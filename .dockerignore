@@ -1,0 +1,13 @@
+.git
+.gitignore
+*.pyc
+__pycache__
+backend/data/users
+backend/data/backups
+data/users
+data/backups
+data/config.json
+# 加密主密钥：运行期自动生成，绝不能打进镜像
+# （否则所有从该镜像启动的实例共用同一把钥匙）
+data/secret.key
+.DS_Store

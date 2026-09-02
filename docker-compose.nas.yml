@@ -1,0 +1,18 @@
+services:
+  omnihome:
+    # 同时声明 build 与 image：
+    #   docker compose -f docker-compose.nas.yml up -d --build   → 从源码构建（路线 A）
+    #   docker compose -f docker-compose.nas.yml up -d           → 使用已 load 的镜像（路线 B）
+    image: omnihome:latest
+    build: .
+    container_name: omnihome
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # 用户数据空间（账号 / 笔记 / 书签 / 偏好 / 备份）持久化，改成 NAS 上想存放数据的目录
+      - ./data:/app/data
+      # 如需「系统监控」页读取 NAS 上的 Docker 容器状态，取消下面一行注释后重建容器：
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - TZ=Asia/Shanghai

@@ -1,0 +1,1213 @@
+/* ============================================================
+   OmniHome · LiveMD 原地实时渲染 Markdown 编辑器
+   ------------------------------------------------------------
+   零外部依赖：输入 `- 123` 立即原地渲染为列表项；删除回退到
+   语法标记处时自动还原为原始文本，可继续逐字编辑。
+   隐藏的原 textarea 仍是数据源，本组件每次变更回写并派发
+   'input' 事件，原有自动保存/统计/待办解析逻辑无需改动。
+
+   LiveMD.attach(textarea, opts) -> inst
+     inst.refresh()    从 textarea.value 重建（打开笔记/外部改写后）
+     inst.setValue(s)  外部写入并重建
+     inst.show()/hide() 编辑模式与其它模式切换
+     inst.focus() / inst.destroy()
+   ============================================================ */
+window.LiveMD = (() => {
+  const E = s => { const d = document.createElement('div'); d.innerHTML = s; return d.firstChild; };
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const escAttr = s => esc(s).replace(/"/g, '&quot;');
+
+  /* ---------- 块级语法标记 ---------- */
+  function parseMarker(line){
+    let m;
+    if ((m = line.match(/^ {0,3}(-{3,}|\*{3,}|_{3,}) *$/))) return { raw: m[0], type: 'hr' };
+    if ((m = line.match(/^- \[([ xX])\] /))) return { raw: m[0], type: 'todo', checked: m[1] !== ' ' };
+    if ((m = line.match(/^[-*+] /)))         return { raw: m[0], type: 'li' };
+    if ((m = line.match(/^#{1,6} /)))        return { raw: m[0], type: 'h', level: m[0].length - 1 };
+    if ((m = line.match(/^> /)))             return { raw: m[0], type: 'quote' };
+    if ((m = line.match(/^(\d+)\. /)))       return { raw: m[0], type: 'oli', num: +m[1] };
+    return null;
+  }
+  const contPrefix = mk =>
+    mk ? (mk.type === 'todo' ? '- [ ] ' : mk.type === 'li' ? '- '
+        : mk.type === 'oli' ? (mk.num + 1) + '. ' : mk.type === 'quote' ? '> ' : '') : '';
+
+  /* ---------- 行内语法渲染（行内代码内不再解析） ---------- */
+  function inlineHtml(s){
+    let out = '', i = 0;
+    while (i < s.length){
+      const ch = s[i];
+      if (ch === '!'){
+        const m = s.slice(i).match(/^!\[([^\]]*)\]\(([^)]*)\)/);
+        if (m){
+          /* 图片：data-pre 存完整语法（含地址），序列化时无损还原 */
+          out += `<img class="lm-img" src="${m[2] ? escAttr(m[2]) : 'data:,'}" alt="${escAttr(m[1])}" data-pre="![${escAttr(m[1])}](${escAttr(m[2])})" contenteditable="false" draggable="false">`;
+          i += m[0].length; continue;
+        }
+      } else if (ch === '`'){
+        const m = s.slice(i).match(/^`([^`]+)`/);
+        if (m){ out += '<code class="lm-c" data-pre="`" data-post="`">' + esc(m[1]) + '</code>'; i += m[0].length; continue; }
+      } else if (ch === '*'){
+        const two = s.slice(i).match(/^\*\*(.+?)\*\*/);
+        const one = !two && s.slice(i).match(/^\*([^*\s][^*]*)\*/);
+        const m = two || one, tag = two ? 'b' : 'i', mk = two ? '**' : '*';
+        if (m){ out += `<${tag} data-pre="${mk}" data-post="${mk}">${inlineHtml(m[1])}</${tag}>`; i += m[0].length; continue; }
+      } else if (ch === '~'){
+        const m = s.slice(i).match(/^~~(.+?)~~/);
+        if (m){ out += `<s data-pre="~~" data-post="~~">${inlineHtml(m[1])}</s>`; i += m[0].length; continue; }
+      } else if (ch === '['){
+        /* 行内链接 [text](url)（文本可编辑，序列化经 data-pre/post 无损还原） */
+        const m = s.slice(i).match(/^\[([^\]]+)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/);
+        if (m){
+          out += `<a class="lm-a" href="${escAttr(m[2])}" target="_blank" rel="noopener noreferrer" data-pre="[${escAttr(m[1])}](${escAttr(m[2])})" data-post="">${esc(m[1])}</a>`;
+          i += m[0].length; continue;
+        }
+      } else if (ch === '<'){
+        /* 自动链接 <url> / <mail@x> */
+        const m = s.slice(i).match(/^<(https?:\/\/[^>\s]+|mailto:[^>\s]+|[^>\s@]+@[^>\s@]+\.[^>\s@]+)>/);
+        if (m){
+          out += `<a class="lm-a" href="${escAttr(m[1])}" target="_blank" rel="noopener noreferrer" data-pre="<" data-post=">">${esc(m[1])}</a>`;
+          i += m[0].length; continue;
+        }
+      }
+      out += esc(ch); i++;
+    }
+    return out;
+  }
+
+  /* ---------- 表格块实时序列化：单元格可直接编辑，读 DOM 现行内容拼回 Markdown ---------- */
+  const TBL_ALIGN_OF = c => /^:-+:$/.test(c) ? 'center' : /-+:$/.test(c) ? 'right' : /^:-+/.test(c) ? 'left' : '';
+  function cellTextOf(cell){
+    return Array.from(cell.childNodes).map(rawOfNode).join('');
+  }
+  function tableLiveRaw(tbl){
+    try {
+      const orig = (tbl.dataset.tableRaw || '').split('\n');
+      const align = orig.length > 1
+        ? orig[1].replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => TBL_ALIGN_OF(c.trim()))
+        : [];
+      const escCell = c => String(c == null ? '' : c).replace(/\|/g, '\\|').trim();
+      const mk = cells => '| ' + cells.map(escCell).join(' | ') + ' |';
+      const n = tbl.querySelectorAll('thead th').length || (tbl.querySelector('tbody tr') || { children: [] }).children.length;
+      const sep = '| ' + Array.from({ length: n }, (_, k) => {
+        const a = align[k] || '';
+        return a === 'center' ? ':---:' : a === 'right' ? '---:' : a === 'left' ? ':---' : '---';
+      }).join(' | ') + ' |';
+      const head = Array.from(tbl.querySelectorAll('thead th')).map(cellTextOf);
+      const rows = Array.from(tbl.querySelectorAll('tbody tr')).map(tr =>
+        Array.from(tr.children).filter(c => c.tagName === 'TD').map(cellTextOf));
+      return [mk(head), sep].concat(rows.map(mk)).join('\n');
+    } catch (e) {
+      return tbl.dataset.tableRaw || '';
+    }
+  }
+
+  /* ---------- 序列化：DOM -> 原始 Markdown ---------- */
+  function rawOfNode(n){
+    if (n.nodeType === 3) return n.data;
+    if (n.tagName === 'BR') return '';
+    if (n.dataset && n.dataset.tableRaw !== undefined) return tableLiveRaw(n);   // 表格：读现行单元格内容
+    const inner = Array.from(n.childNodes).map(rawOfNode).join('');
+    if (n.dataset && n.dataset.raw !== undefined) return n.dataset.raw;
+    if (n.dataset && n.dataset.pre !== undefined) return n.dataset.pre + inner + (n.dataset.post || '');
+    return inner;
+  }
+  const lineRaw = el => el.dataset && el.dataset.tableRaw !== undefined
+    ? tableLiveRaw(el)
+    : Array.from(el.childNodes).map(rawOfNode).join('');
+  const fragRaw = f => Array.from(f.childNodes).map(rawOfNode).join('');
+
+  /* ---------- 代码块语法高亮（纯视觉：对已转义文本包 token span，不影响序列化回写） ---------- */
+  /* 分组：注释 → 字符串 → 数字 → 关键字；`.` 不匹配换行，天然按行止住 */
+  const HL_RE = /(\/\/.*|\/\*[\s\S]*?\*\/|#.*)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`)|\b(\d+(?:\.\d+)?)\b|\b(const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|super|import|export|from|default|try|catch|finally|throw|async|await|yield|typeof|instanceof|in|of|delete|void|null|undefined|true|false|this|def|lambda|pass|raise|with|as|elif|None|True|False|and|or|not|is|public|private|static|final|int|long|float|double|boolean|char|struct|interface|package|fn|match|impl|mut|use)\b/g;
+  function highlightCode(s){
+    return s.replace(HL_RE, (m, com, str, num) =>
+      com ? `<span class="hl-com">${com}</span>`
+      : str ? `<span class="hl-str">${str}</span>`
+      : num ? `<span class="hl-num">${num}</span>`
+      : `<span class="hl-kw">${m}</span>`);
+  }
+
+  function attach(ta, opts = {}){
+    const root = E('<div class="livemd" contenteditable="true" spellcheck="false"></div>');
+    ta.parentNode.insertBefore(root, ta.nextSibling);
+    ta.style.setProperty('display', 'none', 'important');
+    let composing = false, alive = true;
+    root.dataset.placeholder = ta.getAttribute('placeholder') || '';
+
+    const lines = () => Array.from(root.children);
+    const serializeAll = () => lines().map(lineRaw).join('\n');
+    const commitNoRebuild = () => {
+      ta.value = serializeAll();
+      try { ta.dispatchEvent(new Event('input')); } catch (e) {}
+      updatePh();
+    };
+
+    /* ---------- 括号配对高亮：输入光标移到括号旁时同时点亮另一半 ---------- */
+    const BR_OPEN = '([{',
+          BR_PAIR = { '(': ')', '[': ']', '{': '}', ')': '(', ']': '[', '}': '{' };
+    let brNodes = [], lastBrKey = '';
+    function clearBr(){
+      brNodes.forEach(s => {
+        const p = s.parentNode;
+        if (!p) return;
+        s.replaceWith(document.createTextNode(s.textContent));
+        p.normalize();
+      });
+      brNodes = []; lastBrKey = '';
+    }
+    function wrapChar(node, offset){
+      try {
+        const r = document.createRange();
+        r.setStart(node, offset); r.setEnd(node, offset + 1);
+        const s = document.createElement('span');
+        s.className = 'lm-br';
+        r.surroundContents(s);
+        brNodes.push(s);
+      } catch (e) {}
+    }
+    function findBrMatch(text, i){
+      const ch = text[i], target = BR_PAIR[ch];
+      const dir = BR_OPEN.includes(ch) ? 1 : -1;
+      let depth = 0;
+      for (let j = i + dir; j >= 0 && j < text.length; j += dir){
+        if (text[j] === ch) depth++;
+        else if (text[j] === target){ if (!depth) return j; depth--; }
+      }
+      return -1;
+    }
+    /* 按原始文本偏移在行内定位 DOM 落点（跳过 BR，穿透各类 span） */
+    function pointAtRaw(line, off){
+      if (line.dataset && line.dataset.tableRaw !== undefined) return null;   // 表格块不可编辑
+      const walk = arr => {
+        for (const n of arr){
+          if (n.nodeType === 3){
+            if (off <= n.data.length) return { node: n, offset: off };
+            off -= n.data.length; continue;
+          }
+          if (n.tagName === 'BR') continue;
+          const r = walk(Array.from(n.childNodes));
+          if (r) return r;
+        }
+        return null;
+      };
+      return walk(Array.from(line.childNodes));
+    }
+    /* 全文原始偏移 → DOM 落点 */
+    function domPointAt(gi){
+      const ls = lines();
+      let pos = 0;
+      for (const ln of ls){
+        const len = lineRaw(ln).length;
+        if (gi <= pos + len) return pointAtRaw(ln, gi - pos);
+        pos += len + 1;
+      }
+      return null;
+    }
+
+    /* ---------- 表格块：解析 / 渲染 / 原地修改 ---------- */
+    function isTableRow(l){ return l.includes('|') && /^\s*\|.*\|\s*$/.test(l.trim()); }
+    function isTableSep(l){
+      if (!l.includes('-') || !l.includes('|')) return false;
+      /* 去首尾 | 后，剩余字符只能由 [\s:| -] 组成，且至少含一个 '-'（即存在分隔段） */
+      const core = l.trim().replace(/^\|/, '').replace(/\|$/, '');
+      if (!/^[\s:| -]+$/.test(core)) return false;
+      return /-/.test(core.replace(/[\s|:]/g, ''));
+    }
+    const splitRow = r => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
+    function renderTable(rows){
+      const cells = rows.map(splitRow);
+      const head = cells[0] || [];
+      const align = (cells[1] || []).map(c =>
+        /^:-+:$/.test(c) ? 'center' : /-+:$/.test(c) ? 'right' : /^:-+/.test(c) ? 'left' : '');
+      const body = cells.slice(2);
+      const al = a => a ? ' align="' + a + '"' : '';
+      /* 单元格可直接编辑；行/列拖拽手柄悬浮在边缘显示；工具条默认隐藏，选中行/列时才出现 */
+      let h = '<thead><tr>';
+      head.forEach((c, k) => {
+        h += '<th' + al(align[k]) + ' contenteditable="true" data-ci="' + k + '">'
+          + '<span class="lm-colh" draggable="true" title="拖拽调整列顺序"></span>'
+          + (inlineHtml(c) || ' ') + '</th>';
+      });
+      h += '</tr></thead>';
+      let b = '<tbody>';
+      body.forEach((r, ri) => {
+        b += '<tr data-ri="' + ri + '">';
+        head.forEach((_, k) => {
+          b += '<td' + al(align[k]) + ' contenteditable="true">'
+            + (k === 0 ? '<span class="lm-rowh" draggable="true" title="拖拽调整行顺序"></span>' : '')
+            + (inlineHtml(r[k] || '') || ' ') + '</td>';
+        });
+        b += '</tr>';
+      });
+      b += '</tbody>';
+      const raw = escAttr(rows.join('\n'));
+      return '<div class="lm-table" data-table-raw="' + raw + '">'
+        + '<div class="lm-tbar" hidden>'
+        + '<span class="lm-tname">表格</span>'
+        + '<span class="lm-tsel-hint" data-t-hint></span>'
+        + '<button type="button" data-t-act="insbefore" hidden></button>'
+        + '<button type="button" data-t-act="insafter" hidden></button>'
+        + '<button type="button" data-t-act="del" class="lm-tdanger" hidden></button>'
+        + '</div><table>' + h + b + '</table></div>';
+    }
+    /* 修改表格：fn(cells) 就地改（cells[0] 表头、cells[1] 对齐行、其余数据行），改完重建。
+       数据源必须读现行 DOM（单元格可能已编辑，data-table-raw 只是初始快照） */
+    function tableMutate(tblEl, fn){
+      const raw = tableLiveRaw(tblEl);
+      const cells = raw.split('\n').map(splitRow);
+      fn(cells);
+      if (cells.length < 3) return;                       // 至少保留表头+分隔+1 数据行；列数 ≤1 由调用方拦在 fn 内
+      const next = cells.map(row => '| ' + row.map(c => String(c == null ? '' : c)).join(' | ') + ' |').join('\n');
+      let start = 0;
+      for (const ln of lines()){
+        if (ln === tblEl) break;
+        start += lineRaw(ln).length + 1;
+      }
+      const full = serializeAll();
+      const nfull = full.slice(0, start) + next + full.slice(start + raw.length);
+      ta.value = nfull;
+      try { ta.dispatchEvent(new Event('input')); } catch (e) {}
+      rebuild(nfull);
+    }
+
+    /* ---------- 表格交互辅助：定位 / 焦点 / 行列选中 ---------- */
+    function tableIndexOf(tblEl){
+      let k = 0;
+      for (const ln of lines()){
+        if (ln === tblEl) return k;
+        if (ln.classList && ln.classList.contains('lm-table')) k++;
+      }
+      return -1;
+    }
+    const nthTable = k => root.querySelectorAll('.lm-table')[k] || null;
+    function cellPos(tbl, cell){
+      const tr = cell.closest('tr');
+      return {
+        tr,
+        head: cell.tagName === 'TH',
+        ri: Array.from(tbl.querySelectorAll('tbody tr')).indexOf(tr),
+        ci: Array.from(tr.children).filter(c => c.tagName === 'TD' || c.tagName === 'TH').indexOf(cell),
+        rows: tbl.querySelectorAll('tbody tr').length,
+      };
+    }
+    function focusCell(cell){
+      if (!cell) return;
+      cell.focus();
+      try {
+        const r = document.createRange();
+        r.selectNodeContents(cell); r.collapse(false);
+        const s = window.getSelection();
+        s.removeAllRanges(); s.addRange(r);
+      } catch (_) {}
+    }
+    function focusCellAt(tbl, ri, ci){
+      const tr = tbl.querySelectorAll('tbody tr')[ri];
+      if (!tr) return;
+      const cs = Array.from(tr.children).filter(c => c.tagName === 'TD');
+      if (cs.length) focusCell(cs[Math.min(Math.max(ci, 0), cs.length - 1)]);
+    }
+    function clearTableSel(){
+      root.querySelectorAll('.lm-tsel').forEach(n => n.classList.remove('lm-tsel'));
+      root.querySelectorAll('.lm-table').forEach(t => {
+        delete t.dataset.tselKind; delete t.dataset.tselIdx;
+        const bar = t.querySelector('.lm-tbar');
+        if (bar) bar.hidden = true;
+      });
+    }
+    /* 点单元格选中所在行；点表头选中所在列；同步更新浮动工具条按钮 */
+    function selectCell(cell){
+      const tbl = cell.closest('.lm-table');
+      if (!tbl) return;
+      clearTableSel();
+      const bar = tbl.querySelector('.lm-tbar');
+      if (!bar) return;
+      const btn = a => bar.querySelector('[data-t-act="' + a + '"]');
+      const hint = bar.querySelector('[data-t-hint]');
+      const show = (b, txt) => { if (b){ b.hidden = false; b.textContent = txt; } };
+      if (cell.tagName === 'TH'){
+        const { ci } = cellPos(tbl, cell);
+        cell.classList.add('lm-tsel');
+        tbl.dataset.tselKind = 'col'; tbl.dataset.tselIdx = ci;
+        if (hint) hint.textContent = '已选中第 ' + (ci + 1) + ' 列';
+        show(btn('insbefore'), '左插列');
+        show(btn('insafter'), '右插列');
+        show(btn('del'), '删列');
+      } else {
+        const { tr, ri } = cellPos(tbl, cell);
+        if (tr) tr.classList.add('lm-tsel');
+        tbl.dataset.tselKind = 'row'; tbl.dataset.tselIdx = ri;
+        if (hint) hint.textContent = '已选中第 ' + (ri + 1) + ' 行';
+        show(btn('insbefore'), '上插行');
+        show(btn('insafter'), '下插行');
+        show(btn('del'), '删行');
+      }
+      bar.hidden = false;
+    }
+    /* Enter 下移 / Shift+Enter 上移 / Tab 右移 / Shift+Tab 左移；末行回车自动追加新行 */
+    function tableCellNav(cell, dir, shift){
+      const tbl = cell.closest('.lm-table');
+      if (!tbl) return;
+      const { tr, head, ri, ci, rows } = cellPos(tbl, cell);
+      if (dir === 'right'){
+        const siblings = Array.from(tr.children).filter(c => c.tagName === 'TD' || c.tagName === 'TH');
+        const next = siblings[siblings.indexOf(cell) + (shift ? -1 : 1)];
+        if (next){ focusCell(next); return; }
+        const trs = Array.from(tbl.querySelectorAll('tr'));
+        const ti = trs.indexOf(tr) + (shift ? -1 : 1);
+        if (ti >= 0 && ti < trs.length){
+          const cs = Array.from(trs[ti].children).filter(c => c.tagName === 'TD' || c.tagName === 'TH');
+          focusCell(shift ? cs[cs.length - 1] : cs[0]);
+          return;
+        }
+        if (!shift) caretAfterTable(tbl);   // Tab 到表格最后一格再按 → 跳出表格继续写正文（光标不再困在表内）
+        return;
+      }
+      let nri = ri + (shift ? -1 : 1);
+      if (head){ focusCellAt(tbl, Math.max(0, nri), ci); return; }
+      if (!shift && nri >= rows){
+        /* 末行回车：追加新行后跳到新行同列 */
+        const tk = tableIndexOf(tbl);
+        tableMutate(tbl, cells => cells.push(cells[0].map(() => '')));
+        const nt = nthTable(tk);
+        if (nt) focusCellAt(nt, nt.querySelectorAll('tbody tr').length - 1, ci);
+        return;
+      }
+      focusCellAt(tbl, nri, ci);
+    }
+    /* 把光标落到表格之后：表格是文档最后一行时自动补空行，避免光标无处可点 */
+    function caretAfterTable(tbl){
+      const arr = serializeAll().split('\n');
+      const idx = lines().indexOf(tbl);
+      if (idx < 0) return;
+      if (idx >= arr.length - 1) arr.push('');   // 表格在文末：补一个空行供光标落脚
+      const nraw = arr.join('\n');
+      ta.value = nraw;
+      try { ta.dispatchEvent(new Event('input')); } catch (e) {}
+      rebuild(nraw);
+      let off = 0;
+      for (let i = 0; i <= idx; i++) off += arr[i].length + 1;
+      restoreCaret(off);                           // 表格末行的换行之后 = 下一行开头
+    }
+    /* 表格内光标 → 距表格开头的 raw 偏移（工具栏包裹/选区计算用） */
+    function rawOffsetInTable(tbl, container, offset){
+      const rawFull = tableLiveRaw(tbl);
+      try {
+        let cell = null;
+        if (container.nodeType === 3) cell = container.parentElement ? container.parentElement.closest('td, th') : null;
+        else if (container.closest) cell = container.closest('td, th');
+        if (!cell || !tbl.contains(cell)) return rawFull.length;
+        const tr = cell.closest('tr');
+        const ci = Array.from(tr.children).filter(c => c.tagName === 'TD' || c.tagName === 'TH').indexOf(cell);
+        const pre = document.createRange();
+        pre.selectNodeContents(cell); pre.setEnd(container, offset);
+        const inCell = fragRaw(pre.cloneContents());
+        const rawRows = rawFull.split('\n');
+        const rowIdx = tr.parentNode.tagName === 'THEAD' ? 0
+          : 2 + Array.from(tbl.querySelectorAll('tbody tr')).indexOf(tr);
+        const cellsOfRow = splitRow(rawRows[rowIdx] || '');
+        let acc = 0;
+        for (let i = 0; i < rowIdx; i++) acc += (rawRows[i] || '').length + 1;
+        acc += 2;                              // 行首 "| "
+        for (let k = 0; k < ci; k++) acc += String(cellsOfRow[k] == null ? '' : cellsOfRow[k]).length + 3;   // 单元格间 " | "
+        return Math.min(acc + inCell.length, rawFull.length);
+      } catch (_) {
+        return rawFull.length;
+      }
+    }
+
+    /* ---------- 全量重建（含代码围栏状态） ---------- */
+    function rebuild(raw){
+      clearBr();   // 重建前清除括号高亮包裹，避免残留节点
+      const st = root.scrollTop;
+      const srcLines = raw === '' ? [''] : raw.split('\n');
+      let fence = false;
+      const html = [];
+      for (let i = 0; i < srcLines.length; i++){
+        const line = srcLines[i], trim = line.trim();
+        if (/^(```|~~~)/.test(trim)){
+          fence = !fence;
+          html.push(`<div class="lm-line lm-fence">${esc(line) || '<br>'}</div>`);
+          continue;
+        }
+        if (fence){ html.push(`<div class="lm-line lm-code">${highlightCode(esc(line)) || '<br>'}</div>`); continue; }
+        /* 表格：本行是管道行 且 下一行是对齐分隔行 */
+        if (isTableRow(line) && srcLines[i + 1] && isTableSep(srcLines[i + 1])){
+          const rows = [line, srcLines[i + 1]];   // 表头 + 对齐分隔行
+          i += 2;
+          while (srcLines[i] && srcLines[i].trim() && isTableRow(srcLines[i])){ rows.push(srcLines[i]); i++; }
+          html.push(renderTable(rows));
+          continue;
+        }
+        const mk = parseMarker(line);
+        if (mk){
+          if (mk.type === 'hr'){
+            html.push(`<div class="lm-line lm-hrline"><hr class="lm-hr" data-raw="${esc(mk.raw)}" contenteditable="false"></div>`);
+            continue;
+          }
+          const rest = line.slice(mk.raw.length);
+          let inner;
+          if (mk.type === 'todo'){
+            inner = `<span class="lm-cb${mk.checked ? ' on' : ''}" data-checked="${mk.checked ? 1 : 0}" data-raw="${esc(mk.raw)}" contenteditable="false">${mk.checked ? '☑' : '☐'}</span>`;
+          } else {
+            const glyph = mk.type === 'li' ? '&bull;' : mk.type === 'h' ? '#'.repeat(mk.level)
+                        : mk.type === 'quote' ? '&gt;' : esc(mk.raw.trim());
+            inner = `<span class="lm-mk" data-raw="${esc(mk.raw)}" contenteditable="false">${glyph}</span>`;
+          }
+          html.push(`<div class="lm-line lm-${mk.type}${mk.type === 'h' ? ' lm-h lm-h' + mk.level : ''}">${inner}${inlineHtml(rest) || '<br>'}</div>`);
+        } else {
+          html.push(`<div class="lm-line">${inlineHtml(line) || '<br>'}</div>`);
+        }
+      }
+      root.innerHTML = html.join('');
+      /* 附件图片水合：/api/notes/assets/ 地址补鉴权 token（src 属性仅作展示，序列化走 data-pre） */
+      const tk = opts.assetToken ? opts.assetToken()
+        : (window.API && API.getToken ? API.getToken() : '');
+      if (tk) root.querySelectorAll('img.lm-img').forEach(img => {
+        const s = img.getAttribute('src');
+        if (s && s.startsWith('/api/notes/assets/') && !s.includes('token='))
+          img.src = s + '?token=' + encodeURIComponent(tk);
+      });
+      updatePh();
+      if (!histNo) histPush();          // 每次重建后记录新状态（供 Ctrl+Z 回退）
+      root.scrollTop = st;
+      /* 重建完成广播：查找高亮等外部标注需要重打 */
+      try { root.dispatchEvent(new CustomEvent('omni:livemd-rebuild', { bubbles: true })); } catch (_) {}
+    }
+
+    function updatePh(){
+      root.classList.toggle('is-empty', serializeAll() === '');
+    }
+
+    /* ---------- 撤销 / 重做历史栈 ----------
+       内容可编辑区经过程序化 rebuild 后原生撤销栈会失效，
+       这里维护纯文本快照栈：每次 rebuild 入栈，undo/redo 出栈重建。 */
+    let hist = [], histIdx = -1, histNo = false;
+    function histPush(){
+      if (histNo) return;
+      const s = serializeAll();
+      if (hist[histIdx] === s) return;      // 与当前一致：不重复入栈
+      hist.length = histIdx + 1;            // 丢弃重做分支
+      hist.push(s);
+      if (hist.length > 200) hist.shift();
+      histIdx = hist.length - 1;
+    }
+    function restoreHist(idx){
+      histNo = true;
+      histIdx = idx;
+      const raw = hist[idx] == null ? '' : hist[idx];
+      ta.value = raw;
+      try { ta.dispatchEvent(new Event('input')); } catch (e) {}
+      rebuild(raw);
+      histNo = false;
+    }
+
+    /* ---------- 光标的“原始文本偏移”计算 ---------- */
+    function rawOffset(container, offset){
+      if (container === root){
+        let off = 0; const ls = lines();
+        for (let i = 0; i < Math.min(offset, ls.length); i++) off += lineRaw(ls[i]).length + 1;
+        return off;
+      }
+      let node = container;
+      while (node.parentNode !== root) node = node.parentNode;
+      if (node.dataset && node.dataset.tableRaw !== undefined){
+        /* 表格行：基于现行源码精确定位表格内偏移 */
+        let base = 0;
+        for (const ln of lines()){
+          if (ln === node) break;
+          base += lineRaw(ln).length + 1;
+        }
+        return base + rawOffsetInTable(node, container, offset);
+      }
+      const pre = document.createRange();
+      pre.selectNodeContents(node);
+      pre.setEnd(container, offset);
+      let off = fragRaw(pre.cloneContents()).length;
+      for (const ln of lines()){
+        if (ln === node) break;
+        off += lineRaw(ln).length + 1;
+      }
+      return off;
+    }
+    function offsetOfRange(r){
+      if (!root.contains(r.startContainer) && r.startContainer !== root) return null;
+      if (r.startContainer === root){
+        let off = 0; const ls = lines();
+        for (let i = 0; i < Math.min(r.startOffset, ls.length); i++) off += lineRaw(ls[i]).length + 1;
+        return off;
+      }
+      let node = r.startContainer;
+      while (node.parentNode !== root) node = node.parentNode;
+      const pre = document.createRange();
+      pre.selectNodeContents(node);
+      pre.setEnd(r.startContainer, r.startOffset);
+      let off = fragRaw(pre.cloneContents()).length;
+      for (const ln of lines()){
+        if (ln === node) break;
+        off += lineRaw(ln).length + 1;
+      }
+      return off;
+    }
+    function globalOffset(){
+      const sel = window.getSelection();
+      if (!sel.rangeCount) return null;
+      return offsetOfRange(sel.getRangeAt(0));
+    }
+    /* 拖拽落点 → 原始文本偏移（落在编辑器外则追加到文末） */
+    function offsetFromPoint(x, y){
+      const r = document.caretRangeFromPoint
+        ? document.caretRangeFromPoint(x, y) : null;
+      if (!r) return serializeAll().length;
+      const off = offsetOfRange(r);
+      return off == null ? serializeAll().length : off;
+    }
+
+    /* ---------- 光标还原（偏移落点决定渲染/还原） ---------- */
+    function rawifyNode(n){
+      const t = document.createTextNode(rawOfNode(n));
+      n.replaceWith(t);
+      return t;
+    }
+    function setSel(node, offset){
+      const r = document.createRange();
+      if (node.nodeType === 3) r.setStart(node, Math.min(offset, node.data.length));
+      else { r.setStart(node, Math.min(offset, node.childNodes.length)); }
+      r.collapse(true);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(r);
+    }
+    function caretAfter(n){
+      const r = document.createRange();
+      r.setStartAfter(n); r.collapse(true);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(r);
+    }
+    function caretEndOf(n){
+      const r = document.createRange();
+      r.selectNodeContents(n); r.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(r);
+    }
+
+    function restoreInLine(line, off){
+      if (line.dataset && line.dataset.tableRaw !== undefined){ caretAfter(line); return; }
+      const walk = arr => {
+        for (const n of arr){
+          if (n.nodeType === 3){
+            if (off <= n.data.length){ setSel(n, off); return true; }
+            off -= n.data.length; continue;
+          }
+          if (n.tagName === 'BR'){
+            if (off === 0){ setSel(line, Array.from(line.childNodes).indexOf(n)); return true; }
+            continue;
+          }
+          if (n.dataset && n.dataset.raw !== undefined){
+            const len = n.dataset.raw.length;
+            if (off < len){ const t = rawifyNode(n); setSel(t, off); return true; }   /* 光标进入标记内：还原原始文本 */
+            if (off === len){ caretAfter(n); return true; }                            /* 恰在标记后：保持渲染 */
+            off -= len; continue;
+          }
+          if (n.dataset && n.dataset.pre !== undefined){
+            const pre = n.dataset.pre, post = n.dataset.post || '';
+            if (off < pre.length){ const t = rawifyNode(n); setSel(t, off); return true; }
+            off -= pre.length;
+            const innerLen = Array.from(n.childNodes).map(rawOfNode).join('').length;
+            if (off <= innerLen){ if (walk(Array.from(n.childNodes))) return true; caretEndOf(n); return true; }
+            off -= innerLen;
+            if (off <= post.length){ caretEndOf(n); return true; }                     /* 恰在闭合标记处：保持渲染 */
+            off -= post.length; continue;
+          }
+          if (walk(Array.from(n.childNodes))) return true;
+        }
+        return false;
+      };
+      if (!walk(Array.from(line.childNodes))) caretEndOf(line);
+    }
+
+    function restoreCaret(off){
+      if (off == null) return;
+      let pos = 0;
+      for (const ln of lines()){
+        const len = lineRaw(ln).length;
+        if (off <= pos + len){ restoreInLine(ln, off - pos); return; }
+        pos += len + 1;
+      }
+      const ls = lines();
+      if (ls.length) caretEndOf(ls[ls.length - 1]);
+    }
+
+    /* ---------- 输入管线：序列化 → 回写 textarea → 重建 → 还原光标 ---------- */
+    let tblDirty = false;
+    function pipeline(){
+      if (!alive || composing) return;
+      const cur = caretLineEl();
+      if (cur && cur.dataset && cur.dataset.tableRaw !== undefined){
+        /* 表格单元格内：只回写源码不重建（重建会丢单元格内光标），
+           光标离开表格后由 onSelChange 统一刷新内联渲染 */
+        const traw = serializeAll();
+        if (ta.value !== traw) ta.value = traw;
+        try { ta.dispatchEvent(new Event('input')); } catch (e) {}
+        tblDirty = true;
+        updatePh();
+        if (!histNo) histPush();
+        return;
+      }
+      const off = globalOffset();
+      const raw = serializeAll();
+      if (ta.value !== raw) ta.value = raw;
+      try { ta.dispatchEvent(new Event('input')); } catch (e) {}
+      rebuild(raw);
+      restoreCaret(off);
+    }
+
+    /* 取光标所在行及行内偏移 */
+    function caretLineInfo(){
+      const sel = window.getSelection();
+      if (!sel.rangeCount) return null;
+      const r = sel.getRangeAt(0);
+      if (!root.contains(r.startContainer)) return null;
+      let line = r.startContainer;
+      while (line && line.parentNode !== root) line = line.parentNode;
+      if (!line) return null;
+      const pre = document.createRange();
+      pre.selectNodeContents(line);
+      pre.setEnd(r.startContainer, r.startOffset);
+      return { line, r, sel, textBefore: fragRaw(pre.cloneContents()) };
+    }
+
+    /* ---------- 按键：Enter 续行 / Backspace 还原与并段 ---------- */
+    function onKeydown(e){
+      if (composing || e.isComposing) return;
+
+      /* 表格单元格内：Enter 下移 / Tab 右移；退格/删除交给原生，跳过下方标记还原逻辑 */
+      const inCell = e.target.closest ? e.target.closest('.lm-table td, .lm-table th') : null;
+      if (inCell){
+        if (e.key === 'Enter' || e.key === 'Tab'){
+          e.preventDefault();
+          tableCellNav(inCell, e.key === 'Enter' ? 'down' : 'right', e.shiftKey);
+          return;
+        }
+        if (e.key === 'Backspace' || e.key === 'Delete') return;
+      }
+
+      if (e.key === 'Enter' && e.shiftKey){
+        /* Shift+Enter：软换行，映射为原始文本的一个空格 */
+        e.preventDefault();
+        document.execCommand('insertText', false, ' ');
+        return;
+      }
+
+      if (e.key === 'Enter' && !e.shiftKey){
+        e.preventDefault();
+        const off = globalOffset(); if (off == null) return;
+        const arr = serializeAll().split('\n');
+        let pos = 0, li = 0;
+        for (li = 0; li < arr.length; li++){
+          if (off <= pos + arr[li].length) break;
+          pos += arr[li].length + 1;
+        }
+        const local = off - pos, cur = arr[li] || '';
+        const mk = parseMarker(cur);
+        if (mk && mk.type !== 'hr' && cur.trim() === mk.raw.trim()){              /* 空列表项回车：退出列表 */
+          arr[li] = '';
+          const nraw = arr.join('\n');
+          ta.value = nraw;
+          try { ta.dispatchEvent(new Event('input')); } catch (er) {}
+          rebuild(nraw);
+          restoreCaret(pos);
+          return;
+        }
+        const head = cur.slice(0, local), tail = cur.slice(local);
+        const pref = contPrefix(mk);
+        arr.splice(li, 1, head, pref + tail);
+        const nraw = arr.join('\n');
+        ta.value = nraw;
+        try { ta.dispatchEvent(new Event('input')); } catch (er) {}
+        rebuild(nraw);
+        restoreCaret(pos + head.length + 1 + pref.length);
+        return;
+      }
+
+      if (e.key === 'Backspace'){
+        const sel = window.getSelection();
+        if (!sel.rangeCount || !sel.isCollapsed) return;
+        const info = caretLineInfo(); if (!info) return;
+        const { line, r } = info;
+
+        /* 光标容器为行元素：前一子节点是语法节点时先还原 */
+        if (r.startContainer.nodeType === 1 && r.startOffset > 0){
+          const child = r.startContainer.childNodes[r.startOffset - 1];
+          if (child && child.dataset && (child.dataset.raw !== undefined || child.dataset.pre !== undefined)){
+            e.preventDefault();
+            const t = rawifyNode(child);
+            setSel(t, t.data.length);
+            commitNoRebuild();
+            return;
+          }
+        }
+
+        /* 文本光标：前面只有空白且行首是渲染标记 → 还原为原始文本（不删内容） */
+        if (/^\s*$/.test(info.textBefore)){
+          const mkNode = Array.from(line.children).find(c => c.dataset && c.dataset.raw !== undefined);
+          if (mkNode && line.firstElementChild === mkNode){
+            e.preventDefault();
+            const t = rawifyNode(mkNode);
+            setSel(t, t.data.length);
+            commitNoRebuild();
+            return;
+          }
+          /* 行首退格且无标记：并入上一行 */
+          if (info.textBefore === ''){
+            const ls = lines(); const idx = ls.indexOf(line);
+            if (idx > 0){
+              e.preventDefault();
+              const prevRaw = lineRaw(ls[idx - 1]);
+              const curRaw = lineRaw(line);
+              const arr = serializeAll().split('\n');
+              arr[idx - 1] = prevRaw + curRaw; arr.splice(idx, 1);
+              const nraw = arr.join('\n');
+              let base = 0;
+              for (let i = 0; i < idx - 1; i++) base += arr[i].length + 1;
+              ta.value = nraw;
+              try { ta.dispatchEvent(new Event('input')); } catch (er) {}
+              rebuild(nraw);
+              restoreCaret(base + prevRaw.length);
+            }
+            return;
+          }
+        }
+
+        /* 紧邻行内语法开标记之后（如 **|文本）：还原并删除一个标记字符 */
+        const cont = r.startContainer;
+        if (cont.nodeType === 3 && r.startOffset === 0 && !cont.previousSibling
+            && cont.parentNode.dataset && cont.parentNode.dataset.pre !== undefined){
+          const span = cont.parentNode;
+          e.preventDefault();
+          const preLen = span.dataset.pre.length;
+          const t = rawifyNode(span);
+          t.data = t.data.slice(0, preLen - 1) + t.data.slice(preLen);
+          setSel(t, preLen - 1);
+          commitNoRebuild();
+          return;
+        }
+
+        /* 前一兄弟是行内语法节点：先还原为原始文本，下次退格逐字删除 */
+        if (cont.nodeType === 3 && r.startOffset === 0){
+          const pn = cont.previousSibling;
+          if (pn && pn.dataset && pn.dataset.pre !== undefined){
+            e.preventDefault();
+            const t = rawifyNode(pn);
+            setSel(t, t.data.length);
+            commitNoRebuild();
+            return;
+          }
+        }
+      }
+    }
+
+    /* 选区起点若在表格内，返回该表格行元素（块级/行级插入需把落点移到表格后） */
+    function selTableLine(){
+      const sel = window.getSelection();
+      if (!sel.rangeCount) return null;
+      let n = sel.getRangeAt(0).startContainer;
+      if (n !== root && !root.contains(n)) return null;
+      while (n && n.parentNode !== root) n = n.parentNode;
+      return n && n.dataset && n.dataset.tableRaw !== undefined ? n : null;
+    }
+    function tableEndOffset(tbl){
+      let p = 0;
+      for (const ln of lines()){
+        p += lineRaw(ln).length + 1;
+        if (ln === tbl) break;
+      }
+      return Math.min(p, serializeAll().length);
+    }
+
+    /* ---------- 在指定偏移插入原始文本（粘贴 / 插图共用） ---------- */
+    function insertRawAt(pos, text){
+      const arr = serializeAll().split('\n');
+      let p = 0, li = 0;
+      for (li = 0; li < arr.length; li++){
+        if (pos <= p + arr[li].length) break;
+        p += arr[li].length + 1;
+      }
+      const local = pos - p, cur = arr[li] || '';
+      if (text.indexOf('\n') < 0){
+        /* 单行文本：直接拼进当前行，绝不拆行（否则 "# " 会被拆成两行，出现多余标题标记） */
+        arr[li] = cur.slice(0, local) + text + cur.slice(local);
+      } else {
+        const parts = text.split('\n');
+        const newLines = [cur.slice(0, local) + parts[0]]
+          .concat(parts.slice(1, -1), [parts[parts.length - 1] + cur.slice(local)]);
+        arr.splice(li, 1, ...newLines);
+      }
+      const nraw = arr.join('\n');
+      ta.value = nraw;
+      try { ta.dispatchEvent(new Event('input')); } catch (e) {}
+      rebuild(nraw);
+      restoreCaret(pos + text.length);
+    }
+
+    /* ---------- 图片插入：上传后以 Markdown 图片语法写入（逐个追加） ---------- */
+    async function insertFiles(files, point){
+      if (!opts.uploadImage || !files.length) return;
+      let pos = point ? offsetFromPoint(point.x, point.y) : globalOffset();
+      if (pos == null) pos = serializeAll().length;
+      for (const f of files){
+        try {
+          const url = await opts.uploadImage(f);
+          const name = (f.name || 'image').replace(/[\[\]()]/g, '');
+          const prefix = pos > 0 ? '\n' : '';
+          const suffix = pos < serializeAll().length ? '\n' : '';
+          const md = prefix + `![${name}](${url})` + suffix;
+          insertRawAt(pos, md);
+          pos += md.length;
+        } catch (e) {
+          if (opts.onImageError) opts.onImageError(e);
+        }
+      }
+    }
+
+    /* ---------- 粘贴：图片走上传，纯文本插入并拆行 ---------- */
+    function onPaste(e){
+      const files = Array.from((e.clipboardData || {}).files || [])
+        .filter(f => /^image\//.test(f.type));
+      if (files.length && opts.uploadImage){ e.preventDefault(); insertFiles(files); return; }
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+      if (!text) return;
+      const off = globalOffset(); if (off == null) return;
+      insertRawAt(off, text.replace(/\r/g, ''));
+    }
+
+    /* ---------- 任务列表点击勾选 / 表格行列选中与增删 ---------- */
+    function onClick(e){
+      /* 表格浮动工具条：按当前选中的行/列执行插入/删除 */
+      const tAct = e.target.closest('[data-t-act]');
+      if (tAct){
+        e.preventDefault();
+        const wrap = tAct.closest('.lm-table');
+        if (!wrap || !wrap.dataset.tselKind) return;
+        const kind = wrap.dataset.tselKind, idx = +wrap.dataset.tselIdx;
+        const tk = tableIndexOf(wrap);
+        const act = tAct.dataset.tAct;
+        tableMutate(wrap, cells => {
+          if (kind === 'row'){
+            const ri = idx + 2;                       // cells[0] 表头、[1] 分隔行，数据行从 2 起
+            if (act === 'insbefore') cells.splice(ri, 0, cells[0].map(() => ''));
+            else if (act === 'insafter') cells.splice(ri + 1, 0, cells[0].map(() => ''));
+            else if (act === 'del' && cells.length > 3) cells.splice(ri, 1);
+          } else {
+            if (act === 'insbefore') cells.forEach(r => r.splice(idx, 0, ''));
+            else if (act === 'insafter') cells.forEach(r => r.splice(idx + 1, 0, ''));
+            else if (act === 'del' && cells[0].length > 1) cells.forEach(r => r.splice(idx, 1));
+          }
+        });
+        /* 重建后把选中还给同行/同列（越界则钳制） */
+        const nt = nthTable(tk);
+        if (nt){
+          if (kind === 'row'){
+            const trs = nt.querySelectorAll('tbody tr');
+            const tr = trs[Math.min(idx, trs.length - 1)];
+            if (tr && tr.children[0]) selectCell(tr.children[0]);
+          } else {
+            const ths = nt.querySelectorAll('thead th');
+            const th = ths[Math.min(idx, ths.length - 1)];
+            if (th) selectCell(th);
+          }
+        }
+        return;
+      }
+      /* 点单元格：选中所在行；点表头：选中所在列（不干扰光标落点） */
+      const cell = e.target.closest('.lm-table th, .lm-table td');
+      if (cell){ selectCell(cell); return; }
+      /* 点表格下方留白区（表格是块级行，padding 区域可命中）→ 光标跳到表格之后；
+         手柄/浮动工具条区域除外（拖拽与按钮交互不受干扰） */
+      const tblWrap = e.target.closest ? e.target.closest('.lm-table') : null;
+      if (tblWrap && !e.target.closest('.lm-rowh, .lm-colh, .lm-tbar')){
+        clearTableSel();
+        caretAfterTable(tblWrap);
+        return;
+      }
+      /* 点到表格外：清除所有表格选中 */
+      clearTableSel();
+      const cb = e.target.closest('.lm-cb');
+      if (!cb || !root.contains(cb)) return;
+      e.preventDefault();
+      const line = cb.closest('.lm-line');
+      const idx = lines().indexOf(line);
+      if (idx < 0) return;
+      const off = globalOffset();
+      const arr = serializeAll().split('\n');
+      arr[idx] = /- \[[xX]\] /.test(arr[idx])
+        ? arr[idx].replace(/- \[[xX]\] /, '- [ ] ')
+        : arr[idx].replace(/- \[ \] /, '- [x] ');
+      const nraw = arr.join('\n');
+      ta.value = nraw;
+      try { ta.dispatchEvent(new Event('input')); } catch (er) {}
+      rebuild(nraw);
+      restoreCaret(off);
+      if (opts.onToggle) opts.onToggle(idx, arr[idx]);
+    }
+
+    /* 表格行/列拖拽调序：仅从边缘悬浮手柄发起，不与单元格编辑冲突 */
+    function onTableDrag(e, phase){
+      const tgt = e.target;
+      const isEl = tgt && tgt.closest;
+      if (phase === 'start'){
+        const rh = isEl ? tgt.closest('.lm-rowh') : null;
+        const ch = isEl ? tgt.closest('.lm-colh') : null;
+        if (rh){
+          const tr = rh.closest('tr');
+          if (!tr || tr.dataset.ri == null) return;
+          e.dataTransfer.setData('application/x-omni-trow', tr.dataset.ri);
+          e.dataTransfer.effectAllowed = 'move';
+          tr.classList.add('lm-tdrag');
+        } else if (ch){
+          const th = ch.closest('th');
+          if (!th) return;
+          const ci = Array.from(th.parentNode.children).filter(n => n.tagName === 'TH').indexOf(th);
+          e.dataTransfer.setData('application/x-omni-tcol', String(ci));
+          e.dataTransfer.effectAllowed = 'move';
+          th.classList.add('lm-tdrag');
+        }
+      } else if (phase === 'over'){
+        const types = Array.from(e.dataTransfer.types || []);
+        if (types.includes('application/x-omni-trow') && isEl && tgt.closest('tr[data-ri]')){
+          e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+          const tr = tgt.closest('tr[data-ri]');
+          const wrap = tr.closest('.lm-table');
+          clearTableDropMarks(wrap);
+          /* 虚线预览：按悬停点在上半/下半决定插到该行上方/下方 */
+          const r = tr.getBoundingClientRect();
+          const side = e.clientY < r.top + r.height / 2 ? 'top' : 'bottom';
+          tr.classList.add('lm-drop-' + side);
+          tr.dataset.dropSide = side;
+        } else if (types.includes('application/x-omni-tcol') && isEl && tgt.closest('.lm-table th')){
+          e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+          const th = tgt.closest('.lm-table th');
+          const wrap = th.closest('.lm-table');
+          clearTableDropMarks(wrap);
+          const r = th.getBoundingClientRect();
+          const side = e.clientX < r.left + r.width / 2 ? 'left' : 'right';
+          th.classList.add('lm-drop-' + side);
+          th.dataset.dropSide = side;
+        }
+      } else if (phase === 'drop'){
+        const types = Array.from(e.dataTransfer.types || []);
+        if (types.includes('application/x-omni-trow')){
+          const tr = isEl ? tgt.closest('tr[data-ri]') : null;
+          if (!tr) return;
+          const from = e.dataTransfer.getData('application/x-omni-trow');
+          if (from === '' || from === tr.dataset.ri) return;
+          e.preventDefault();
+          const wrap = tr.closest('.lm-table');
+          clearTableDropMarks(wrap);
+          if (!wrap) return;
+          tableMutate(wrap, cells => {
+            const fi = +from + 2, ri = +tr.dataset.ri + 2;   // 表头与分隔行不可移动；预览侧决定插入方位（原位挪动无视觉变化）
+            const moved = cells.splice(fi, 1)[0];
+            cells.splice(ri, 0, moved);
+          });
+        } else if (types.includes('application/x-omni-tcol')){
+          const th = isEl ? tgt.closest('.lm-table th') : null;
+          if (!th) return;
+          const from = e.dataTransfer.getData('application/x-omni-tcol');
+          if (from === '') return;
+          const wrap = th.closest('.lm-table');
+          clearTableDropMarks(wrap);
+          if (!wrap) return;
+          const to = Array.from(th.parentNode.children).filter(n => n.tagName === 'TH').indexOf(th);
+          if (+from === to) return;
+          e.preventDefault();
+          tableMutate(wrap, cells => {
+            const fi = +from;
+            cells.forEach(r => { const v = r.splice(fi, 1)[0]; r.splice(to, 0, v == null ? '' : v); });
+          });
+        }
+      }
+    }
+    /* 清除拖拽虚线预览（换目标/落点/结束时调用） */
+    function clearTableDropMarks(scope){
+      if (!scope || !scope.querySelectorAll) return;
+      scope.querySelectorAll('.lm-drop-top, .lm-drop-bottom, .lm-drop-left, .lm-drop-right')
+        .forEach(n => { n.classList.remove('lm-drop-top', 'lm-drop-bottom', 'lm-drop-left', 'lm-drop-right'); delete n.dataset.dropSide; });
+    }
+    root.addEventListener('dragstart', e => onTableDrag(e, 'start'));
+    root.addEventListener('dragover', e => onTableDrag(e, 'over'));
+    root.addEventListener('drop', e => onTableDrag(e, 'drop'));
+    root.addEventListener('dragend', () => {
+      root.querySelectorAll('.lm-tdrag').forEach(n => n.classList.remove('lm-tdrag'));
+      root.querySelectorAll('.lm-table').forEach(clearTableDropMarks);
+    });
+
+    /* ---------- 选区变化：光标行标记（标题 # 显隐） + 括号配对 ---------- */
+    function caretLineEl(){
+      const sel = window.getSelection();
+      if (!sel.rangeCount) return null;
+      const r = sel.getRangeAt(0);
+      if (!root.contains(r.startContainer)) return null;
+      let n = r.startContainer;
+      while (n && n.parentNode !== root) n = n.parentNode;
+      return n;
+    }
+    function caretBrackets(){
+      const sel = window.getSelection();
+      if (composing || !sel.rangeCount || !sel.isCollapsed){ clearBr(); return; }
+      const off = globalOffset();
+      if (off == null){ clearBr(); return; }
+      const full = serializeAll();
+      let gi = -1;
+      const before = full[off - 1], at = full[off];
+      if (before && BR_PAIR[before]) gi = off - 1;
+      else if (at && BR_PAIR[at]) gi = off;
+      if (gi < 0){ clearBr(); return; }
+      const key = gi + ':' + full[gi] + ':' + full.length;
+      if (key === lastBrKey && brNodes.length) return;
+      clearBr();
+      const mj = findBrMatch(full, gi);
+      if (mj < 0) return;
+      const p1 = domPointAt(gi);
+      if (!p1) return;
+      lastBrKey = key;
+      wrapChar(p1.node, p1.offset);
+      /* 首处包裹会切分文本节点，另一括号落点须基于包裹后的 DOM 重新定位 */
+      const p2 = domPointAt(mj);
+      if (p2) wrapChar(p2.node, p2.offset);
+      /* wrap 会切分文本节点，把光标复位到原偏移避免跳动 */
+      restoreCaret(off);
+    }
+    let selTimer = 0;
+    function onSelChange(){
+      if (!root.isConnected || selTimer) return;
+      selTimer = requestAnimationFrame(() => {
+        selTimer = 0;
+        const el = caretLineEl();
+        for (const x of root.querySelectorAll('.lm-caret'))
+          if (x !== el) x.classList.remove('lm-caret');
+        if (el) el.classList.add('lm-caret');
+        caretBrackets();
+        /* 光标离开表格后，把刚才编辑过的表格刷新一次内联渲染（加粗/链接等） */
+        if (tblDirty && (!el || !el.dataset || el.dataset.tableRaw === undefined)){
+          tblDirty = false;
+          const off = globalOffset();
+          rebuild(serializeAll());
+          restoreCaret(off);
+        }
+      });
+    }
+
+    root.addEventListener('input', () => pipeline());
+    root.addEventListener('keydown', onKeydown);
+    root.addEventListener('paste', onPaste);
+    root.addEventListener('click', onClick);
+    /* 本机图片拖入编辑区 → 上传并插入 */
+    root.addEventListener('dragover', e => {
+      if (opts.uploadImage && e.dataTransfer
+          && Array.from(e.dataTransfer.types).includes('Files')){
+        e.preventDefault();
+        root.classList.add('lm-drop');
+      }
+    });
+    root.addEventListener('dragleave', e => {
+      if (e.relatedTarget && root.contains(e.relatedTarget)) return;
+      root.classList.remove('lm-drop');
+    });
+    root.addEventListener('drop', e => {
+      const files = Array.from((e.dataTransfer || {}).files || [])
+        .filter(f => /^image\//.test(f.type));
+      if (!files.length || !opts.uploadImage) return;
+      e.preventDefault();
+      root.classList.remove('lm-drop');
+      insertFiles(files, { x: e.clientX, y: e.clientY });
+    });
+    document.addEventListener('selectionchange', onSelChange);
+    root.addEventListener('compositionstart', () => { composing = true; });
+    root.addEventListener('compositionend', () => { composing = false; pipeline(); });
+
+    /* ---------- 选区包裹（工具栏加粗/斜体等）：有选区包住，无选区插入占位 ---------- */
+    function wrapSelection(pre, suf, ph){
+      const sel = window.getSelection();
+      if (sel.rangeCount && !sel.isCollapsed && root.contains(sel.anchorNode)){
+        const r = sel.getRangeAt(0);
+        const s = rawOffset(r.startContainer, r.startOffset);
+        const e = rawOffset(r.endContainer, r.endOffset);
+        const raw = serializeAll();
+        const next = raw.slice(0, s) + pre + raw.slice(s, e) + suf + raw.slice(e);
+        ta.value = next;
+        try { ta.dispatchEvent(new Event('input')); } catch (_) {}
+        rebuild(next);
+        restoreCaret(s + pre.length + (e - s));
+        return true;
+      }
+      const pos = (sel.rangeCount && root.contains(sel.anchorNode))
+        ? rawOffset(sel.anchorNode, sel.anchorOffset) : serializeAll().length;
+      const phText = ph || '';
+      const raw = serializeAll();
+      const next = raw.slice(0, pos) + pre + phText + suf + raw.slice(pos);
+      ta.value = next;
+      try { ta.dispatchEvent(new Event('input')); } catch (_) {}
+      rebuild(next);
+      if (phText){
+        /* 光标落在占位符中间并选中它 */
+        const r = document.createRange();
+        const p1 = domPointAt(pos + pre.length);
+        const p2 = domPointAt(pos + pre.length + phText.length);
+        if (p1 && p2){
+          r.setStart(p1.node, p1.offset);
+          r.setEnd(p2.node, p2.offset);
+          const s2 = window.getSelection();
+          s2.removeAllRanges(); s2.addRange(r);
+        } else restoreCaret(pos + pre.length);
+      } else {
+        restoreCaret(pos + pre.length);
+      }
+      root.focus();
+      return true;
+    }
+
+    /* ---------- 当前行行首插入前缀（标题 / 列表 / 引用） ---------- */
+    function lineInsert(prefix){
+      let off = globalOffset();
+      const tl = selTableLine();
+      if (tl) off = tableEndOffset(tl);   // 光标在表格内：落到表格后的新行，避免插坏表格源码
+      if (off == null) return;
+      const arr = serializeAll().split('\n');
+      let p = 0, li = 0;
+      for (li = 0; li < arr.length; li++){
+        if (off <= p + arr[li].length) break;
+        p += arr[li].length + 1;
+      }
+      insertRawAt(p, prefix);
+    }
+
+    const inst = {
+      refresh(){ rebuild(ta.value); },
+      undo(){ if (histIdx > 0){ restoreHist(histIdx - 1); return true; } return false; },
+      redo(){ if (histIdx < hist.length - 1){ restoreHist(histIdx + 1); return true; } return false; },
+      wrapSelection,
+      lineInsert,
+      setValue(s){ ta.value = s; rebuild(s); try { ta.dispatchEvent(new Event('input')); } catch (e) {} },
+      insertText(text){
+        let off = globalOffset();
+        const tl = selTableLine();
+        if (tl) off = tableEndOffset(tl);   // 块级内容不插进表格内部，落在表格之后
+        insertRawAt(off == null ? serializeAll().length : off, text);
+      },
+      show(){ root.style.display = ''; ta.style.removeProperty('display'); ta.style.setProperty('display', 'none', 'important'); rebuild(ta.value); },
+      hide(){ root.style.display = 'none'; ta.style.removeProperty('display'); },
+      isShown(){ return root.style.display !== 'none'; },
+      focus(){ root.focus(); },
+      destroy(){
+        alive = false; root.remove(); ta.style.removeProperty('display');
+        document.removeEventListener('selectionchange', onSelChange);
+      },
+      el: root
+    };
+    rebuild(ta.value);
+    return inst;
+  }
+
+  return { attach };
+})();

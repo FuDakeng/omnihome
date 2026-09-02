@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "OmniHome 快捷导航",
+  "version": "2.0.5",
+  "description": "连接你的 OmniHome 服务器：右键把当前网页收进快捷导航，浏览器书签与万事屋双向同步（含分类与顺序）。",
+  "permissions": [
+    "storage",
+    "contextMenus",
+    "alarms",
+    "bookmarks",
+    "notifications",
+    "tabs",
+    "activeTab",
+    "downloads",
+    "scripting"
+  ],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "OmniHome 快捷导航"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content-hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

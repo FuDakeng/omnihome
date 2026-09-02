@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <div class="brand">
+      <span class="logo">O</span>
+      <div class="head-t"><b>OmniHome</b><span id="headSub">未连接 · 请先登录</span></div>
+    </div>
+    <span class="dot" id="headDot"></span>
+  </header>
+
+  <!-- ========== 未登录 ========== -->
+  <section id="loginPanel">
+    <div class="field"><label>服务器地址</label>
+      <input id="inServer" placeholder="如 192.168.1.10:8000" spellcheck="false" autocomplete="off"></div>
+    <div class="field"><label>用户名</label>
+      <input id="inUser" placeholder="万事屋账号" spellcheck="false" autocomplete="off"></div>
+    <div class="field"><label>密码</label>
+      <input id="inPass" type="password" placeholder="登录密码"></div>
+    <div class="err" id="loginErr" hidden></div>
+    <div class="btn-row">
+      <button class="btn ghost" id="btnTest"><span class="spin" id="testSpin" hidden></span>测试连接</button>
+      <button class="btn primary" id="btnLogin"><span class="spin" id="loginSpin" hidden></span>登录</button>
+    </div>
+  </section>
+
+  <!-- ========== 已登录 ========== -->
+  <section id="mainPanel" hidden>
+    <div class="user-card">
+      <span class="avatar" id="uAvatar">O</span>
+      <div class="user-info"><b id="uName"></b><span id="uServer"></span></div>
+      <button class="icon-btn" id="btnLogout" title="退出登录">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+    </div>
+
+    <!-- 收藏当前页 -->
+    <div class="card-block">
+      <div class="block-head">
+        <b>收藏当前页</b>
+        <button class="mini-link btn-mini" id="saveToggle">选择分类 ▾</button>
+      </div>
+      <button class="btn primary wide" id="btnQuickAdd">⭐ 收藏到万事屋</button>
+      <div class="save-more" id="saveMore" hidden style="display:none">
+        <div class="field"><label>名称</label><input id="svName" maxlength="80"></div>
+        <div class="field"><label>分类</label><select id="svCat"></select></div>
+        <div class="field"><label>描述</label><input id="svDesc" maxlength="60" placeholder="可用 AI 分析自动填写"></div>
+        <div class="field"><label>标签</label><input id="svTagInput" placeholder="输入后回车添加，可多个" autocomplete="off"></div>
+        <div class="tags" id="svTags"></div>
+        <div class="btn-row">
+          <button class="btn ghost" id="btnAi"><span class="spin" id="aiSpin" hidden></span>✨ AI 分析</button>
+          <button class="btn primary" id="btnSavePick">保存书签</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 书签同步 -->
+    <div class="card-block">
+      <div class="block-head"><b>书签同步</b><span class="chip" id="syncChip">待同步</span></div>
+      <div class="sync-info" id="syncInfo">尚未同步</div>
+      <div class="err" id="syncErr" hidden></div>
+      <div class="row-line">
+        <span>自动同步</span>
+        <button class="switch" id="swAuto" role="switch"></button>
+      </div>
+      <div class="row-line" id="rowInterval">
+        <span>同步间隔</span>
+        <div class="interval-box">
+          <select id="selInterval">
+            <option value="5">5 分钟</option>
+            <option value="15">15 分钟</option>
+            <option value="30">30 分钟</option>
+            <option value="60">1 小时</option>
+            <option value="360">6 小时</option>
+            <option value="1440">24 小时</option>
+            <option value="custom">自定义…</option>
+          </select>
+          <input type="number" id="inInterval" min="1" max="43200" step="1" placeholder="分钟" hidden style="display:none">
+        </div>
+      </div>
+      <div class="row-line">
+        <span>不同步隐藏的分类</span>
+        <button class="switch" id="swSkipHidden" role="switch"></button>
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost" id="btnSync"><span class="spin" id="syncSpin" hidden></span>立即同步</button>
+        <button class="btn ghost" id="btnImport"><span class="spin" id="importSpin" hidden></span>导入浏览器书签</button>
+      </div>
+      <div class="hint" id="syncHint"></div>
+    </div>
+
+    <div class="foot">
+      <button class="mini-link btn-mini" id="btnOpenSite">🏠 打开万事屋</button>
+      <span id="footVer"></span>
+    </div>
+  </section>
+</div>
+
+<!-- 确认弹窗：首次同步 / 反向导入（内联 style 兜底：无论 CSS 如何都默认隐藏） -->
+<div class="modal" id="modal" hidden style="display:none">
+  <div class="modal-card">
+    <div class="modal-title" id="modalTitle"></div>
+    <div class="modal-sub" id="modalSub"></div>
+    <div class="btn-row">
+      <button class="btn ghost" id="modalCancel">取消</button>
+      <button class="btn danger" id="modalOk"><span class="spin" id="modalSpin" hidden></span><span id="modalOkText">确定</span></button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" hidden style="display:none"></div>
+<script type="module" src="popup.js"></script>
+</body>
+</html>
