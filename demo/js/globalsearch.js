@@ -82,6 +82,13 @@
 
   /* ---------- 事件 ---------- */
   input.addEventListener('focus', () => { pop.classList.add('open'); renderRecent(); });
+  /* 下拉面板纯 CSS :focus-within 驱动显隐：点击面板内按钮（历史 ×/隐藏/清除等）时
+     mousedown 默认会把焦点移到按钮，而 renderRecent 重建 DOM / 隐藏标题行又会让焦点
+     丢回 body → focus-within 失效 → 下拉被关闭。在 mousedown 阶段阻止焦点转移，
+     input 始终持有焦点，面板保持打开，click 事件不受影响 */
+  pop.addEventListener('mousedown', e => {
+    if (e.target.closest('button, .sp-del')) e.preventDefault();
+  });
   document.addEventListener('click', e => {
     if (!e.target.closest('.searchbar')) pop.classList.remove('open');
   });

@@ -1475,6 +1475,52 @@ def _note_to_md(meta: dict, content: str) -> bytes:
     return md.encode("utf-8")
 
 
+@router.get("/api/notes/folder/export")
+def export_folder_notes(path: str = "", authorization: Optional[str] = Header(None),
+                        token: Optional[str] = None):
+    """指定文件夹（含全部子文件夹）的笔记打包 zip；目录结构相对于所选文件夹。
+    供文件夹 ⋯ 菜单「导出文件夹」使用（<a> 下载，支持 token 查询参数）。"""
+    from urllib.parse import quote as _quote
+    username = require_user(authorization, token)
+    path = (path or "").strip().strip("/")
+    if not path:
+        raise HTTPException(400, "文件夹路径不能为空")
+    idx = storage.notes_index(username)
+    prefix = path + "/"
+    picked = [m for m in idx
+              if not m.get("pinned") and (m.get("folder") == path or (m.get("folder") or "").startswith(prefix))]
+    if not picked:
+        raise HTTPException(404, "该文件夹下没有笔记")
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as zf:
+        used = set()
+        for m in picked:
+            folder = (m.get("folder") or "").strip("/")
+            rel = folder[len(path):].strip("/")            # 相对所选文件夹的子路径
+            parts = [_safe_fs_name(p) for p in rel.split("/") if p] if rel else []
+            arc = "/".join(parts + [_safe_fs_name(m.get("title") or m["id"]) + ".md"]) if parts \
+                else (_safe_fs_name(m.get("title") or m["id"]) + ".md")
+            base = arc; n = 2
+            while arc in used:
+                stem, ext = base.rsplit(".", 1) if "." in base else (base, "")
+                arc = (f"{stem}-{n}.{ext}" if ext else f"{base}-{n}")
+                n += 1
+            used.add(arc)
+            content = storage.note_read(username, m["id"]) or ""
+            zf.writestr(arc, _note_to_md(m, content))
+    buf.seek(0)
+    fname = _safe_fs_name(path.rsplit("/", 1)[-1]) + ".zip"
+    ascii_fname = fname.encode("ascii", errors="replace").decode("ascii") or "folder.zip"
+    utf8_fname = _quote(fname, safe="")
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition":
+                 f"attachment; filename=\"{ascii_fname}\"; filename*=UTF-8''{utf8_fname}",
+                 "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.get("/api/notes/{nid}/export")
 def export_note_md(nid: str, authorization: Optional[str] = Header(None),
                    token: Optional[str] = None):

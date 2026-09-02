@@ -28,6 +28,7 @@ const Notes = (() => {
         QUICK_FOLDER = '灵感速记';
   const PIN_KEY = 'omni.kb.pinned.hidden';
   const ASSET_KEY = 'omni.kb.assets.hidden';
+  const SYNC_KEY = 'omni.kb.sync.hidden';   // 「同步笔记」分区折叠状态
   const isPlan = f => f === PLAN_FOLDER || f.startsWith(PLAN_FOLDER + '/');
   const isQuick = f => f === QUICK_FOLDER || f.startsWith(QUICK_FOLDER + '/');
   const isBuiltin = f => isPlan(f) || isQuick(f);
@@ -545,7 +546,7 @@ const Notes = (() => {
           <span class="kb-count num">${noteCountIn(f)}</span>
           ${locked ? '<span class="chip no-dot" style="font-size:10px;padding:2px 6px" title="系统内置文件夹，不可删除">内置</span>'
             : `<button class="icon-btn-xs kb-folder-add" data-kb-add="${App.esc(f)}" title="在此文件夹内新建笔记或子文件夹"><svg class="ic"><use href="#i-plus"/></svg></button>
-               <button class="icon-btn-xs kb-folder-del" data-folder-del="${App.esc(f)}" title="删除文件夹"><svg class="ic"><use href="#i-trash"/></svg></button>`}
+               <button class="icon-btn-xs kb-folder-more" data-folder-act="${App.esc(f)}" title="文件夹操作：重命名 / 复制 / 导出 / 删除"><svg class="ic"><use href="#i-more"/></svg></button>`}
         </div>
         <div class="kb-folder-body" ${open ? '' : 'hidden'}>
           ${inner || '<div class="kb-empty">暂无笔记，可新建或拖拽进来</div>'}
@@ -555,19 +556,42 @@ const Notes = (() => {
 
   function renderTree(){
     const pinned = idx.filter(n => n.pinned);
-    const roots = idx.filter(n => !n.pinned && !n.folder);
+    /* 同步判定：LocalSync 维护的同步笔记 id 快照（localStorage 同步可读） */
+    const isSynced = id => !!(window.LocalSync && LocalSync.isSyncedId(id));
+    const roots = idx.filter(n => !n.pinned && !n.folder && !isSynced(n.id));
     const pinHidden = localStorage.getItem(PIN_KEY) === '1';
+    /* 同步笔记所在的一级目录集合：这些文件夹整体归入「同步笔记」分区 */
+    const syncRoots = new Set();
+    for (const n of idx) if (!n.pinned && isSynced(n.id) && n.folder) syncRoots.add(n.folder.split('/')[0]);
     let html = '';
 
-    /* 「我的笔记」分区：普通文件夹与未分组笔记全部归入此区 */
+    /* 「线上笔记」分区（原「我的笔记」）：非同步的普通文件夹与未分组笔记归入此区 */
     html += `
       <div class="kb-sec-title" data-drop-root title="拖拽笔记到此处取消分组">
-        <svg class="ic"><use href="#i-inbox"/></svg>我的笔记
+        <svg class="ic"><use href="#i-inbox"/></svg>线上笔记
         <button class="icon-btn-xs kb-root-add" data-kb-add="" title="新建笔记或文件夹"><svg class="ic"><use href="#i-plus"/></svg></button>
       </div>`;
-    for (const f of childFolders('')) if (!isBuiltin(f)) html += renderFolder(f);
+    for (const f of childFolders('')) if (!isBuiltin(f) && !syncRoots.has(f)) html += renderFolder(f);
     html += roots.length ? roots.map(noteItemHtml).join('')
       : '<div class="kb-empty">暂无笔记，点上方「新建笔记」开始</div>';
+
+    /* 「同步笔记」分区：绑定本地文件夹后，同步相关的文件/文件夹全部归入此区 */
+    const syncCount = idx.filter(n => !n.pinned && isSynced(n.id)).length;
+    const syncHidden = localStorage.getItem(SYNC_KEY) === '1';
+    html += `
+      <div class="kb-sec-title kb-pin-head${syncHidden ? ' closed' : ''}" data-sync-toggle title="点击隐藏 / 展开同步笔记分区">
+        <svg class="ic kb-pin-chev"><use href="#i-chev-d"/></svg>
+        <svg class="ic"><use href="#i-swap"/></svg>同步笔记
+        <span class="kb-count num">${syncCount}</span>
+      </div>`;
+    if (!syncHidden){
+      if (syncCount){
+        for (const f of [...syncRoots].sort()) html += renderFolder(f);
+        html += idx.filter(n => !n.pinned && !n.folder && isSynced(n.id)).map(noteItemHtml).join('');
+      } else {
+        html += '<div class="kb-empty">尚未绑定：知识库 ⋯ 菜单 → 本地文件夹同步</div>';
+      }
+    }
 
     /* 附件分区：.md 中上传的图片/附件自动归档于此，点击把引用插入当前笔记 */
     const assetsHidden = localStorage.getItem(ASSET_KEY) === '1';
@@ -800,7 +824,7 @@ const Notes = (() => {
 
   async function create(folder){
     try {
-      /* 笔记只允许建在「我的笔记」分区：默认最近点选的文件夹，内置文件夹回落根 */
+      /* 笔记只允许建在「线上笔记」分区：默认最近点选的文件夹，内置文件夹回落根 */
       const dest = folder !== undefined ? folder
         : (isBuiltin(currentFolder) ? '' : currentFolder);
       const meta = await API.post('/api/notes',
@@ -903,13 +927,74 @@ const Notes = (() => {
     } catch (e) { showToast(e.message, 'err'); }
   }
 
+  /* ---------- 文件夹 ⋯ 操作菜单：重命名 / 复制 / 导出 / 删除（0.2.21 起替代悬浮删除钮） ---------- */
+  function openFolderMenu(anchor, f){
+    kbMenu(anchor, [
+      ['重命名文件夹', 'i-pen', async () => {
+        const name = await App.promptModal({
+          title: '重命名文件夹', sub: `「${folderLabel(f)}」的子文件夹与笔记将一并迁移`,
+          value: folderLabel(f), placeholder: '新名称',
+        });
+        if (!name) return;
+        const trimmed = name.trim();
+        if (!trimmed || trimmed === folderLabel(f)) return;
+        if (trimmed.includes('/')){ showToast('文件夹名称不能包含 /', 'err'); return; }
+        const parent = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '';
+        const newF = parent ? parent + '/' + trimmed : trimmed;
+        if (folders.includes(newF)){ showToast('同级已存在同名文件夹', 'err'); return; }
+        try {
+          await API.post('/api/notes/folders', { name: newF });
+          /* 迁移子文件夹树（后端自动逐级补齐；已存在时 400 忽略） */
+          for (const p of folders.filter(x => x.startsWith(f + '/')))
+            await API.post('/api/notes/folders', { name: newF + p.slice(f.length) }).catch(() => {});
+          /* 迁移本级与全部子级笔记 */
+          const moving = idx.filter(n => n.folder === f || (n.folder || '').startsWith(f + '/'));
+          for (const n of moving)
+            await API.put('/api/notes/' + n.id, { folder: newF + (n.folder || '').slice(f.length) });
+          /* 删旧文件夹树：笔记已迁空，后端「内容上移」逻辑不会再触发 */
+          await API.del('/api/notes/folders/' + encodeURIComponent(f));
+          collapsed.delete(f);
+          if (currentFolder === f) currentFolder = newF;
+          await load();
+          showToast(`文件夹已重命名为「${trimmed}」`);
+        } catch (e) { showToast(e.message, 'err'); }
+      }],
+      ['复制文件夹', 'i-copy', () => copyFolder(f)],
+      ['导出文件夹', 'i-download', () => API.dl('/api/notes/folder/export?path=' + encodeURIComponent(f))],
+      ['删除文件夹', 'i-trash', () => delFolder(f)],
+    ]);
+  }
+
+  /* 复制文件夹：递归建同名子树，逐篇拉正文新建副本（目标名自动避重） */
+  async function copyFolder(f){
+    const parent = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '';
+    const base = folderLabel(f) + ' 副本';
+    let label = base, i = 2;
+    while (folders.includes(parent ? parent + '/' + label : label)) label = base + i++;
+    const newF = parent ? parent + '/' + label : label;
+    try {
+      await API.post('/api/notes/folders', { name: newF });
+      for (const p of folders.filter(x => x.startsWith(f + '/')))
+        await API.post('/api/notes/folders', { name: newF + p.slice(f.length) }).catch(() => {});
+      const src = idx.filter(n => !n.pinned && (n.folder === f || (n.folder || '').startsWith(f + '/')));
+      for (const n of src){
+        const d = await API.get('/api/notes/' + n.id);
+        const r = await API.post('/api/notes',
+          { title: n.title || '未命名笔记', tags: n.tags || [], folder: newF + (n.folder || '').slice(f.length) });
+        await API.put('/api/notes/' + r.id, { content: d.content || '' });
+      }
+      await load();
+      showToast(src.length ? `已复制文件夹（${src.length} 篇笔记）` : '已复制空文件夹');
+    } catch (e) { showToast(e.message, 'err'); }
+  }
+
   async function moveNote(id, folder){
     try {
       await API.put('/api/notes/' + id, { folder });
       const meta = idx.find(n => n.id === id);
       if (meta) meta.folder = folder;
       renderTree();
-            showToast(folder ? `已移入文件夹「${folder}」` : '已移回我的笔记');
+            showToast(folder ? `已移入文件夹「${folder}」` : '已移回线上笔记');
     } catch (e) { showToast(e.message, 'err'); }
   }
 
@@ -923,7 +1008,7 @@ const Notes = (() => {
         if (meta) meta.folder = folder;
       }
             renderTree();
-      showToast(`${ids.length} 篇笔记${folder ? `已移入「${folder}」` : '已移回我的笔记'}`);
+      showToast(`${ids.length} 篇笔记${folder ? `已移入「${folder}」` : '已移回线上笔记'}`);
     } catch (e) { showToast(e.message, 'err'); }
   }
 
@@ -964,7 +1049,7 @@ const Notes = (() => {
       await load();
       showToast(moved.length > 1
         ? `已移动 ${moved.length} 个文件夹`
-        : `文件夹已移到${target ? `「${folderLabel(target)}」内` : '我的笔记'}`);
+        : `文件夹已移到${target ? `「${folderLabel(target)}」内` : '线上笔记'}`);
     } catch (e) { showToast(e.message, 'err'); }
   }
 
@@ -1291,12 +1376,8 @@ const Notes = (() => {
       if (ndel){ e.stopPropagation(); del(ndel.dataset.noteDel); return; }
       const kadd = e.target.closest('[data-kb-add]');
       if (kadd){ e.stopPropagation(); openKbMenu(kadd, kadd.dataset.kbAdd); return; }
-      const del = e.target.closest('[data-folder-del]');
-      if (del){
-        e.stopPropagation();
-        delFolder(del.dataset.folderDel);
-        return;
-      }
+      const fact = e.target.closest('[data-folder-act]');
+      if (fact){ e.stopPropagation(); openFolderMenu(fact, fact.dataset.folderAct); return; }
       const add = e.target.closest('[data-folder-add]');
       if (add){
         e.stopPropagation();
@@ -1310,6 +1391,11 @@ const Notes = (() => {
       }
       if (e.target.closest('[data-assets-toggle]')){
         localStorage.setItem(ASSET_KEY, localStorage.getItem(ASSET_KEY) === '1' ? '0' : '1');
+        renderTree();
+        return;
+      }
+      if (e.target.closest('[data-sync-toggle]')){
+        localStorage.setItem(SYNC_KEY, localStorage.getItem(SYNC_KEY) === '1' ? '0' : '1');
         renderTree();
         return;
       }

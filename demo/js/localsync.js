@@ -27,8 +27,12 @@
   let lsLoading = false;       // reconcile 内部触发 Notes.load 时抑制回环
   let timer = null, saveT = null, siteT = null;
   let mapping = {};            // relPath -> { id, mtime(ms), synced(s) }
+  /* 同步笔记 id 快照：localStorage 同步可读（IndexedDB 是异步的，renderTree 分区需要即时判断） */
+  let syncIds = new Set();
+  try { syncIds = new Set(JSON.parse(localStorage.getItem('ls_ids') || '[]')); } catch (_) { syncIds = new Set(); }
   let logs = [];               // 面板日志（内存，最近 30 条）
   let lastSync = parseInt(localStorage.getItem('ls_last') || '0', 10);
+  let lastToast = 0, pendingChanges = 0;   // 同步通知节流（30s 聚合一次，避免频繁打扰）
 
   /* ---------- IndexedDB（目录句柄不可序列化进 localStorage） ---------- */
   function idbOpen(){
@@ -99,6 +103,31 @@
     logs = logs.slice(0, 30);
     renderPanel();
   }
+  /* mapping 变更后的统一落盘：idb + 同步 id 快照（供目录树「同步笔记」分区即时判断） */
+  async function persistMapping(){
+    await idbSet('mapping', mapping);
+    rebuildSyncIds();
+  }
+  function rebuildSyncIds(){
+    syncIds = new Set(Object.keys(mapping).map(p => mapping[p].id));
+    try { localStorage.setItem('ls_ids', JSON.stringify([...syncIds])); } catch (_) {}
+  }
+  /* 同步变更通知：30 秒节流聚合，一轮对账只弹一次，不频繁打扰 */
+  function notifyChanges(n){
+    pendingChanges += n;
+    const now = Date.now();
+    if (now - lastToast >= 30000){
+      lastToast = now;
+      const c = pendingChanges; pendingChanges = 0;
+      showToast('本地同步：' + c + ' 处变更已同步');
+    }
+  }
+  /* 确保站点存在该文件夹路径（后端会自动逐级补齐上级；已存在时 400 忽略）。
+     不先建文件夹直接 POST 带 folder 的笔记，笔记会挂到未注册路径下在目录树中不可见 */
+  async function ensureFolders(path){
+    if (!path) return;
+    try { await API.post('/api/notes/folders', { name: path }); } catch (_) { /* 已存在 */ }
+  }
   function handleErr(e, what){
     if (e && e.name === 'NotAllowedError'){
       enabled = false; stopPolling(); permState = 'prompt';
@@ -157,6 +186,11 @@
       const byPath = {}; files.forEach(f => { byPath[f.relPath] = f; });
       const d = await API.get('/api/notes');                 // 网络失败 → catch 15s 重试
       const notes = d.notes || [];
+      /* 补齐缺失的文件夹注册：早期导入的笔记可能挂在未注册路径下，在目录树中不可见（BUG 修复） */
+      const haveFolders = new Set(d.folders || []);
+      const missingFolders = [...new Set(notes.map(n => (n.folder || '').trim()).filter(Boolean))]
+        .filter(fp => !haveFolders.has(fp));
+      for (const fp of missingFolders){ await ensureFolders(fp); log('↓ 补齐文件夹注册：' + fp); }
       const byId = {}; notes.forEach(n => { byId[n.id] = n; });
       const idToPath = {}; Object.keys(mapping).forEach(p => { idToPath[mapping[p].id] = p; });
       let changes = 0;
@@ -168,6 +202,7 @@
           const text = await f.handle.getFile().then(x => x.text());
           const parts = f.relPath.split('/'); const fname = parts.pop();
           const parsed = parseMd(text, fname.replace(/\.md$/i, ''));
+          await ensureFolders(parts.join('/'));              // 先注册文件夹，否则笔记在树中不可见
           const r = await API.post('/api/notes', { title: parsed.title, tags: [], folder: parts.join('/') });
           await API.put('/api/notes/' + r.id, { content: parsed.content });
           mapping[f.relPath] = { id: r.id, mtime: f.lastModified, synced: Date.now() / 1000 };
@@ -182,6 +217,7 @@
         if (!note){
           /* 站点侧已删而本地文件仍在：以本地为准重新导入 */
           const parts = f.relPath.split('/'); parts.pop();
+          await ensureFolders(parts.join('/'));
           const r = await API.post('/api/notes', { title: parsed.title, tags: [], folder: parts.join('/') });
           await API.put('/api/notes/' + r.id, { content: parsed.content });
           mapping[f.relPath] = { id: r.id, mtime: f.lastModified, synced: Date.now() / 1000 };
@@ -248,11 +284,14 @@
       /* 清理双侧都已消失的残留映射 */
       Object.keys(mapping).forEach(p => { if (!byPath[p] && !byId[mapping[p].id]) delete mapping[p]; });
 
-      await idbSet('mapping', mapping);
+      await persistMapping();
       lastSync = Date.now(); localStorage.setItem('ls_last', String(lastSync));
-      if (changes && window.Notes){
-        lsLoading = true;                 // 抑制 Notes.load → onSiteChanged 回环
-        try { await Notes.load(); } finally { lsLoading = false; }
+      if (changes){
+        notifyChanges(changes);
+        if (window.Notes){
+          lsLoading = true;               // 抑制 Notes.load → onSiteChanged 回环
+          try { await Notes.load(); } finally { lsLoading = false; }
+        }
       }
     } catch (e){
       handleErr(e, '同步');
@@ -280,6 +319,7 @@
       dir = h; permState = 'granted';
       await idbSet('dir', h);
       mapping = (await idbGet('mapping')) || {};
+      rebuildSyncIds();
       enabled = true; localStorage.setItem('ls_enabled', '1');
       log('已绑定文件夹「' + h.name + '」，开始首次全量对账（双向合并）');
       renderPanel(); startPolling();
@@ -295,12 +335,15 @@
       if (!h) return;
       dir = h;
       mapping = (await idbGet('mapping')) || {};
+      rebuildSyncIds();
       permState = await h.queryPermission({ mode: 'readwrite' });
       if (permState === 'granted' && localStorage.getItem('ls_enabled') !== '0'){
         enabled = true;
         startPolling();
         reconcile('restore');          // 断网/关页期间的本地修改在此自动补齐
       }
+      /* 刷新目录树，让「同步笔记」分区立即按最新 mapping 展示 */
+      if (window.Notes){ lsLoading = true; try { await Notes.load(); } finally { lsLoading = false; } }
     } catch (_) { dir = null; }
   }
   async function reauthorize(){
@@ -324,9 +367,11 @@
     dir = null; enabled = false; mapping = {}; permState = 'prompt';
     await idbDel('dir'); await idbDel('mapping');
     localStorage.removeItem('ls_enabled'); localStorage.removeItem('ls_last');
+    syncIds = new Set(); localStorage.removeItem('ls_ids');
     lastSync = 0;
     log('已解绑本地文件夹');
     renderPanel();
+    if (window.Notes){ lsLoading = true; try { await Notes.load(); } finally { lsLoading = false; } }
   }
   function toggleEnabled(){
     enabled = !enabled;
@@ -402,7 +447,7 @@
         if (cur && cur !== want){ await removeFile(cur); delete mapping[cur]; }
         const nm = await writeFile(want, noteToMd(meta, content));
         mapping[want] = { id: meta.id, mtime: nm, synced: Date.now() / 1000 };
-        await idbSet('mapping', mapping);
+        await persistMapping();
         lastSync = Date.now(); localStorage.setItem('ls_last', String(lastSync));
       } catch (e){ handleErr(e, '写入本地'); }
     }, DEBOUNCE_SAVE);
@@ -420,5 +465,10 @@
   window.addEventListener('online', () => { if (dir && enabled) reconcile('online'); });
   App.onEnter(() => restore());
 
-  window.LocalSync = { supported, openPanel, onNoteSaved, onSiteChanged, restore, reconcile };
+  window.LocalSync = {
+    supported, openPanel, onNoteSaved, onSiteChanged, restore, reconcile,
+    /* 目录树「同步笔记」分区依赖的同步判断（同步读内存快照，renderTree 可直接调用） */
+    isSyncedId: id => syncIds.has(id),
+    isBound: () => !!dir,
+  };
 })();
