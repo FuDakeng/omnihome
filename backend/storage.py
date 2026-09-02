@@ -668,16 +668,24 @@ def _sql_write_folders(conn, username: str, content: str):
         arr = json.loads(content) if content and content.strip() else []
     except json.JSONDecodeError:
         arr = []
-    if not arr:
+    # 保序去重：文件夹名是主键 (username, name) 的组成部分，重复名会触发
+    # UniqueViolation（如旧版「速记」改名合并到「灵感速记」时两者并存）。
+    # 落库前必须合并，否则整批 INSERT 失败 → list_notes 稳定 500。
+    seen, names = set(), []
+    for n in arr:
+        name = str(n)
+        if name and name not in seen:
+            seen.add(name)
+            names.append(name)
+    if not names:
         return
     t = int(time.time())
-    params = [{"u": username, "name": str(n), "pos": i, "t": t}
-              for i, n in enumerate(arr) if str(n)]
-    if params:
-        conn.execute(text(
-            'INSERT INTO "bm_note_folders" '
-            '("username", "name", "pos", "updated") '
-            "VALUES (:u, :name, :pos, :t)"), params)
+    params = [{"u": username, "name": name, "pos": i, "t": t}
+              for i, name in enumerate(names)]
+    conn.execute(text(
+        'INSERT INTO "bm_note_folders" '
+        '("username", "name", "pos", "updated") '
+        "VALUES (:u, :name, :pos, :t)"), params)
 
 
 def _sql_read_calendar_obj(conn, username: str) -> list:

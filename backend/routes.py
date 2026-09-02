@@ -1212,7 +1212,14 @@ def _ensure_pinned(username: str):
     # 旧版兼容：「速记」文件夹整体改名为「灵感速记」（含子路径与笔记归属）
     if "速记" in folders or any(f.startswith("速记/") for f in folders):
         ren = _rename_quick("速记", QUICK_FOLDER)
-        folders = [ren(f) for f in folders]
+        # 改名后可能与已存在的「灵感速记」及其子路径撞名，保序去重再落库；
+        # 否则重复名会撞 bm_note_folders 主键 (username, name)，每次拉取都 500。
+        _seen, _merged = set(), []
+        for _f in (ren(x) for x in folders):
+            if _f not in _seen:
+                _seen.add(_f)
+                _merged.append(_f)
+        folders = _merged
         idx = storage.notes_index(username)
         moved = False
         for item in idx:
