@@ -23,12 +23,30 @@
 
   function renderRecent(){
     const recent = JSON.parse(localStorage.getItem('om_recent') || '[]');
-    $('#spRecent').innerHTML = recent.length
-      ? recent.slice(0, 5).map(q => `
-        <button class="sp-item" data-recent="${App.esc(q)}">
-          <svg class="ic"><use href="#i-clock"/></svg>${App.esc(q)}</button>`).join('')
-      : '<div style="font-size:12px;color:var(--om-text-3);padding:4px 2px">暂无搜索记录</div>';
+    const histHidden = localStorage.getItem('om_recent_hidden') === '1';
+    const head = $('#spRecentHead');
+    if (head) head.hidden = histHidden;   // 隐藏态：标题行连同操作钮一起收起
+    if (histHidden){
+      $('#spRecent').innerHTML = `
+        <button class="sp-item" id="spRecentShow">
+          <svg class="ic"><use href="#i-clock"/></svg>搜索历史已隐藏
+          <span style="margin-left:auto;font-size:11px;color:var(--om-primary)">显示</span>
+        </button>`;
+    } else {
+      $('#spRecent').innerHTML = recent.length
+        ? recent.slice(0, 5).map(q => `
+          <button class="sp-item" data-recent="${App.esc(q)}">
+            <svg class="ic"><use href="#i-clock"/></svg>${App.esc(q)}
+            <span class="sp-del" data-recent-del="${App.esc(q)}" title="删除这条历史">×</span></button>`).join('')
+        : '<div style="font-size:12px;color:var(--om-text-3);padding:4px 2px">暂无搜索记录</div>';
+    }
     $$('.engine-chip').forEach(c => c.classList.toggle('on', c.textContent === currentEngine()));
+  }
+
+  function delRecent(q){
+    const recent = JSON.parse(localStorage.getItem('om_recent') || '[]').filter(x => x !== q);
+    localStorage.setItem('om_recent', JSON.stringify(recent));
+    renderRecent();
   }
 
   function pushRecent(q){
@@ -93,6 +111,19 @@
       localStorage.setItem('om_engine', engineIdx);
       renderRecent();
       return;
+    }
+    /* 搜索历史：单条删除 / 全部清除 / 隐藏与恢复（先于 data-recent 判断，× 在历史项内部） */
+    const rdel = e.target.closest('[data-recent-del]');
+    if (rdel){ e.stopPropagation(); e.preventDefault(); delRecent(rdel.dataset.recentDel); return; }
+    if (e.target.closest('#spRecentClear')){
+      localStorage.setItem('om_recent', '[]');
+      renderRecent(); showToast('搜索历史已清空'); return;
+    }
+    if (e.target.closest('#spRecentHide') || e.target.closest('#spRecentShow')){
+      const nowHidden = localStorage.getItem('om_recent_hidden') !== '1';
+      if (e.target.closest('#spRecentShow')) localStorage.removeItem('om_recent_hidden');
+      else localStorage.setItem('om_recent_hidden', nowHidden ? '1' : '');
+      renderRecent(); return;
     }
     const recent = e.target.closest('[data-recent]');
     if (recent){ input.value = recent.dataset.recent; doSearch(recent.dataset.recent); return; }

@@ -172,6 +172,22 @@
 }
 .sp-item:hover{ background: var(--om-surface-2); color: var(--om-text-1); }
 .sp-item .ic{ width: 14px; height: 14px; color: var(--om-text-3); }
+/* 搜索历史：标题行操作钮（隐藏/清除）+ 单条删除 ×（悬浮才显，不遮挡词条） */
+.sp-recent-head{ display: flex; align-items: center; justify-content: space-between; }
+.sp-recent-ops{ display: inline-flex; gap: 4px; }
+.sp-op{
+  border: 0; background: transparent; color: var(--om-text-3);
+  font-size: 11px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
+  letter-spacing: 0; transition: all var(--om-t-fast);
+}
+.sp-op:hover{ color: var(--om-primary); background: var(--om-primary-ghost); }
+.sp-del{
+  margin-left: auto; flex: none; width: 18px; height: 18px; line-height: 17px;
+  text-align: center; border-radius: 50%; font-size: 13px; color: var(--om-text-3);
+  opacity: 0; transition: opacity var(--om-t-fast), background var(--om-t-fast);
+}
+.sp-item:hover .sp-del{ opacity: 1; }
+.sp-del:hover{ background: var(--om-danger-ghost, rgba(239,68,68,.14)); color: var(--om-danger); }
 .sp-foot{ margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--om-border); font-size: 11px; color: var(--om-text-3); display: flex; justify-content: space-between; }
 
 /* ---------- 徽章 / 状态胶囊 ---------- */
@@ -2424,3 +2440,42 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 .livemd .lm-rowh:active, .livemd .lm-colh:active{ cursor: grabbing; }
 /* 表格在首行时工具条改放表格内顶部，避免被编辑区裁剪 */
 .livemd > .lm-table:first-child .lm-tbar{ top: 4px; }
+
+/* ---------- 本地文件夹双向同步面板（localsync.js） ---------- */
+.ls-mask{
+  position: fixed; inset: 0; z-index: 120;
+  background: rgba(0,0,0,.5); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+}
+.ls-panel{
+  width: min(560px, calc(100vw - 32px)); max-height: min(76vh, 640px);
+  display: flex; flex-direction: column;
+  background: var(--om-bg-2, var(--om-surface)); border: 1px solid var(--om-border);
+  border-radius: var(--om-radius-lg); box-shadow: var(--om-shadow-lg, 0 18px 50px rgba(0,0,0,.35));
+  overflow: hidden;
+}
+.ls-head{
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--om-border);
+}
+.ls-head h3{ display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 700; color: var(--om-text-1); }
+.ls-head .ic{ width: 16px; height: 16px; color: var(--om-primary); }
+.ls-body{ padding: 16px 18px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.ls-note{ font-size: 12.5px; line-height: 1.7; color: var(--om-text-2); }
+.ls-stat{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
+.ls-stat > div{ display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--om-text-1); min-width: 0; }
+.ls-stat b{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-k{ flex: none; font-size: 11px; color: var(--om-text-3); }
+.ls-ok{ color: var(--om-success, #22c55e); }
+.ls-warn{ color: var(--om-warning, #f59e0b); }
+.ls-btns{ display: flex; flex-wrap: wrap; gap: 8px; }
+.ls-btns .btn[disabled]{ opacity: .45; pointer-events: none; }
+.ls-danger:hover{ color: var(--om-danger); border-color: var(--om-danger); }
+.ls-log-head{ font-size: 11px; color: var(--om-text-3); letter-spacing: .6px; }
+.ls-log{
+  max-height: 200px; overflow: auto; display: flex; flex-direction: column; gap: 4px;
+  background: var(--om-surface-2); border-radius: var(--om-radius-sm); padding: 8px 10px;
+}
+.ls-log-item{ font-size: 11.5px; line-height: 1.6; color: var(--om-text-2); word-break: break-all; }
+.ls-log-item.err{ color: var(--om-danger); }
+.ls-log-t{ color: var(--om-text-3); margin-right: 8px; font-variant-numeric: tabular-nums; }

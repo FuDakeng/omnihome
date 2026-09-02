@@ -487,6 +487,9 @@ const Notes = (() => {
       else if (!currentId && idx.length) open(idx[0].id);
       /* 重新进入视图时重拉当前笔记正文，覆盖仪表盘速记等外部更新 */
       else if (currentId && idx.some(n => n.id === currentId)) open(currentId);
+      /* 本地同步钩子：load() 是所有站点侧变更（建/删/改名/导入/移动）的收敛点，
+         防抖触发双向对账；reconcile 内部回调 Notes.load 时由 lsLoading 标志抑制回环 */
+      if (window.LocalSync) LocalSync.onSiteChanged();
     } catch (e) { /* 未登录或网络异常，忽略 */ }
   }
 
@@ -825,6 +828,8 @@ const Notes = (() => {
       $('#edFootTime').textContent = '已自动保存（刚刚）';
       renderTree();
       renderTabs();
+      /* 本地同步钩子：防抖写入本地物理文件（未绑定时空操作） */
+      if (window.LocalSync) LocalSync.onNoteSaved(meta || idx.find(n => n.id === currentId), $('#edSrc').value);
     } catch (e) { showToast('保存失败：' + e.message, 'err'); }
   }
 
@@ -1078,6 +1083,7 @@ const Notes = (() => {
     $('#notesOverflowBtn')?.addEventListener('click', () => kbMenu($('#notesOverflowBtn'), [
       ['导入 Markdown / zip', 'i-download', () => importMd()],
       ['导出全部笔记', 'i-upload', () => API.dl('/api/notes/all')],
+      ['本地文件夹同步', 'i-swap', () => window.LocalSync && LocalSync.openPanel()],
     ]));
     /* 编辑区顶栏由全局 .topbar 承载（#globalSearch 等 demo.js 已绑）；
        此处不再绑定 kbBack / kbEditorSearch / kbAvatar / kbDate */
@@ -1945,6 +1951,7 @@ Notes.init();
         }
         $('#quickNoteTime').textContent = '已自动保存 ' +
           new Date().toTimeString().slice(0, 5);
+        window.LocalSync?.onSiteChanged();   // 速记不经 Notes.save，单独触发对账
       } catch (e) {
         $('#quickNoteTime').textContent = '保存失败';
         showToast('速记保存失败：' + e.message);

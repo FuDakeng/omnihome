@@ -1476,10 +1476,12 @@ def _note_to_md(meta: dict, content: str) -> bytes:
 
 
 @router.get("/api/notes/{nid}/export")
-def export_note_md(nid: str, authorization: Optional[str] = Header(None)):
-    """单条笔记下载为 .md 文件；含 Content-Disposition 触发浏览器另存。"""
+def export_note_md(nid: str, authorization: Optional[str] = Header(None),
+                   token: Optional[str] = None):
+    """单条笔记下载为 .md 文件；含 Content-Disposition 触发浏览器另存。
+    浏览器 <a> 下载带不了 Authorization 头，必须支持 token 查询参数（否则 401 变 JSON 下载）。"""
     from urllib.parse import quote as _quote
-    username = require_user(authorization)
+    username = require_user(authorization, token)
     if not storage.note_key(username, nid):
         raise HTTPException(400, "非法笔记 ID")
     idx = storage.notes_index(username)
@@ -1502,9 +1504,10 @@ def export_note_md(nid: str, authorization: Optional[str] = Header(None)):
 
 
 @router.get("/api/notes/all")
-def export_all_notes(authorization: Optional[str] = Header(None)):
-    """全部笔记打包为 zip：按 folder 还原目录结构，文件名 = 标题.md。"""
-    username = require_user(authorization)
+def export_all_notes(authorization: Optional[str] = Header(None),
+                     token: Optional[str] = None):
+    """全部笔记打包为 zip：按 folder 还原目录结构，文件名 = 标题.md。同样支持 token 查询参数供 <a> 下载。"""
+    username = require_user(authorization, token)
     idx = storage.notes_index(username)
     buf = _io.BytesIO()
     with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as zf:
