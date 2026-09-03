@@ -2,11 +2,25 @@
 版本号唯一来源：打包、镜像构建、/api/about 均读取这里的 VERSION。
 每次发版请同步更新 VERSION 与 CHANGELOG（新版本置顶）。
 """
-VERSION = "0.2.22"
-STAGE = "数据库引擎文件夹重复名主键冲突 500 修复"
+VERSION = "0.2.23"
+STAGE = "回收站 · 嵌套目录缩进 · 同步范围与拖动修复 · Dockerfile 补回阿里云源"
 
 # 更新日志（最新版本置顶）
 CHANGELOG = [
+    {
+        "version": "0.2.23",
+        "date": "2026-09-03",
+        "items": [
+            "BUG 修复：知识库多级嵌套文件夹时，由于 .kb-folder-body 每层都额外叠加 padding-left+margin-left+border-left（深 4 级即 100px），长标题（如「账号」「驾驶」「心理」「资产」「报表」）被挤压成 1-2 字截断；改为按层级只在第一层挂树状竖线、子层复用父级缩进，标题空间恢复",
+            "BUG 修复：本地文件夹同步范围未收敛——常驻笔记（生词本 / 今日计划 / 灵感速记等内置项）以及用户主动移入「每日计划」「灵感速记」文件夹的笔记，会被原 reconcile 步骤 3 一并写入物理文件夹；现在以 pinned + 一级文件夹白名单做同步范围限定，reconcile 步骤 1（本地→站点）/ 2（本地消失 → 删站点）/ 3（站点→本地）三段都加 inSyncScope 守卫，残留 mapping 也会被回收",
+            "BUG 修复：拖动「同步笔记」分区下的笔记到「线上笔记」分区后，UI 上仍藏在该分区不显示——因为 syncIds 集合没在移出时清理；新增 LocalSync.detachById / detachMany，把同步笔记移出本地区间时立即从 mapping + syncIds 抹除并触发对账，renderTree 即时回到「线上笔记」分区",
+            "BUG 修复：拖动内嵌子文件夹到根的 .md 丢失层级——webkitGetAsEntry 递归时 walkEntry 没把父目录前缀透传，导致子文件夹里所有文件按 basename 全部进根目录（后端 import-files 因此建错路径、嵌套结构丢失）；现在 readEntries 接受 prefix 参数，子目录递归时叠加父名+'/'",
+            "新功能：知识库新增回收站分区。删笔记不再「不可恢复」，普通笔记软删进回收站，保留原文件夹与标题快照，可逐条恢复或永久删；常驻（pinned）笔记保持原行为（直接物理删除、_ensure_pinned 自动重建），不会进回收站",
+            "新功能：设置 → 数据与存储 → 「回收站」卡片中可设置保留天数（默认 30 天，0 = 仅手动清空不自动清），后端 GET /api/notes 入口懒清理过期项；回收站分区头部附加一键清空按钮，列表每行带恢复 / 永久删除两个图标按钮",
+            "后端新增 API：GET /api/notes/trash · POST /api/notes/{id}/restore · DELETE /api/notes/trash/{id} · POST /api/notes/trash/purge-all；trash 路由声明顺序在 /api/notes/{nid} 之前，避免 FastAPI 按声明顺序匹配把 'trash' 当 nid（沿用 v0.2.6 的路由顺序教训）",
+            "开发者文档：Dockerfile 补回阿里云 PyPI 镜像源（此前遗漏，NAS 在国内直连官方源构建极慢）；.gitignore 增加 .workbuddy/ 本地会话目录，避免工作记忆入库",
+        ],
+    },
     {
         "version": "0.2.22",
         "date": "2026-09-03",

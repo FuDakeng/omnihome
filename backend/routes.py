@@ -48,6 +48,7 @@ class PrefsIn(BaseModel):
     layout: Optional[dict] = None
     locale: Optional[dict] = None
     weather: Optional[dict] = None
+    trashDays: Optional[int] = None   # v0.2.15 增：回收站文件保留天数（0=永久保留，需手动清）
 
 
 @router.put("/api/settings")
@@ -58,6 +59,9 @@ def put_settings(body: PrefsIn, authorization: Optional[str] = Header(None)):
         val = getattr(body, key)
         if val:
             prefs[key].update(val)
+    if body.trashDays is not None:
+        days = max(0, min(3650, int(body.trashDays)))   # 上限 10 年，超过视作永久保留（0）
+        prefs["trashDays"] = days
     storage.save_prefs(username, prefs)
     return prefs
 
@@ -1251,8 +1255,13 @@ class NoteMetaIn(BaseModel):
 def list_notes(authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
     _ensure_pinned(username)
-    return {"notes": storage.notes_index(username),
-            "folders": storage.user_json(username, "notes/folders.json", [])}
+    _gc_trash(username)            # v0.2.15 增：按设置天数自动清理过期回收站条目
+    idx = storage.notes_index(username)
+    active = [n for n in idx if not n.get("deleted")]
+    trash_count = sum(1 for n in idx if n.get("deleted"))
+    return {"notes": active,
+            "folders": storage.user_json(username, "notes/folders.json", []),
+            "trashCount": trash_count}
 
 
 @router.post("/api/notes")
@@ -1772,6 +1781,91 @@ def _create_imported_note(username: str, title: str, content: str, folder: str) 
 
 
 
+# ---------- 回收站（v0.2.15） ----------
+# 必须在 /api/notes/{nid} 之前声明，否则 FastAPI 按声明顺序匹配会把 "trash" 当 nid 吃掉（见 v0.2.6 教训）
+def _gc_trash(username: str):
+    """按设置的天数自动清理回收站过期项；trashDays=0 表示永不自动清。"""
+    prefs = storage.get_prefs(username)
+    days = int(prefs.get("trashDays", 30) or 0)
+    if days <= 0:
+        return
+    threshold = int(time.time()) - days * 86400
+    idx = storage.notes_index(username)
+    alive = []
+    purged = 0
+    for n in idx:
+        if n.get("deleted") and (n.get("deleted") or 0) < threshold:
+            try: storage.note_delete(username, n["id"])
+            except Exception: pass
+            purged += 1
+        else:
+            alive.append(n)
+    if purged:
+        storage.save_notes_index(username, alive)
+
+
+@router.get("/api/notes/trash")
+def list_trash(authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    _gc_trash(username)
+    idx = storage.notes_index(username)
+    items = [n for n in idx if n.get("deleted")]
+    items.sort(key=lambda x: x.get("deleted") or 0, reverse=True)
+    return {"notes": items,
+            "trashDays": int((storage.get_prefs(username) or {}).get("trashDays", 30) or 0)}
+
+
+@router.delete("/api/notes/trash/{nid}")
+def trash_purge_one(nid: str, authorization: Optional[str] = Header(None)):
+    """永久删除一篇回收站笔记（连 .md 文件一并清除，无法恢复）。"""
+    username = require_user(authorization)
+    if not storage.note_key(username, nid):
+        raise HTTPException(400, "非法笔记 ID")
+    idx = storage.notes_index(username)
+    hit = next((i for i in idx if i["id"] == nid), None)
+    if not hit:
+        raise HTTPException(404, "笔记不存在")
+    storage.note_delete(username, nid)
+    idx[:] = [i for i in idx if i["id"] != nid]
+    storage.save_notes_index(username, idx)
+    return {"ok": True}
+
+
+@router.post("/api/notes/trash/purge-all")
+def trash_purge_all(authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    idx = storage.notes_index(username)
+    purged = 0
+    alive = []
+    for n in idx:
+        if n.get("deleted"):
+            try: storage.note_delete(username, n["id"])
+            except Exception: pass
+            purged += 1
+        else:
+            alive.append(n)
+    storage.save_notes_index(username, alive)
+    return {"ok": True, "purged": purged}
+
+
+@router.post("/api/notes/{nid}/restore")
+def restore_note(nid: str, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    if not storage.note_key(username, nid):
+        raise HTTPException(400, "非法笔记 ID")
+    idx = storage.notes_index(username)
+    hit = next((i for i in idx if i["id"] == nid), None)
+    if not hit:
+        raise HTTPException(404, "笔记不存在")
+    if not hit.get("deleted"):
+        return {"ok": True, "restored": False}
+    hit.pop("deleted", None)
+    hit.pop("deleted_title", None)
+    hit["updated"] = int(time.time())
+    storage.save_notes_index(username, idx)
+    return {"ok": True, "restored": True}
+
+
 @router.get("/api/notes/{nid}")
 def get_note(nid: str, authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
@@ -1824,11 +1918,24 @@ def save_note(nid: str, body: NoteContentIn,
 
 @router.delete("/api/notes/{nid}")
 def delete_note(nid: str, authorization: Optional[str] = Header(None)):
+    """v0.2.15 改为软删除：常驻笔记保持原行为（直接删除，会被 _ensure_pinned 重建），
+       用户笔记进回收站（设 deleted 时间戳，不动 .md 文件），可在设置/侧栏恢复或永久删。"""
     username = require_user(authorization)
-    storage.note_delete(username, nid)
-    idx = [i for i in storage.notes_index(username) if i["id"] != nid]
+    if not storage.note_key(username, nid):
+        raise HTTPException(400, "非法笔记 ID")
+    idx = storage.notes_index(username)
+    hit = next((i for i in idx if i["id"] == nid), None)
+    if not hit:
+        raise HTTPException(404, "笔记不存在")
+    if hit.get("pinned"):
+        storage.note_delete(username, nid)
+        idx[:] = [i for i in idx if i["id"] != nid]
+        storage.save_notes_index(username, idx)
+        return {"ok": True, "softDeleted": False}
+    hit["deleted"] = int(time.time())
+    hit["deleted_title"] = hit.get("title") or ""   # 保留原始标题，便于回收站识别
     storage.save_notes_index(username, idx)
-    return {"ok": True}
+    return {"ok": True, "softDeleted": True}
 
 
 # ---------- 今日计划（plan.md，已弃用：仪表盘改绑知识库常驻笔记） ----------

@@ -29,6 +29,8 @@ const Notes = (() => {
   const PIN_KEY = 'omni.kb.pinned.hidden';
   const ASSET_KEY = 'omni.kb.assets.hidden';
   const SYNC_KEY = 'omni.kb.sync.hidden';   // 「同步笔记」分区折叠状态
+  const TRASH_KEY = 'omni.kb.trash.hidden'; // v0.2.15 增：「回收站」分区折叠状态
+  let trash = [];                        // 当前加载的回收站条目（懒加载，展开时拉）
   const isPlan = f => f === PLAN_FOLDER || f.startsWith(PLAN_FOLDER + '/');
   const isQuick = f => f === QUICK_FOLDER || f.startsWith(QUICK_FOLDER + '/');
   const isBuiltin = f => isPlan(f) || isQuick(f);
@@ -476,6 +478,12 @@ const Notes = (() => {
       folders = d.folders || [];
       await loadAssets();
       idx.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+      /* trashCount 用后端返回值同步头部（无需展开回收站） */
+      if (typeof d.trashCount === 'number'){
+        const cnt = $('#kbTrashCount');
+        if (cnt) cnt.textContent = String(d.trashCount);
+        try { localStorage.setItem('om_trash_count', String(d.trashCount)); } catch (_) {}
+      }
       /* 恢复上次打开的标签页（刷新/切视图后），过滤已删除的笔记 */
       try {
         const saved = JSON.parse(localStorage.getItem(TABS_KEY) || '[]');
@@ -530,15 +538,17 @@ const Notes = (() => {
   const noteCountIn = f => idx.filter(n =>
     !n.pinned && (n.folder === f || (n.folder || '').startsWith(f + '/'))).length;
 
-  function renderFolder(f){
+  function renderFolder(f, depth){
     const notes = idx.filter(n => !n.pinned && n.folder === f);
     const subs = childFolders(f);
     const open = !collapsed.has(f);
     const locked = f === PLAN_FOLDER || f === QUICK_FOLDER;   // 内置/专属：不可拖拽挪位
-    const inner = subs.map(renderFolder).join('')
+    /* 嵌套缩进只由 .kb-folder-body 的 padding-left(12px) 表达（CSS v0.2.15）；
+       递归传 depth 仅用于给顶层（分区根下第一层）加 kb-folder-root 以决定是否画树状竖线 */
+    const inner = subs.map(s => renderFolder(s, (depth || 0) + 1)).join('')
       + (notes.length ? notes.map(noteItemHtml).join('') : '');
     return `
-      <div class="kb-folder${open ? ' open' : ''}${currentFolder === f ? ' current' : ''}">
+      <div class="kb-folder${open ? ' open' : ''}${currentFolder === f ? ' current' : ''}${(depth || 0) === 0 ? ' kb-folder-root' : ''}">
         <div class="kb-folder-row${selFolders.has(f) ? ' kb-selected' : ''}" data-folder-toggle="${App.esc(f)}"${locked ? '' : ' draggable="true"'}>
           <svg class="ic kb-chev"><use href="#i-chev-d"/></svg>
           <svg class="ic kb-folder-ic"><use href="#i-folder"/></svg>
@@ -555,6 +565,8 @@ const Notes = (() => {
   }
 
   function renderTree(){
+    /* v0.2.15 增：被软删的笔记不进任何分区（拖入删除横条软删后不调 load 的场景兜底） */
+    idx = idx.filter(n => !n.deleted);
     const pinned = idx.filter(n => n.pinned);
     /* 同步判定：LocalSync 维护的同步笔记 id 快照（localStorage 同步可读） */
     const isSynced = id => !!(window.LocalSync && LocalSync.isSyncedId(id));
@@ -574,6 +586,21 @@ const Notes = (() => {
     for (const f of childFolders('')) if (!isBuiltin(f) && !syncRoots.has(f)) html += renderFolder(f);
     html += roots.length ? roots.map(noteItemHtml).join('')
       : '<div class="kb-empty">暂无笔记，点上方「新建笔记」开始</div>';
+
+    /* 回收站：常驻被删笔记按 pinned 重建不进此区；普通笔记进 trash 后显示计数，点击展开 */
+    const trashCount = +(document.getElementById('kbTrashCount')?.textContent || 0)
+      || +(localStorage.getItem('om_trash_count') || 0);
+    const trashHidden = localStorage.getItem(TRASH_KEY) === '1';
+    html += `
+      <div class="kb-sec-title kb-pin-head${trashHidden ? ' closed' : ''}" data-trash-toggle title="点击隐藏 / 展开回收站">
+        <svg class="ic kb-pin-chev"><use href="#i-chev-d"/></svg>
+        <svg class="ic"><use href="#i-trash"/></svg>回收站
+        <span class="kb-count num" id="kbTrashCount">${trashCount}</span>
+        ${trashCount > 0 ? '<button class="icon-btn-xs kb-root-add" data-trash-empty title="一键清空回收站"><svg class="ic"><use href="#i-trash"/></svg></button>' : ''}
+      </div>
+      <div id="kbTrashBody" ${trashHidden ? 'hidden' : ''}>
+        ${trashHidden ? '' : (trashCount ? '' : '<div class="kb-empty">回收站是空的</div>')}
+      </div>`;
 
     /* 「同步笔记」分区：绑定本地文件夹后，同步相关的文件/文件夹全部归入此区 */
     const syncCount = idx.filter(n => !n.pinned && isSynced(n.id)).length;
@@ -635,6 +662,73 @@ const Notes = (() => {
     /* 目录树附件缩略图水合：裸 <img> 请求不带凭证会被 401 拦成裂图（拖图上传后“图片损坏”的根因） */
     hydrateImages($('#noteTree'));
     updateBatchBar();
+    /* 回收站展开态：本地有缓存就用，没有就现拉一次（避免每次 renderTree 都重拉） */
+    if (!localStorage.getItem(TRASH_KEY) || localStorage.getItem(TRASH_KEY) !== '1'){
+      loadTrash();
+    }
+  }
+
+  /* 回收站（v0.2.15 增）：渲染 trash 列表（受折叠状态控制） */
+  function renderTrashList(){
+    const body = $('#kbTrashBody');
+    const head = document.querySelector('[data-trash-toggle]');
+    if (!body || !head) return;
+    const hidden = head.classList.contains('closed');
+    body.hidden = hidden;
+    if (hidden){ body.innerHTML = ''; return; }
+    if (!trash.length){ body.innerHTML = '<div class="kb-empty">回收站是空的</div>'; return; }
+    body.innerHTML = trash.map(n => `
+      <div class="note-item kb-trash-row" data-trash-id="${App.esc(n.id)}" title="${App.esc(n.deleted_title || n.title || '未命名笔记')} · ${relTime(n.deleted)}删除">
+        <svg class="ic ni-icon" style="color:var(--om-text-3)"><use href="#i-trash"/></svg>
+        <span class="ni-title">${App.esc(n.deleted_title || n.title || '未命名笔记')}</span>
+        <span class="ni-date">${relTime(n.deleted)}</span>
+        <button class="icon-btn-xs kb-trash-restore" data-trash-restore="${App.esc(n.id)}" title="恢复到原文件夹"><svg class="ic"><use href="#i-reply"/></svg></button>
+        <button class="icon-btn-xs kb-trash-purge" data-trash-purge="${App.esc(n.id)}" title="永久删除"><svg class="ic"><use href="#i-trash"/></svg></button>
+      </div>`).join('');
+  }
+  /* 拉一次回收站（懒加载：仅在展开时拉，collapse 时不重复） */
+  async function loadTrash(){
+    try {
+      const d = await API.get('/api/notes/trash');
+      trash = d.notes || [];
+      const cnt = $('#kbTrashCount'); if (cnt) cnt.textContent = String(trash.length);
+      renderTrashList();
+    } catch (e) { /* 静默 */ }
+  }
+  async function restoreTrash(id){
+    try {
+      const r = await API.post('/api/notes/' + encodeURIComponent(id) + '/restore');
+      showToast(r.restored ? '已恢复到原位置' : '未在回收站');
+      await load();
+      await loadTrash();
+    } catch (e) { showToast(e.message, 'err'); }
+  }
+  async function purgeTrash(id){
+    if (!await App.confirmModal({
+      title: '永久删除笔记？',
+      sub: '该笔记将被彻底从回收站移除，.md 文件一并清除，无法恢复。',
+      okText: '永久删除', danger: true,
+    })) return;
+    try {
+      await API.del('/api/notes/trash/' + encodeURIComponent(id));
+      showToast('已永久删除');
+      await load();
+      await loadTrash();
+    } catch (e) { showToast(e.message, 'err'); }
+  }
+  async function purgeAllTrash(){
+    if (!trash.length) return;
+    if (!await App.confirmModal({
+      title: '清空回收站？',
+      sub: `回收站共 ${trash.length} 篇笔记，全部将永久删除，无法恢复。`,
+      okText: '清空', danger: true,
+    })) return;
+    try {
+      const r = await API.post('/api/notes/trash/purge-all');
+      showToast(`已清空回收站（${r.purged || 0} 篇）`);
+      await load();
+      await loadTrash();
+    } catch (e) { showToast(e.message, 'err'); }
   }
 
   /* 多选操作栏：选中笔记/文件夹时底部滑出，提供批量删除/取消 */
@@ -862,32 +956,42 @@ const Notes = (() => {
     if (!meta) return;
     const msg = meta.pinned
       ? `「${meta.title}」是常驻笔记，删除后将立即自动重建一篇新的，确定继续？`
-      : '删除这篇笔记？此操作不可恢复。';
-    if (!await App.confirmModal({ title: '删除笔记', sub: msg, okText: '删除', danger: !meta.pinned })) return;
-    await API.del('/api/notes/' + id).catch(e => showToast(e.message, 'err'));
-    selNotes.delete(id);
-    idx = idx.filter(n => n.id !== id);
-    openTabs = openTabs.filter(t => t !== id);   // 同步关闭对应标签页
-    persistTabs();
-    if (currentId === id){
-      currentId = null;
-      $('#edSrc').value = ''; $('#edTitle').value = ''; renderPreview();
-      if (liveEd) liveEd.refresh();
-      updateCrumb();
-    }
-    renderTabs();
-    if (meta.pinned){
-      showToast('常驻笔记已自动重建');
-      await load();   // 后端拉取时自动重建常驻笔记
-      return;
-    }
-    if (!currentId){
-      /* 删的是当前页：优先切到剩余标签页，无标签才回落第一篇 */
-      if (openTabs.length) open(openTabs[openTabs.length - 1]);
-      else if (idx.length) open(idx[0].id);
-    }
-    renderTree();
-    showToast('笔记已删除');
+      : '删除这篇笔记？\n\n笔记会进入回收站（可在设置中配置保留天数），期间可从回收站恢复。';
+    if (!await App.confirmModal({ title: '删除笔记', sub: msg, okText: '删除到回收站', danger: !meta.pinned })) return;
+    try {
+      const r = await API.del('/api/notes/' + id);
+      /* v0.2.15：普通笔记后端改为软删除（进回收站），pinned 仍然直接删（随后端自动重建），
+         因此前端不要再本地把 idx.filter(n.id !== id)，否则从回收站恢复时找不到条目 */
+      if (r && r.softDeleted){
+        /* 把 idx 里的元信息标记为 deleted，但保留记录（同步不会丢失） */
+        const it = idx.find(n => n.id === id);
+        if (it){ it.deleted = r.id ? Math.floor(Date.now()/1000) : Date.now()/1000; it.deleted_title = it.title; }
+      } else {
+        selNotes.delete(id);
+        idx = idx.filter(n => n.id !== id);
+      }
+      openTabs = openTabs.filter(t => t !== id);   // 同步关闭对应标签页
+      persistTabs();
+      if (currentId === id){
+        currentId = null;
+        $('#edSrc').value = ''; $('#edTitle').value = ''; renderPreview();
+        if (liveEd) liveEd.refresh();
+        updateCrumb();
+      }
+      renderTabs();
+      if (meta.pinned){
+        showToast('常驻笔记已自动重建');
+        await load();   // 后端拉取时自动重建常驻笔记
+        return;
+      }
+      if (!currentId){
+        /* 删的是当前页：优先切到剩余标签页，无标签才回落第一篇 */
+        if (openTabs.length) open(openTabs[openTabs.length - 1]);
+        else if (idx.length) open(idx[0].id);
+      }
+      renderTree();
+      showToast(r && r.softDeleted ? '已移到回收站（保留 N 天）' : '已删除');
+    } catch (e) { showToast(e.message, 'err'); }
   }
 
   /* ---------- 文件夹（支持在文件夹内再建文件夹） ---------- */
@@ -992,9 +1096,17 @@ const Notes = (() => {
     try {
       await API.put('/api/notes/' + id, { folder });
       const meta = idx.find(n => n.id === id);
+      const prevFolder = meta ? meta.folder : '';
       if (meta) meta.folder = folder;
       renderTree();
             showToast(folder ? `已移入文件夹「${folder}」` : '已移回线上笔记');
+      /* 同步笔记移出本地同步区间：立即从 mapping 移除 + 触发对账（v0.2.15 BUG 修复：
+         否则 syncIds 还留 id，下一轮 renderTree 仍把它藏到「同步笔记」分区，线上看不到） */
+      if (window.LocalSync && prevFolder && folder !== prevFolder){
+        const rootFrom = prevFolder.split('/')[0];
+        const rootTo = (folder || '').split('/')[0];
+        if (rootFrom !== rootTo) LocalSync.detachById(id);
+      }
     } catch (e) { showToast(e.message, 'err'); }
   }
 
@@ -1009,6 +1121,8 @@ const Notes = (() => {
       }
             renderTree();
       showToast(`${ids.length} 篇笔记${folder ? `已移入「${folder}」` : '已移回线上笔记'}`);
+      /* 同步范围整体脱离：统一 detach（v0.2.15 BUG 修复） */
+      if (window.LocalSync && folder !== undefined) LocalSync.detachMany(ids);
     } catch (e) { showToast(e.message, 'err'); }
   }
 
@@ -1232,12 +1346,13 @@ const Notes = (() => {
       });
     }
 
-    function readEntries(reader, out){
+    function readEntries(reader, out, prefix){
+      /* prefix 透传到子项，让后端 import-files 看到完整相对路径以建对应文件夹 */
       return new Promise(resolve => {
         function readBatch(){
           reader.readEntries(async entries => {
             if (!entries.length) return resolve();
-            for (const e of entries) await walkEntry(e, '', out);
+            for (const e of entries) await walkEntry(e, prefix || '', out);
             readBatch();
           });
         }
@@ -1250,9 +1365,11 @@ const Notes = (() => {
         if (entry.name.startsWith('._') || entry.name === 'Thumbs.db' || entry.name === '.DS_Store') return;
         const file = await new Promise(r => entry.file(r));
         const text = await file.text();
-        out.push({ path: prefix + entry.name, content: text });
+        out.push({ path: (prefix || '') + entry.name, content: text });
       } else if (entry.isDirectory){
-        await readEntries(entry.createReader(), out);
+        /* 子文件夹用 父prefix + 文件夹名 + '/' 作为下一级前缀，
+           否则后端 import-files 把所有 md 全部建到根目录、嵌套结构丢失（v0.2.15 BUG 修复） */
+        await readEntries(entry.createReader(), out, (prefix || '') + entry.name + '/');
       }
     }
     async function dropUploadSingle(file){
@@ -1397,6 +1514,33 @@ const Notes = (() => {
       if (e.target.closest('[data-sync-toggle]')){
         localStorage.setItem(SYNC_KEY, localStorage.getItem(SYNC_KEY) === '1' ? '0' : '1');
         renderTree();
+        return;
+      }
+      /* 回收站头：点击展开/收起；展开时按需拉取 */
+      if (e.target.closest('[data-trash-toggle]') && !e.target.closest('[data-trash-empty]')){
+        const head = e.target.closest('[data-trash-toggle]');
+        head.classList.toggle('closed');
+        const closed = head.classList.contains('closed');
+        localStorage.setItem(TRASH_KEY, closed ? '1' : '0');
+        if (!closed) loadTrash();   // 展开时按需拉；收起不重复
+        else renderTrashList();
+        return;
+      }
+      /* 一键清空回收站 */
+      if (e.target.closest('[data-trash-empty]')){
+        e.stopPropagation();
+        purgeAllTrash();
+        return;
+      }
+      /* 恢复 / 永久删单条回收站条目（必须在 data-trash-id 之内，避免误判笔记点击） */
+      if (e.target.closest('[data-trash-restore]')){
+        e.stopPropagation();
+        restoreTrash(e.target.closest('[data-trash-restore]').dataset.trashRestore);
+        return;
+      }
+      if (e.target.closest('[data-trash-purge]')){
+        e.stopPropagation();
+        purgeTrash(e.target.closest('[data-trash-purge]').dataset.trashPurge);
         return;
       }
       const assetDel = e.target.closest('[data-asset-del]');

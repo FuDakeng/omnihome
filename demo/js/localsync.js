@@ -71,6 +71,14 @@
   }
 
   /* ---------- 工具 ---------- */
+  /* 同步范围限定：本地文件夹（mapping）只与"用户笔记 + 线上笔记"的子集同步，
+     系统内置笔记（pinned / 每日计划 / 灵感速记）不参与（v0.2.15 BUG 修复） */
+  function inSyncScope(n){
+    if (!n) return false;
+    if (n.pinned) return false;
+    const f = (n.folder || '').split('/')[0];
+    return f !== '每日计划' && f !== '灵感速记';
+  }
   function safeName(s){
     const t = String(s || '').replace(/[\\/:*?"<>|]/g, '_').trim();
     return t || '未命名笔记';
@@ -240,14 +248,15 @@
         }
       }
 
-      /* 2) 本地文件消失 → 删除站点笔记（安全阀：单轮 >10 个暂停） */
+      /* 2) 本地文件消失 → 删除站点笔记（安全阀：单轮 >10 个暂停）；
+     非同步范围的笔记本就不该在 mapping 内，此处双检防误删内置（v0.2.15 BUG 修复） */
       const gone = Object.keys(mapping).filter(p => !byPath[p]);
       if (gone.length > 10){
         log('⚠ 检测到 ' + gone.length + ' 个本地文件同时消失，已暂停删除同步，请人工确认', true);
       } else {
         for (const p of gone){
           const m = mapping[p];
-          if (byId[m.id]){
+          if (byId[m.id] && inSyncScope(byId[m.id])){
             await API.del('/api/notes/' + m.id).catch(() => {});
             log('↓ 本地文件已删，同步删除站点笔记：' + (byId[m.id].title || p));
             changes++;
@@ -256,8 +265,9 @@
         }
       }
 
-      /* 3) 站点 → 本地：新增写入 / 重命名迁移 / 站点内容更新回写 */
+      /* 3) 站点 → 本地：仅同步范围内的笔记（v0.2.15 BUG 修复：不再把所有笔记含内置写入本地） */
       for (const n of notes){
+        if (!inSyncScope(n)) continue;          // 内置/常驻笔记不参与本地同步
         const want = uniquePath(expectedPath(n), n);
         const cur = idToPath[n.id];
         if (cur === want && byPath[want]){
@@ -280,6 +290,17 @@
         idToPath[n.id] = want; changes++;
         log(cur ? '↑ 站点重命名/移动，本地已更新：' + want : '↑ 站点新笔记已写入本地：' + want);
       }
+
+      /* 清理：mapping 中残留的、非同步范围内的 id 立即回收（避免误同步） */
+      Object.keys(mapping).forEach(p => {
+        const nid = mapping[p].id;
+        if (!inSyncScope(byId[nid])){
+          /* 该笔记已转内置/被删/不再同步，写到本地后又会被步骤 3 重新写出，
+             干脆从 mapping 中抹去，后续 reconcile 不会再去管它 */
+          delete mapping[p];
+          delete idToPath[nid];
+        }
+      });
 
       /* 清理双侧都已消失的残留映射 */
       Object.keys(mapping).forEach(p => { if (!byPath[p] && !byId[mapping[p].id]) delete mapping[p]; });
@@ -470,5 +491,29 @@
     /* 目录树「同步笔记」分区依赖的同步判断（同步读内存快照，renderTree 可直接调用） */
     isSyncedId: id => syncIds.has(id),
     isBound: () => !!dir,
+    /* v0.2.15 增：把同步笔记移出本地同步区间（拖到线上）时调用，立即从 mapping 中移除该 id，
+       同步笔记分区不再显示它，renderTree 自然在「线上笔记」分区看到，UI 立刻一致。
+       注意是本地的 mapping/syncIds 清理，不删站点笔记，也不删本地文件 */
+    async detachById(id){
+      let dirty = false;
+      for (const p of Object.keys(mapping)) if (mapping[p].id === id){ delete mapping[p]; dirty = true; }
+      if (syncIds.has(id)){ syncIds.delete(id); dirty = true; }
+      if (dirty){
+        try { localStorage.setItem('ls_ids', JSON.stringify([...syncIds])); } catch (_) {}
+        await idbSet('mapping', mapping);
+        try { if (window.Notes){ lsLoading = true; await Notes.load(); } } catch (_) {} finally { lsLoading = false; }
+      }
+    },
+    async detachMany(ids){
+      let dirty = false;
+      const set = new Set(ids);
+      for (const p of Object.keys(mapping)) if (set.has(mapping[p].id)){ delete mapping[p]; dirty = true; }
+      ids.forEach(id => { if (syncIds.has(id)){ syncIds.delete(id); dirty = true; } });
+      if (dirty){
+        try { localStorage.setItem('ls_ids', JSON.stringify([...syncIds])); } catch (_) {}
+        await idbSet('mapping', mapping);
+        try { if (window.Notes){ lsLoading = true; await Notes.load(); } } catch (_) {} finally { lsLoading = false; }
+      }
+    },
   };
 })();

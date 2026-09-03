@@ -359,6 +359,10 @@
       $('#dataBackups').textContent = s.backups + ' 份';
       $('#dataSize').textContent = App.fmtBytes(s.bytes) + ' 已用';
       $('#engineChip').textContent = ENGINE_LABEL[s.engine] || '文件存储';
+      /* v0.2.15 增：回收站保留天数回显 */
+      const prefs = await API.get('/api/settings').catch(() => ({}));
+      const days = (prefs && prefs.trashDays);
+      $('#trashDays').value = (days === 0 || days) ? days : 30;
       /* 备份设置回显 */
       const bc = s.backupCfg || {};
       $('#bkAuto').classList.toggle('on', !!bc.auto);
@@ -392,6 +396,16 @@
       loadData();
     } catch (e) { showToast(e.message, 'err'); }
     finally { $('#backupNow').disabled = false; }
+  });
+
+  /* 回收站保留天数（v0.2.15 增）：0 = 仅手动清空 */
+  $('#trashDaysSave')?.addEventListener('click', async () => {
+    const raw = parseInt($('#trashDays').value, 10);
+    const days = isNaN(raw) ? 30 : Math.max(0, Math.min(3650, raw));
+    try {
+      await API.put('/api/settings', { trashDays: days });
+      showToast(days === 0 ? '已关闭自动清理，仅手动清空' : `回收站保留 ${days} 天`);
+    } catch (e) { showToast(e.message, 'err'); }
   });
 
   /* 备份设置：自动备份开关 / 周期 / 保留份数 */

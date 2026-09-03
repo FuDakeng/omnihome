@@ -2275,10 +2275,17 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 .kb-folder-row:hover .kb-folder-del, .kb-folder-row:hover .kb-folder-add, .kb-folder-row:hover .kb-folder-more{ opacity: 1; }
 .kb-folder-body{
   display: flex; flex-direction: column; gap: 2px;
-  padding-left: 12px; margin-left: 13px;
+  padding-left: 12px;
+}
+/* 仅"直接挂载"在分区根下的文件夹体画树状竖线，二级往后避免叠加占空 */
+.kb-folder-root > .kb-folder-body{
+  margin-left: 13px;
   border-left: 1px solid var(--om-border);
 }
 .kb-empty{ font-size: 11px; color: var(--om-text-3); padding: 6px 10px; }
+
+/* 嵌套 .kb-folder 自身不输出额外外边距与边框（缩进由上一级 body 表达） */
+.kb-folder .kb-folder{ margin: 0; }
 
 /* 常驻笔记徽标 */
 .kb-pin{ display: inline-flex; margin-left: 6px; color: var(--om-warning); vertical-align: -1px; }

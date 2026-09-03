@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>万事屋 · 个人门户</title>
-<link rel="stylesheet" href="css/theme.css?v=0.2.22">
-<link rel="stylesheet" href="css/layout.css?v=0.2.22">
-<link rel="stylesheet" href="css/components.css?v=0.2.22">
+<link rel="stylesheet" href="css/theme.css?v=0.2.23">
+<link rel="stylesheet" href="css/layout.css?v=0.2.23">
+<link rel="stylesheet" href="css/components.css?v=0.2.23">
 <script>
 /* 首屏绘制前确定明暗，避免主题闪烁；未登录时登录页也据此渲染。
    优先级：本机上次的选择 → 系统偏好 → 深色兜底（html 标签上的初始值）。 */
@@ -63,6 +63,7 @@
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M17.9 17.9A10.8 10.8 0 0 1 12 19c-7 0-11-7-11-7a19.8 19.8 0 0 1 5.1-5.9M9.9 4.2A9.5 9.5 0 0 1 12 4c7 0 11 8 11 8a19.9 19.9 0 0 1-2.6 3.8M3 3l18 18"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 15h10l1-15M10 11v6M14 11v6"/></symbol>
+<symbol id="i-reply" viewBox="0 0 24 24"><path d="M9 17l-5-5 5-5M4 12h11a5 5 0 015 5v0a5 5 0 01-5 5h-3"/></symbol>
   <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
@@ -1144,6 +1145,26 @@
 
               <article class="card">
                 <div class="card-head">
+                  <h3 class="card-title"><svg class="ic"><use href="#i-trash"/></svg>回收站</h3>
+                  <span class="chip no-dot">被删除的笔记暂存，可恢复或永久清除</span>
+                </div>
+                <div class="card-pad">
+                  <div class="set-row" style="align-items:center">
+                    <div class="set-row-info">
+                      <div class="set-row-label">笔记保留天数</div>
+                      <div class="set-row-sub">超出后自动永久清除（设为 0 = 仅手动清空，不自动清）。常驻笔记（生词本）不进回收站，删除后由系统自动重建。</div>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px">
+                      <div class="input-wrap" style="width:96px"><input class="input num" type="number" id="trashDays" min="0" max="3650" value="30" style="padding-left:14px;height:34px"></div>
+                      <span style="font-size:12px;color:var(--om-text-3)">天</span>
+                      <button class="btn btn-outline btn-sm" id="trashDaysSave"><svg class="ic"><use href="#i-check"/></svg>保存</button>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="card-head">
                   <h3 class="card-title"><svg class="ic"><use href="#i-download"/></svg>备份与恢复</h3>
                   <span class="chip success">ZIP 打包 · 含全部用户数据</span>
                 </div>
@@ -1724,29 +1745,29 @@
 <!-- Markdown 渲染与消毒：优先本地 vendor（NAS 离线可用），失败再退回 CDN。
      之前只走 CDN，内网/离线部署会降级到内置简版渲染器，
      导致表格 / 参考链接 / 自动链接等 GFM 语法全部渲染不出来。 -->
-<script src="js/vendor/marked.min.js?v=0.2.22"
+<script src="js/vendor/marked.min.js?v=0.2.23"
         onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js';s.onerror=function(){console.warn('marked 本地与 CDN 均未加载，使用内置渲染')};document.head.appendChild(s);"></script>
-<script src="js/vendor/purify.min.js?v=0.2.22"
+<script src="js/vendor/purify.min.js?v=0.2.23"
         onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js';s.onerror=function(){console.warn('DOMPurify 本地与 CDN 均未加载')};document.head.appendChild(s);"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" onerror="console.warn('QRCode CDN 未加载')"></script>
-<script src="js/demo.js?v=0.2.22"></script>
-<script src="js/api.js?v=0.2.22"></script>
-<script src="js/app.js?v=0.2.22"></script>
-<script src="js/auth.js?v=0.2.22"></script>
-<script src="js/weather.js?v=0.2.22"></script>
-<script src="js/monitor.js?v=0.2.22"></script>
-<script src="js/word.js?v=0.2.22"></script>
-<script src="js/calendar.js?v=0.2.22"></script>
-<script src="js/bookmarks.js?v=0.2.22"></script>
-<script src="js/globalsearch.js?v=0.2.22"></script>
-<script src="js/vault.js?v=0.2.22"></script>
-<script src="js/livemd.js?v=0.2.22"></script>
-<script src="js/dashboard.js?v=0.2.22"></script>
-<script src="js/notes.js?v=0.2.22"></script>
-<script src="js/localsync.js?v=0.2.22"></script>
-<script src="js/plan.js?v=0.2.22"></script>
-<script src="js/toolbox.js?v=0.2.22"></script>
-<script src="js/settings.js?v=0.2.22"></script>
+<script src="js/demo.js?v=0.2.23"></script>
+<script src="js/api.js?v=0.2.23"></script>
+<script src="js/app.js?v=0.2.23"></script>
+<script src="js/auth.js?v=0.2.23"></script>
+<script src="js/weather.js?v=0.2.23"></script>
+<script src="js/monitor.js?v=0.2.23"></script>
+<script src="js/word.js?v=0.2.23"></script>
+<script src="js/calendar.js?v=0.2.23"></script>
+<script src="js/bookmarks.js?v=0.2.23"></script>
+<script src="js/globalsearch.js?v=0.2.23"></script>
+<script src="js/vault.js?v=0.2.23"></script>
+<script src="js/livemd.js?v=0.2.23"></script>
+<script src="js/dashboard.js?v=0.2.23"></script>
+<script src="js/notes.js?v=0.2.23"></script>
+<script src="js/localsync.js?v=0.2.23"></script>
+<script src="js/plan.js?v=0.2.23"></script>
+<script src="js/toolbox.js?v=0.2.23"></script>
+<script src="js/settings.js?v=0.2.23"></script>
 <!-- 附件灯箱：点击附件图片时大图预览，点背景或按 Esc 关闭 -->
 <div class="asset-lightbox" id="assetLightbox" hidden>
   <div class="asset-lightbox-mask" data-asset-close></div>
