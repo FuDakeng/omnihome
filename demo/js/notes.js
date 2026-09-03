@@ -10,7 +10,15 @@ const Notes = (() => {
   let currentId = null;
   let currentMode = 'split';
   let currentFolder = '';  // 新建笔记的默认文件夹（最近点选的）
-  const collapsed = new Set();
+  /* v0.2.25：目录默认折叠——expanded 记录已展开的文件夹（持久化），不在集合内即折叠 */
+  const EXPAND_KEY = 'omni.kb.expanded';
+  const expanded = new Set((() => {
+    try { return JSON.parse(localStorage.getItem(EXPAND_KEY) || '[]'); }
+    catch (_) { return []; }
+  })());
+  function persistExpanded(){
+    try { localStorage.setItem(EXPAND_KEY, JSON.stringify([...expanded])); } catch (_) {}
+  }
   let dirty = false;
   let saveTimer = null;
   let liveEd = null;       // LiveMD 实例（原地实时渲染）
@@ -457,17 +465,10 @@ const Notes = (() => {
     ]);
   }
 
-  /* ---------- 快速删除横条（拖入即删，多选批量） ---------- */
-  function showTrash(){
-    const t = $('#kbTrash'); if (!t || !dragState) return;
-    $('#kbTrashHint').textContent = dragState.kind === 'note'
-      ? `拖到此处删除 ${dragState.ids.length} 篇笔记`
-      : `拖到此处删除 ${dragState.ids.length} 个文件夹（笔记上移一层）`;
-    t.hidden = false;
-  }
-  function hideTrash(){
-    const t = $('#kbTrash'); if (!t) return;
-    t.hidden = true; t.classList.remove('drop-del');
+  /* ---------- 拖放删除高亮：目标为树列底部「回收站」条（v0.2.25 替代原全屏横条） ---------- */
+  function highlightTrash(on){
+    const t = $('#kbTreeFoot'); if (!t) return;
+    t.classList.toggle('kb-drop-del', !!on && !!dragState);
   }
 
   /* ---------- 加载 ---------- */
@@ -521,19 +522,17 @@ const Notes = (() => {
     return new Date(ts * 1000).toLocaleDateString('zh-CN');
   }
 
-  /* ---------- 树状目录渲染（按设计图：图标 + 标题 + 修改日期，单行） ---------- */
-  function noteItemHtml(n, depth){
+  /* ---------- 树状目录渲染（图标 + 标题 + ⋯，单行） ---------- */
+  function noteItemHtml(n){
     const pinned = n.pinned;
-    /* 只读笔记标题旁挂小锁；悬浮时日期位换成 ⋯ 操作按钮（弹菜单，不遮挡标题文本） */
+    /* 只读笔记标题旁挂小锁；悬浮时右侧为 ⋯ 操作按钮。
+       v0.2.25：不再显示最近修改时间，标题占满整行；时间/字数/大小收进 ⋯ → 查看详细 */
     const lock = n.readonly ? '<svg class="ic ni-icon" style="color:var(--om-text-3);width:11px;height:11px"><use href="#i-lock"/></svg>' : '';
-    /* 嵌套层级：嵌套在多级文件夹里的笔记行也用 inline margin-left 与兄弟文件夹行对齐（v0.2.23 加强） */
-    const extraPad = (depth || 0) * 14;
     return `
       <button class="note-item${n.id === currentId ? ' active' : ''}${selNotes.has(n.id) ? ' kb-selected' : ''}" data-note-id="${n.id}"${pinned ? '' : ' draggable="true"'}>
         <svg class="ic ni-icon"><use href="${pinned ? '#i-star' : '#i-note'}"/></svg>${lock}
-        <span class="ni-title" style="margin-left:${extraPad}px">${App.esc(n.title || '未命名笔记')}</span>
-        <span class="ni-date">${relTime(n.updated)}</span>
-        <span class="ni-act" data-note-act="${n.id}" title="笔记操作：新标签页打开 / 重命名 / 副本 / 只读 / 删除"><svg class="ic"><use href="#i-more"/></svg></span>
+        <span class="ni-title">${App.esc(n.title || '未命名笔记')}</span>
+        <span class="ni-act" data-note-act="${n.id}" title="笔记操作：查看详细 / 新标签页打开 / 重命名 / 副本 / 只读 / 删除"><svg class="ic"><use href="#i-more"/></svg></span>
       </button>`;
   }
 
@@ -553,17 +552,14 @@ const Notes = (() => {
   function renderFolder(f, depth){
     const notes = idx.filter(n => !n.pinned && n.folder === f);
     const subs = childFolders(f);
-    const open = !collapsed.has(f);
+    /* v0.2.25：默认折叠——expanded 集合记录已展开的文件夹（localStorage 持久化），不在集合内即折叠 */
+    const open = expanded.has(f);
     const locked = f === PLAN_FOLDER || f === QUICK_FOLDER;   // 内置/专属：不可拖拽挪位
-    const d = depth || 0;
-    /* 缩进完全靠 row 自带的 inline padding-left 表达（每层精确 +14px），
-       这样 CSS .kb-folder-body 不再 padding-left，多层嵌套时标题仍能完整显示（v0.2.23 加强） */
-    const rowPad = 8 + d * 14;
-    const inner = subs.map(s => renderFolder(s, d + 1)).join('')
-      + (notes.length ? notes.map(n => noteItemHtml(n, d + 1)).join('') : '');
+    const inner = subs.map(s => renderFolder(s)).join('')
+      + (notes.length ? notes.map(n => noteItemHtml(n)).join('') : '');
     return `
-      <div class="kb-folder${open ? ' open' : ''}${currentFolder === f ? ' current' : ''}${d === 0 ? ' kb-folder-root' : ''}">
-        <div class="kb-folder-row${selFolders.has(f) ? ' kb-selected' : ''}" style="padding-left:${rowPad}px" data-folder-toggle="${App.esc(f)}"${locked ? '' : ' draggable="true"'}>
+      <div class="kb-folder${open ? ' open' : ''}${currentFolder === f ? ' current' : ''}${!depth ? ' kb-folder-root' : ''}">
+        <div class="kb-folder-row${selFolders.has(f) ? ' kb-selected' : ''}" data-folder-toggle="${App.esc(f)}"${locked ? '' : ' draggable="true"'}>
           <svg class="ic kb-chev"><use href="#i-chev-d"/></svg>
           <svg class="ic kb-folder-ic"><use href="#i-folder"/></svg>
           <span class="kb-folder-name" title="${App.esc(f)}">${App.esc(folderLabel(f))}</span>
@@ -677,19 +673,39 @@ const Notes = (() => {
     updateBatchBar();
   }
 
-  /* ---------- 回收站（v0.2.23 改为弹层：入口在树头「回收站」按钮） ---------- */
+  /* ---------- 回收站（v0.2.25：按原文件夹分组显示） ---------- */
   function renderTrashList(){
     const body = $('#kbTrashList');
     if (!body) return;
     if (!trash.length){ body.innerHTML = '<div class="kb-trash-empty">回收站是空的</div>'; return; }
-    body.innerHTML = trash.map(n => `
-      <div class="note-item kb-trash-row" data-trash-id="${App.esc(n.id)}" title="${App.esc(n.deleted_title || n.title || '未命名笔记')} · ${relTime(n.deleted)}删除">
-        <svg class="ic ni-icon" style="color:var(--om-text-3)"><use href="#i-trash"/></svg>
-        <span class="ni-title">${App.esc(n.deleted_title || n.title || '未命名笔记')}</span>
-        <span class="ni-date">${relTime(n.deleted)}</span>
-        <button class="icon-btn-xs kb-trash-restore" data-trash-restore="${App.esc(n.id)}" title="恢复到原文件夹"><svg class="ic"><use href="#i-reply"/></svg></button>
-        <button class="icon-btn-xs kb-trash-purge" data-trash-purge="${App.esc(n.id)}" title="永久删除"><svg class="ic"><use href="#i-trash"/></svg></button>
-      </div>`).join('');
+    /* 按原文件夹分组（保持删除时间倒序），未分组的归「未分组」；文件夹已删除的标注「已删除」 */
+    const groups = new Map();   // folder -> [note]
+    const order = [];
+    for (const n of trash){
+      const f = n.folder || '';
+      if (!groups.has(f)){ groups.set(f, []); order.push(f); }
+      groups.get(f).push(n);
+    }
+    const activeFolders = new Set(folders);
+    body.innerHTML = order.map(f => {
+      const items = groups.get(f);
+      const gone = f && !activeFolders.has(f);
+      const label = f
+        ? `${App.esc(f.split('/').pop())}${gone ? '<span class="chip no-dot" style="font-size:10px;padding:1px 6px;margin-left:6px" title="原文件夹已删除，恢复笔记时自动重建">文件夹已删除</span>' : ''}`
+        : '未分组';
+      return `
+      <div class="kb-trash-group">
+        <div class="kb-sec-title" style="padding:8px 0 2px"><svg class="ic"><use href="#i-folder"/></svg>${label}<span class="kb-count num" style="margin-left:auto">${items.length}</span></div>
+        ${items.map(n => `
+        <div class="note-item kb-trash-row" data-trash-id="${App.esc(n.id)}" title="${App.esc(n.deleted_title || n.title || '未命名笔记')} · ${relTime(n.deleted)}删除">
+          <svg class="ic ni-icon" style="color:var(--om-text-3)"><use href="#i-trash"/></svg>
+          <span class="ni-title">${App.esc(n.deleted_title || n.title || '未命名笔记')}</span>
+          <span class="ni-date">${relTime(n.deleted)}</span>
+          <button class="icon-btn-xs kb-trash-restore" data-trash-restore="${App.esc(n.id)}" title="恢复到原文件夹"><svg class="ic"><use href="#i-reply"/></svg></button>
+          <button class="icon-btn-xs kb-trash-purge" data-trash-purge="${App.esc(n.id)}" title="永久删除"><svg class="ic"><use href="#i-trash"/></svg></button>
+        </div>`).join('')}
+      </div>`;
+    }).join('');
   }
   /* 拉回收站 + trashDays 显示 */
   async function loadTrash(){
@@ -844,6 +860,7 @@ const Notes = (() => {
     const meta = idx.find(n => n.id === id);
     if (!meta) return;
     kbMenu(anchor, [
+      ['查看详细', 'i-search', () => showNoteInfo(id)],
       ['在新标签页打开', 'i-note', () => open(id)],
       ['导出为 .md', 'i-download', () => API.dl('/api/notes/' + id + '/export')],
       ['重命名', 'i-pen', async () => {
@@ -881,6 +898,32 @@ const Notes = (() => {
       }],
       ['删除笔记', 'i-trash', () => del(id)],
     ]);
+  }
+
+  /* ---------- 笔记详情弹层（v0.2.25：⋯ 菜单 → 查看详细） ---------- */
+  async function showNoteInfo(id){
+    const meta = idx.find(n => n.id === id);
+    if (!meta) return;
+    $('#kbInfoTitle').textContent = meta.title || '未命名笔记';
+    $('#kbInfoUpdated').textContent = new Date((meta.updated || 0) * 1000)
+      .toLocaleString('zh-CN', { hour12: false });
+    $('#kbInfoType').textContent = meta.pinned ? 'Markdown 笔记（常驻）'
+      : meta.readonly ? 'Markdown 笔记（只读）' : 'Markdown 笔记';
+    $('#kbInfoFolder').textContent = meta.folder || '未分组（线上笔记）';
+    $('#kbInfoChars').textContent = '…';
+    $('#kbInfoSize').textContent = '…';
+    App.openModal('kbInfoMask');
+    try {
+      const d = await API.get('/api/notes/' + encodeURIComponent(id));
+      const content = d.content || '';
+      const text = content.replace(/\s+/g, '');           // 去空白后的字符数（正文字数口径）
+      const bytes = new Blob([content]).size;             // UTF-8 字节数
+      $('#kbInfoChars').textContent = text.length.toLocaleString('zh-CN') + ' 字';
+      $('#kbInfoSize').textContent = App.fmtBytes(bytes);
+    } catch (e) {
+      $('#kbInfoChars').textContent = '读取失败';
+      $('#kbInfoSize').textContent = '—';
+    }
   }
 
   /* ---------- 打开 / 保存 ---------- */
@@ -1036,7 +1079,7 @@ const Notes = (() => {
     const full = parent ? parent + '/' + name.trim() : name.trim();
     try {
       await API.post('/api/notes/folders', { name: full });
-      if (parent) collapsed.delete(parent);   // 展开父级让新文件夹可见
+      if (parent){ expanded.add(parent); persistExpanded(); }   // 展开父级让新文件夹可见
       currentFolder = full;
       await load();
       showToast(`文件夹「${name.trim()}」已创建`);
@@ -1048,16 +1091,17 @@ const Notes = (() => {
     if (!await App.confirmModal({
       title: `删除文件夹「${folderLabel(name)}」？`,
       sub: hasSub
-        ? '其中的笔记会移到上级文件夹，内部子文件夹将一并删除（笔记本身不会删除）。'
-        : '其中的笔记将移到上级文件夹，笔记本身不会删除。',
+        ? '内部子文件夹将一并删除，其中的笔记全部移入回收站（可恢复，原文件夹在恢复时自动重建）。'
+        : '其中的笔记将全部移入回收站（可恢复，原文件夹在恢复时自动重建）。',
       okText: '删除', danger: true,
     })) return;
     try {
-      await API.del('/api/notes/folders/' + encodeURIComponent(name));
+      const r = await API.del('/api/notes/folders/' + encodeURIComponent(name));
       if (currentFolder === name) currentFolder = '';
-      collapsed.delete(name);
+      expanded.delete(name); persistExpanded();
       await load();
-      showToast('文件夹已删除');
+      showToast(`文件夹已删除（${(r && r.trashed) || 0} 篇笔记进回收站）`);
+      if (r && r.trashed) loadTrash();
     } catch (e) { showToast(e.message, 'err'); }
   }
 
@@ -1087,7 +1131,7 @@ const Notes = (() => {
             await API.put('/api/notes/' + n.id, { folder: newF + (n.folder || '').slice(f.length) });
           /* 删旧文件夹树：笔记已迁空，后端「内容上移」逻辑不会再触发 */
           await API.del('/api/notes/folders/' + encodeURIComponent(f));
-          collapsed.delete(f);
+          expanded.add(f); persistExpanded();
           if (currentFolder === f) currentFolder = newF;
           await load();
           showToast(`文件夹已重命名为「${trimmed}」`);
@@ -1189,7 +1233,7 @@ const Notes = (() => {
         await API.put('/api/notes/' + n.id, { folder: nf });
         n.folder = nf;
       }
-      collapsed.clear();
+      expanded.clear(); persistExpanded();
       await load();
       showToast(moved.length > 1
         ? `已移动 ${moved.length} 个文件夹`
@@ -1318,6 +1362,9 @@ const Notes = (() => {
     $('#kbTrashClose')?.addEventListener('click', () => App.closeModal('kbTrashMask'));
     $('#kbTrashPurgeAll')?.addEventListener('click', purgeAllTrash);
     $('#kbTrashMask')?.addEventListener('click', e => { if (e.target === $('#kbTrashMask')) App.closeModal('kbTrashMask'); });
+    /* 笔记详情弹层 */
+    $('#kbInfoClose')?.addEventListener('click', () => App.closeModal('kbInfoMask'));
+    $('#kbInfoMask')?.addEventListener('click', e => { if (e.target === $('#kbInfoMask')) App.closeModal('kbInfoMask'); });
     /* 编辑区顶栏由全局 .topbar 承载（#globalSearch 等 demo.js 已绑）；
        此处不再绑定 kbBack / kbEditorSearch / kbAvatar / kbDate */
     /* 单篇导出/删除已随 0.2.18 顶栏移除，入口收进笔记悬浮 ⋯ 菜单（openNoteMenu） */
@@ -1446,7 +1493,7 @@ const Notes = (() => {
       const f = e.target.closest('[data-crumb=folder]');
       if (f){
         const path = f.dataset.folder;
-        if (collapsed.has(path)){ collapsed.delete(path); renderTree(); }
+        if (!expanded.has(path)){ expanded.add(path); persistExpanded(); renderTree(); }
         setTimeout(() => {
           const row = document.querySelector('[data-folder-toggle="' + path + '"]');
           row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -1590,7 +1637,8 @@ const Notes = (() => {
         }
         /* 普通点击：退出多选状态，避免选中效果残留 */
         selNotes.clear(); selFolders.clear(); selAssets.clear();
-        if (collapsed.has(f)) collapsed.delete(f); else collapsed.add(f);
+        if (expanded.has(f)) expanded.delete(f); else expanded.add(f);
+        persistExpanded();
         currentFolder = f;
         renderTree();
         return;
@@ -1623,7 +1671,6 @@ const Notes = (() => {
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', id);
         setTimeout(() => item.classList.add('dragging'), 0);
-        showTrash();
         return;
       }
       if (row){
@@ -1635,7 +1682,6 @@ const Notes = (() => {
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', f);
         setTimeout(() => row.classList.add('dragging'), 0);
-        showTrash();
       }
       if (assetRow){
         /* 拖动附件 → 编辑区可在光标位置插入引用；多选时批量插入 */
@@ -1651,7 +1697,7 @@ const Notes = (() => {
       const item = e.target.closest ? e.target.closest('[data-note-id], [data-folder-toggle]') : null;
       if (item) item.classList.remove('dragging');
       dragState = null;
-      hideTrash();
+      highlightTrash(false);
       $$('.kb-drop-hint', tree).forEach(x => x.classList.remove('kb-drop-hint'));
     });
     tree.addEventListener('dragover', e => {
@@ -1726,36 +1772,43 @@ const Notes = (() => {
       const ok = await App.confirmModal({
         title: dels.length > 1 ? `删除 ${dels.length} 个文件夹？`
           : `删除文件夹「${folderLabel(dels[0])}」？`,
-        sub: '其中的笔记会移到上级文件夹，内部子文件夹将一并删除（笔记本身不会删除）。',
+        sub: '内部子文件夹将一并删除，其中的笔记全部移入回收站（可恢复，原文件夹在恢复时自动重建）。',
         okText: '删除', danger: true,
       });
       if (!ok) return;
+      let trashed = 0;
       for (const f of dels){
         await API.del('/api/notes/folders/' + encodeURIComponent(f))
+          .then(r => { trashed += (r && r.trashed) || 0; })
           .catch(e2 => showToast(e2.message, 'err'));
         if (currentFolder === f) currentFolder = '';
-        collapsed.delete(f);
+        expanded.delete(f); persistExpanded();
       }
       selFolders.clear();
       await load();
-      showToast(dels.length > 1 ? `已删除 ${dels.length} 个文件夹` : '文件夹已删除');
+      showToast(dels.length > 1
+        ? `已删除 ${dels.length} 个文件夹（${trashed} 篇笔记进回收站）`
+        : `文件夹已删除（${trashed} 篇笔记进回收站）`);
+      if (trashed) loadTrash();
     }
 
-    /* 快速删除横条：拖拽落到此处即删（多选批量；内置项自动跳过） */
-    const trash = $('#kbTrash');
-    trash.addEventListener('dragover', e => {
+    /* 快速删除：拖拽落到树列底部「回收站」条即删（v0.2.25 替代原全屏横条；内置项自动跳过） */
+    const foot = $('#kbTreeFoot');
+    foot.addEventListener('dragover', e => {
       if (!dragState) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
-      trash.classList.add('drop-del');
+      foot.classList.add('kb-drop-del');
     });
-    trash.addEventListener('dragleave', () => trash.classList.remove('drop-del'));
-    trash.addEventListener('drop', async e => {
+    foot.addEventListener('dragleave', e => {
+      if (!foot.contains(e.relatedTarget)) foot.classList.remove('kb-drop-del');
+    });
+    foot.addEventListener('drop', async e => {
       if (!dragState) return;
       e.preventDefault();
       const { kind, ids } = dragState;
       dragState = null;
-      hideTrash();
+      highlightTrash(false);
       $$('.kb-drop-hint', tree).forEach(x => x.classList.remove('kb-drop-hint'));
       if (kind === 'note') await bulkDeleteNotes(ids);
       else await bulkDeleteFolders(ids);

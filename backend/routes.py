@@ -1340,26 +1340,32 @@ def replace_folders(body: FoldersIn, authorization: Optional[str] = Header(None)
 
 @router.delete("/api/notes/folders/{name:path}")
 def delete_folder(name: str, authorization: Optional[str] = Header(None)):
+    """删除文件夹：子树内所有笔记一并软删进回收站（可恢复），文件夹从列表移除（v0.2.25）。"""
     username = require_user(authorization)
     if name == PLAN_FOLDER:
         raise HTTPException(403, "「每日计划」为系统内置文件夹，不可删除")
     folders = storage.user_json(username, "notes/folders.json", [])
     if name not in folders:
         raise HTTPException(404, "文件夹不存在")
-    parent = name.rsplit("/", 1)[0] if "/" in name else ""
     prefix = name + "/"
     removed = {name} | {f for f in folders if f.startswith(prefix)}
     folders = [f for f in folders if f not in removed]
     storage.save_user_json(username, "notes/folders.json", folders)
     idx = storage.notes_index(username)
+    now = int(time.time())
+    trashed = 0
     for item in idx:
         f = item.get("folder") or ""
-        # 本级与子文件夹内的笔记统一移到上级文件夹（顶层则回根目录）；
-        # 子文件夹本身从列表移除，即「子文件夹一并删除」
+        # 本级与子文件夹内的笔记统一软删进回收站（保留原 folder 快照以便整体恢复）
         if f == name or f.startswith(prefix):
-            item["folder"] = parent
+            if not item.get("pinned"):
+                item["deleted"] = now
+                item["deleted_title"] = item.get("title") or ""
+                trashed += 1
+            else:
+                item["folder"] = ""   # 常驻笔记不进回收站，归位根目录
     storage.save_notes_index(username, idx)
-    return {"ok": True}
+    return {"ok": True, "trashed": trashed}
 
 
 # ---------- 笔记附件：图片上传（剪贴板粘贴 / 拖拽 / 选择文件共用） ----------
@@ -1862,6 +1868,17 @@ def restore_note(nid: str, authorization: Optional[str] = Header(None)):
     hit.pop("deleted", None)
     hit.pop("deleted_title", None)
     hit["updated"] = int(time.time())
+    # 原文件夹可能已随删除一起移除：恢复时自动补注册，否则笔记在目录树不可见
+    fp = (hit.get("folder") or "").strip("/")
+    if fp:
+        folders = storage.user_json(username, "notes/folders.json", [])
+        if fp not in folders:
+            cur = ""
+            for seg in fp.split("/"):
+                cur = seg if not cur else cur + "/" + seg
+                if cur not in folders:
+                    folders.append(cur)
+            storage.save_user_json(username, "notes/folders.json", folders)
     storage.save_notes_index(username, idx)
     return {"ok": True, "restored": True}
 

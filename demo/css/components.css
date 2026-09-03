@@ -2273,25 +2273,37 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 .kb-count{ font-size: 10px; color: var(--om-text-3); }
 .kb-folder-del, .kb-folder-add, .kb-folder-more{ opacity: 0; transition: opacity var(--om-t-fast); }
 .kb-folder-row:hover .kb-folder-del, .kb-folder-row:hover .kb-folder-add, .kb-folder-row:hover .kb-folder-more{ opacity: 1; }
-/* 嵌套缩进：完全靠 row 自带的 inline padding-left（每层 +14px）精确表达，
-   body 不再 padding-left，避免多层累加把标题挤成 1-2 字（v0.2.23 加强） */
+/* 嵌套缩进：靠 .kb-folder-body 的 padding-left 嵌套传递（每层 12px），
+   顶层 body 额外挂树状竖线（仅第一层，避免叠加占空） */
 .kb-folder-body{
   display: flex; flex-direction: column; gap: 2px;
+  padding-left: 12px;
 }
-/* 顶层 row 起始缩进（覆盖 .kb-folder-row 的 7px 8px） */
-.kb-folder-root > .kb-folder-row{
-  padding-left: 8px !important;
-}
-/* 顶层 body 画树状竖线（仅第一层避免叠加占空） */
 .kb-folder-root > .kb-folder-body{
   margin-left: 13px;
   border-left: 1px solid var(--om-border);
   padding-left: 0;
 }
+/* 文件夹笔记数统计居右 */
+.kb-folder-row .kb-count{ margin-left: auto; }
 .kb-empty{ font-size: 11px; color: var(--om-text-3); padding: 6px 10px; }
 
 /* 嵌套 .kb-folder 自身不输出额外外边距与边框（缩进由上一级 body 表达） */
 .kb-folder .kb-folder{ margin: 0; }
+
+/* 树列底部条：回收站入口（v0.2.25 从树头移到这里，兼作拖放删除目标） */
+.kb-tree-foot{
+  display: flex; align-items: center;
+  padding: 8px 10px;
+  border-top: 1px solid var(--om-border);
+  background: var(--om-surface);
+}
+.kb-tree-foot.kb-drop-del{
+  outline: 2px dashed var(--om-danger);
+  outline-offset: -3px;
+  background: color-mix(in oklab, var(--om-danger) 10%, var(--om-surface));
+}
+.kb-tree-foot .kb-tree-sel{ margin-left: 0; }
 
 /* 常驻笔记徽标 */
 .kb-pin{ display: inline-flex; margin-left: 6px; color: var(--om-warning); vertical-align: -1px; }
@@ -2504,3 +2516,5 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 .kb-trash-row .kb-trash-restore:hover{ color: var(--om-primary); }
 .kb-trash-row .kb-trash-purge:hover{ color: var(--om-danger); }
 .kb-trash-empty{ font-size: 12px; color: var(--om-text-3); text-align: center; padding: 22px 0; }
+.kb-trash-group{ padding-bottom: 4px; }
+.kb-trash-group + .kb-trash-group{ border-top: 1px dashed var(--om-border); }
