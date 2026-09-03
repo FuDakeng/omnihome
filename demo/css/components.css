@@ -830,16 +830,17 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .note-item .ni-date{ font-size: 11px; color: var(--om-text-3); flex: none; }
-/* 悬浮操作按钮：悬浮时在日期位置滑出（不遮挡标题文本），点它弹操作菜单 */
+/* 悬浮操作按钮：悬浮时滑出。v0.2.26 改为 hover 才占位（display:none → grid），
+   非 hover 时不再挤占标题宽度——标题占满整行，仅在真正溢出时省略号截断 */
 .note-item .ni-act{
   flex: none; width: 22px; height: 22px;
-  display: grid; place-items: center;
+  display: none; place-items: center;
   border: 1px solid var(--om-border); border-radius: 6px;
   background: var(--om-surface); color: var(--om-text-3);
-  cursor: pointer; opacity: 0; transition: all var(--om-t-fast);
+  cursor: pointer;
 }
 .note-item .ni-act .ic{ width: 13px; height: 13px; }
-.note-item:hover .ni-act{ opacity: 1; }
+.note-item:hover .ni-act{ display: grid; opacity: 1; }
 .note-item:hover .ni-date{ display: none; }   /* 日期与操作按钮同位互斥，避免叠加遮挡 */
 .note-item .ni-act:hover{ color: var(--om-primary); border-color: var(--om-primary); }
 /* 旧的悬浮删除按钮与 ni-sub 已废弃（按设计图改为一行式：图标+标题+日期） */
@@ -1314,6 +1315,9 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
   z-index: 100;
 }
 .modal-mask.open{ opacity: 1; visibility: visible; }
+/* 确认框永远置顶：否则在其他 modal（如回收站弹层）内触发确认时，
+   同 z-index 下 DOM 靠后的弹层会盖住确认框（v0.2.26 修复「清空回收站」确认被遮） */
+#confirmMask{ z-index: 260; }
 .modal{
   width: min(420px, 92vw);
   border-radius: var(--om-radius-lg);
@@ -2271,8 +2275,10 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 .kb-folder-ic{ width: 14px; height: 14px; color: var(--om-warning); }
 .kb-folder-name{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-count{ font-size: 10px; color: var(--om-text-3); }
-.kb-folder-del, .kb-folder-add, .kb-folder-more{ opacity: 0; transition: opacity var(--om-t-fast); }
-.kb-folder-row:hover .kb-folder-del, .kb-folder-row:hover .kb-folder-add, .kb-folder-row:hover .kb-folder-more{ opacity: 1; }
+/* 悬浮新建/操作按钮：v0.2.26 改为 hover 才占位（原 opacity:0 常驻占位会把
+   笔记数统计挤离右缘、压缩标题可宽） */
+.kb-folder-del, .kb-folder-add, .kb-folder-more{ display: none; }
+.kb-folder-row:hover .kb-folder-del, .kb-folder-row:hover .kb-folder-add, .kb-folder-row:hover .kb-folder-more{ display: grid; opacity: 1; }
 /* 嵌套缩进：靠 .kb-folder-body 的 padding-left 嵌套传递（每层 12px），
    顶层 body 额外挂树状竖线（仅第一层，避免叠加占空） */
 .kb-folder-body{
@@ -2291,19 +2297,27 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 /* 嵌套 .kb-folder 自身不输出额外外边距与边框（缩进由上一级 body 表达） */
 .kb-folder .kb-folder{ margin: 0; }
 
-/* 树列底部条：回收站入口（v0.2.25 从树头移到这里，兼作拖放删除目标） */
+/* 树列底部条：回收站入口（v0.2.25 从树头移到这里，兼作拖放删除目标）
+   v0.2.26：整条为点击热区，按钮撑满舒展 */
 .kb-tree-foot{
-  display: flex; align-items: center;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border-top: 1px solid var(--om-border);
   background: var(--om-surface);
+  cursor: pointer;
+  transition: background var(--om-t-fast);
 }
+.kb-tree-foot:hover{ background: var(--om-surface-2); }
 .kb-tree-foot.kb-drop-del{
   outline: 2px dashed var(--om-danger);
   outline-offset: -3px;
   background: color-mix(in oklab, var(--om-danger) 10%, var(--om-surface));
 }
-.kb-tree-foot .kb-tree-sel{ margin-left: 0; }
+.kb-tree-foot .kb-tree-sel{
+  width: 100%;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 9px 12px;
+  background: transparent; border-color: transparent;
+}
 
 /* 常驻笔记徽标 */
 .kb-pin{ display: inline-flex; margin-left: 6px; color: var(--om-warning); vertical-align: -1px; }

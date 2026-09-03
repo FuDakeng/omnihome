@@ -1357,8 +1357,8 @@ const Notes = (() => {
       ['导出全部笔记', 'i-upload', () => API.dl('/api/notes/all')],
       ['本地文件夹同步', 'i-swap', () => window.LocalSync && LocalSync.openPanel()],
     ]));
-    /* 回收站按钮（v0.2.23 BUG 修复：替代原「多选」按钮位置，弹浮层而非侧栏分区） */
-    $('#kbTrashBtn')?.addEventListener('click', () => openTrashModal());
+    /* 回收站入口：v0.2.26 整个底部条都是点击热区（按钮只是视觉），点击弹层 */
+    $('#kbTreeFoot')?.addEventListener('click', () => openTrashModal());
     $('#kbTrashClose')?.addEventListener('click', () => App.closeModal('kbTrashMask'));
     $('#kbTrashPurgeAll')?.addEventListener('click', purgeAllTrash);
     $('#kbTrashMask')?.addEventListener('click', e => { if (e.target === $('#kbTrashMask')) App.closeModal('kbTrashMask'); });
@@ -1524,6 +1524,16 @@ const Notes = (() => {
       if (e.key === 'Escape' && $('#assetLightbox')?.classList.contains('open')) closeAssetPreview();
     });
 
+/* 回收站条目：恢复 / 永久删。
+   必须绑 document 委托（v0.2.26 修复按钮无响应）：列表在 #kbTrashMask 弹层内，
+   不在 #noteTree 子树中，绑在 noteTree 上的监听器永远收不到弹层内的点击 */
+    document.addEventListener('click', e => {
+      const rst = e.target.closest('[data-trash-restore]');
+      if (rst){ e.stopPropagation(); restoreTrash(rst.dataset.trashRestore); return; }
+      const prg = e.target.closest('[data-trash-purge]');
+      if (prg){ e.stopPropagation(); purgeTrash(prg.dataset.trashPurge); return; }
+    });
+
     /* 编辑区拖入附件 → 在光标处插入引用 */
     const edSrc = $('#edSrc');
     if (edSrc){
@@ -1595,17 +1605,6 @@ const Notes = (() => {
       if (e.target.closest('[data-sync-toggle]')){
         localStorage.setItem(SYNC_KEY, localStorage.getItem(SYNC_KEY) === '1' ? '0' : '1');
         renderTree();
-        return;
-      }
-      /* 回收站条目：恢复 / 永久删（列表在弹层内，document 委托免时序问题） */
-      if (e.target.closest('[data-trash-restore]')){
-        e.stopPropagation();
-        restoreTrash(e.target.closest('[data-trash-restore]').dataset.trashRestore);
-        return;
-      }
-      if (e.target.closest('[data-trash-purge]')){
-        e.stopPropagation();
-        purgeTrash(e.target.closest('[data-trash-purge]').dataset.trashPurge);
         return;
       }
       const assetDel = e.target.closest('[data-asset-del]');
