@@ -43,6 +43,29 @@ function parentDir(p) {
   return i > 0 ? String(p).slice(0, i) : '';
 }
 function nowMs() { return Date.now(); }
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+/* 把响应 JSON 解析失败转成「可定位」错误：服务端由 FastAPI 生成，JSON 必然合法，
+   一旦解析失败几乎都是响应字节在传输链路（反向代理 / 公网 / gzip）被截断或错位。
+   这里截取出错位置上下文，并对比「收到长度」与 content-length——两者不一致即传输截断。 */
+function diagnoseJsonError(e, text, resp, method, urlPath) {
+  const msg = (e && e.message) || String(e);
+  const m = /position (\d+)/.exec(msg);
+  const pos = m ? parseInt(m[1], 10) : -1;
+  const h = (resp && resp.headers) || {};
+  const ct = h['content-type'] || h['Content-Type'] || '?';
+  const clen = h['content-length'] || h['Content-Length'] || '?';
+  let where = '';
+  if (pos >= 0 && text) {
+    const a = Math.max(0, pos - 24);
+    const b = Math.min(text.length, pos + 24);
+    where = '｜出错处 …' + text.slice(a, pos) + '【' + (text.charAt(pos) || 'EOF') + '】' +
+      text.slice(pos + 1, b) + '…';
+  }
+  return new Error('服务端响应非法 JSON（' + method + ' ' + urlPath + '）：' + msg +
+    '｜status=' + (resp && resp.status) + ' content-type=' + ct +
+    ' 收到长度=' + (text ? text.length : 0) + ' content-length=' + clen + where);
+}
 
 /* ---------- 确认弹窗（Obsidian 无内置 confirm，返回 Promise<bool>） ---------- */
 class ConfirmModal extends Modal {
@@ -131,22 +154,46 @@ class OmniHomeSyncPlugin extends Plugin {
         .join('&');
       if (qs) url += (url.indexOf('?') >= 0 ? '&' : '?') + qs;
     }
-    const headers = { 'X-API-Key': this.settings.apiKey };
+    const headers = { 'X-API-Key': this.settings.apiKey, 'Accept': 'application/json' };
     const req = { url: url, method: method, headers: headers };
     if (opts.body !== undefined) {
       headers['Content-Type'] = 'application/json';
       req.contentType = 'application/json';
       req.body = JSON.stringify(opts.body);
     }
-    let resp;
-    try { resp = await requestUrl(req); }
-    catch (e) { throw new Error('无法连接服务端：' + ((e && e.message) || e)); }
-    if (resp.status === 401) throw new Error('API Key 无效或已吊销（401）');
-    if (resp.status >= 400) {
-      const d = resp.json || {};
-      throw new Error(d.detail || ('请求失败 ' + resp.status));
+
+    // 不用 resp.json 的隐式解析（失败时只抛一句无上下文的 SyntaxError）；改读 resp.text
+    // 手动 JSON.parse：网络错误或解析失败先重试（GET 幂等；POST 重试经服务端 LWW 判定为
+    // site-wins 不会重复写，安全），仍失败则抛出带 status/content-type/长度/出错片段的诊断。
+    const maxTries = 3;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= maxTries; attempt++) {
+      let resp;
+      try {
+        resp = await requestUrl(req);
+      } catch (e) {
+        lastErr = new Error('无法连接服务端：' + ((e && e.message) || e));
+        if (attempt < maxTries) { await sleep(300 * attempt); continue; }
+        throw lastErr;
+      }
+      if (resp.status === 401) throw new Error('API Key 无效或已吊销（401）');
+      const text = resp.text != null ? resp.text : '';
+      if (resp.status >= 400) {
+        let detail = '';
+        try { detail = (JSON.parse(text) || {}).detail || ''; } catch (e) { /* 错误体可能非 JSON */ }
+        throw new Error(detail || ('请求失败 ' + resp.status));
+      }
+      try {
+        return text ? JSON.parse(text) : {};
+      } catch (e) {
+        lastErr = diagnoseJsonError(e, text, resp, method, urlPath);
+        console.warn('[OmniHome Sync] 响应 JSON 解析失败（第 ' + attempt + '/' + maxTries +
+          ' 次）：', lastErr.message, '\n原始响应前 500 字：', text.slice(0, 500));
+        if (attempt < maxTries) { await sleep(300 * attempt); continue; }
+        throw lastErr;
+      }
     }
-    return resp.json;
+    throw lastErr || new Error('请求失败');
   }
   remoteList() {
     return this.api('GET', '/api/sync/list').then((d) => (d && d.files) || []);

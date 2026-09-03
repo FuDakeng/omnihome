@@ -2,11 +2,18 @@
 版本号唯一来源：打包、镜像构建、/api/about 均读取这里的 VERSION。
 每次发版请同步更新 VERSION 与 CHANGELOG（新版本置顶）。
 """
-VERSION = "0.2.27"
-STAGE = "Obsidian 双向同步插件 · /api/sync RESTful API · API Key 鉴权 · LWW 冲突 · 修复全新库笔记正文 NOT NULL"
+VERSION = "0.2.28"
+STAGE = "Obsidian 同步插件 HTTP 层加固 · 响应非法 JSON 自动重试 + 富诊断（定位传输截断）"
 
 # 更新日志（最新版本置顶）
 CHANGELOG = [
+    {
+        "version": "0.2.28",
+        "date": "2026-09-04",
+        "items": [
+            "修复：Obsidian 同步插件在部分网络下同步到一半报「Expected ',' or '}' after property value in JSON at position N」——服务端 FastAPI 生成的 JSON 必然合法（已用 Python→JavaScriptCore 往返测试覆盖引号/反斜杠/控制符/emoji/U+2028/长文均正常），根因是响应字节经反向代理 / 公网链路被截断或错位；插件 HTTP 层加固：不再用 resp.json 隐式解析，改读 resp.text 手动 JSON.parse，失败自动重试 3 次（GET 幂等；POST 重试经服务端 LWW 判为 site-wins 不重复写，安全），仍失败则抛出带 status / content-type / 收到长度 vs content-length / 出错位置上下文片段的诊断信息——「收到长度 ≠ content-length」即传输截断铁证，便于精确定位是代理截断、编码错位还是网关错误页（仅 obsidian-plugin/main.js 变更，服务端无改动）",
+        ],
+    },
     {
         "version": "0.2.27",
         "date": "2026-09-04",
