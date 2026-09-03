@@ -2098,13 +2098,17 @@ def sync_get_file(path: str, x_api_key: Optional[str] = Header(None, alias="X-AP
     if not meta:
         raise HTTPException(404, "文件不存在")
     content = storage.note_read(username, meta["id"], "")
-    return {"path": norm, "content": _note_to_md(meta, content).decode("utf-8"),
+    md = _note_to_md(meta, content)          # .md 字节（标题 H1 + 正文）
+    # 正文以 base64 下发：明文里的 <script>/<svg>/<?xml 等会被中间内容安全网关/WAF
+    # 当成 XSS 特征篡改（甚至 hex 化）响应体，令客户端 JSON 解析崩坏；base64 使其不透明。
+    return {"path": norm, "contentB64": base64.b64encode(md).decode("ascii"),
             "mtime": int(meta.get("updated") or 0) * 1000}
 
 
 class SyncFileIn(BaseModel):
     path: str
-    content: str = ""
+    content: str = ""                    # 旧客户端明文正文（回退用）
+    contentB64: Optional[str] = None     # 新客户端 base64 正文（优先；规避中间网关/WAF 篡改）
     clientMtime: Optional[int] = None    # 客户端本地文件 mtime（毫秒），用于 LWW
 
 
@@ -2118,7 +2122,16 @@ def sync_put_file(body: SyncFileIn,
     username = require_sync_user(x_api_key)
     norm = _validate_sync_path(body.path)
     folder, fname = _split_sync_path(norm)
-    title, body_md = _parse_md(body.content.encode("utf-8"), fname)
+    # 正文优先取 contentB64（base64 传输规避中间网关对 <script>/<svg> 等特征的篡改），
+    # 回退明文 content（兼容旧客户端）。
+    if body.contentB64:
+        try:
+            text = base64.b64decode(body.contentB64).decode("utf-8", "replace")
+        except Exception:
+            raise HTTPException(400, "contentB64 不是合法的 base64")
+    else:
+        text = body.content
+    title, body_md = _parse_md(text.encode("utf-8"), fname)
     meta = _resolve_sync_path(username, norm)
     client_mtime = int(body.clientMtime or 0)
 

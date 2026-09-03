@@ -18,6 +18,7 @@ storage 重定向到临时目录，file + sqlite 双引擎各跑一遍，结束�
 运行：cd backend && python3 _sync_regress.py
 """
 import json
+import base64
 import shutil
 import tempfile
 import time
@@ -75,6 +76,14 @@ def HK(key):
 
 def HA(tok):
     return {"Authorization": "Bearer " + tok}
+
+
+def gcontent(body):
+    """从 GET /api/sync/file 响应取正文：优先 base64 解码 contentB64（v0.2.29 新协议），
+    回退明文 content（旧协议）。与插件 decodeSyncContent 语义一致。"""
+    if isinstance(body.get("contentB64"), str):
+        return base64.b64decode(body["contentB64"]).decode("utf-8", "replace")
+    return body.get("content", "")
 
 
 def seed(title, folder="", content="", updated=None, pinned=False, deleted=None):
@@ -137,12 +146,34 @@ def run_suite(engine):
           r.text[:120])
     r = client.get("/api/sync/file", headers=HK(key), params={"path": "笔记A.md"})
     body = r.json()
-    check(f"[{engine}] GET 回读标题作 H1", body.get("content", "").startswith("# 笔记A"),
-          body.get("content", "")[:40])
-    check(f"[{engine}] GET 回读含正文", "正文内容" in body.get("content", ""), "")
+    md = gcontent(body)
+    check(f"[{engine}] GET 回读标题作 H1", md.startswith("# 笔记A"), md[:40])
+    check(f"[{engine}] GET 回读含正文", "正文内容" in md, "")
+    check(f"[{engine}] GET 正文走 contentB64（新协议、无明文 content）",
+          isinstance(body.get("contentB64"), str) and body.get("content") is None, str(list(body.keys())))
     idx = storage.notes_index(USER)
     check(f"[{engine}] 索引标题解析正确", any(i["title"] == "笔记A" for i in idx),
           str([i["title"] for i in idx]))
+
+    # base64 传输：正文含 HTML/JS/SVG 特征串时，响应体不得出现明文特征（对 WAF 不透明）
+    evil = ('# ev\n\n<script>document.createElement("iframe")</script>\n'
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<svg xmlns="http://www.w3.org/2000/svg" width="1em"><path d="M0 0"/></svg>\n')
+    b64 = base64.b64encode(evil.encode("utf-8")).decode("ascii")
+    rp = client.post("/api/sync/file", headers=HK(key),
+                     json={"path": "ev.md", "contentB64": b64, "clientMtime": 9_999_999_999_999})
+    check(f"[{engine}] POST contentB64 applied",
+          rp.status_code == 200 and rp.json().get("applied") is True, rp.text[:120])
+    rr = client.get("/api/sync/file", headers=HK(key), params={"path": "ev.md"})
+    raw = rr.content
+    check(f"[{engine}] 响应体对 WAF 不透明（无明文 <svg/<script/<?xml）",
+          (b"<svg" not in raw) and (b"<script" not in raw) and (b"<?xml" not in raw), "")
+    dec = gcontent(rr.json())
+    check(f"[{engine}] contentB64 往返无损（含 script/svg/iframe/xml）",
+          ('createElement("iframe")' in dec) and ("<svg xmlns=" in dec) and ("<?xml" in dec), dec[:60])
+    rb = client.post("/api/sync/file", headers=HK(key),
+                     json={"path": "bad.md", "contentB64": "!!!not-b64!!!"})
+    check(f"[{engine}] 非法 base64 返回 400", rb.status_code == 400, rb.text[:120])
 
     # 无 H1 -> 用文件名兜底标题
     r = client.post("/api/sync/file", headers=HK(key),

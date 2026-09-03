@@ -25,6 +25,10 @@ const LWW_WINDOW_MS = 2000;         // LWW 同刻窗口（站点优先）
 const LOCAL_STABLE_MS = 1000;       // 本地文件“已变更”判定容差
 const SELF_WRITE_MS = 4000;         // 自写抑制窗口（避免回环触发）
 
+/* 插件独立版本线（与服务端 app 版本解耦；须与 manifest.json 的 version 保持一致）。
+   打进启动日志与设置页，用户反馈报错时可一眼确认所装插件版本。 */
+const PLUGIN_VERSION = '0.0.1';
+
 const DEFAULT_SETTINGS = {
   serverUrl: '',
   apiKey: '',
@@ -45,16 +49,47 @@ function parentDir(p) {
 function nowMs() { return Date.now(); }
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
+/* ---------- base64 ↔ UTF-8 文本 ----------
+   同步正文一律经 base64 传输：笔记常含 <script>/<svg>/<?xml/iframe 等片段，明文放进 JSON
+   会被中间「内容安全网关 / WAF / 反代」当成 XSS 攻击特征，从而篡改（甚至 hex 化）响应体，
+   导致客户端 JSON.parse 在正文中途崩坏（实测 position 3581 处字面 <svg 被换成十六进制串）。
+   base64 后载荷只剩 [A-Za-z0-9+/=]，对内容过滤完全透明，彻底规避。
+   用 TextEncoder/TextDecoder + btoa/atob 实现，桌面(Electron)与移动端(Capacitor)均可用。 */
+function b64encode(str) {
+  const bytes = new TextEncoder().encode(String(str == null ? '' : str));
+  let bin = '';
+  const CH = 0x8000;                       // 分块 apply，避免超长参数栈溢出
+  for (let i = 0; i < bytes.length; i += CH) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  }
+  return btoa(bin);
+}
+function b64decode(b64) {
+  const bin = atob(String(b64 || ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+/* 从 GET /api/sync/file 响应取正文：优先 contentB64（新服务端），回退 content（旧服务端）。
+   两者皆无返回 null —— 服务端与插件版本不匹配，调用方应报错而非写入空正文（否则会清空本地笔记）。 */
+function decodeSyncContent(data) {
+  if (data && typeof data.contentB64 === 'string') return b64decode(data.contentB64);
+  if (data && typeof data.content === 'string') return data.content;
+  return null;
+}
+
 /* 把响应 JSON 解析失败转成「可定位」错误：服务端由 FastAPI 生成，JSON 必然合法，
-   一旦解析失败几乎都是响应字节在传输链路（反向代理 / 公网 / gzip）被截断或错位。
-   这里截取出错位置上下文，并对比「收到长度」与 content-length——两者不一致即传输截断。 */
+   一旦解析失败几乎都是响应字节在传输链路被中间设备（内容安全网关 / WAF / 反代）篡改：
+   明文正文里的 <script>/<svg>/<?xml 等被当成攻击特征改写或 hex 化，令 JSON 在中途崩坏。
+   （v0.0.1 起正文改走 base64 已规避此问题；保留诊断以备其它传输异常。）
+   截取出错位置上下文 + 完整响应头，便于判定是篡改还是截断。 */
 function diagnoseJsonError(e, text, resp, method, urlPath) {
   const msg = (e && e.message) || String(e);
   const m = /position (\d+)/.exec(msg);
   const pos = m ? parseInt(m[1], 10) : -1;
   const h = (resp && resp.headers) || {};
-  const ct = h['content-type'] || h['Content-Type'] || '?';
-  const clen = h['content-length'] || h['Content-Length'] || '?';
+  let hdump = '';
+  try { hdump = JSON.stringify(h); } catch (e2) { hdump = String(h); }
   let where = '';
   if (pos >= 0 && text) {
     const a = Math.max(0, pos - 24);
@@ -63,8 +98,9 @@ function diagnoseJsonError(e, text, resp, method, urlPath) {
       text.slice(pos + 1, b) + '…';
   }
   return new Error('服务端响应非法 JSON（' + method + ' ' + urlPath + '）：' + msg +
-    '｜status=' + (resp && resp.status) + ' content-type=' + ct +
-    ' 收到长度=' + (text ? text.length : 0) + ' content-length=' + clen + where);
+    '｜status=' + (resp && resp.status) +
+    ' 收到长度=' + (text ? text.length : 0) +
+    ' 响应头=' + String(hdump).slice(0, 300) + where);
 }
 
 /* ---------- 确认弹窗（Obsidian 无内置 confirm，返回 Promise<bool>） ---------- */
@@ -107,6 +143,10 @@ class OmniHomeSyncPlugin extends Plugin {
 
     this.statusBar = this.addStatusBarItem();
     this.setStatus(this.canSync() ? 'idle' : 'off');
+
+    // 启动即打印插件版本：用户反馈报错时可一眼确认所装版本（manifest 为准，常量兜底）
+    console.log('[OmniHome Sync] 插件版本 v' + ((this.manifest && this.manifest.version) || PLUGIN_VERSION) +
+      '（正文 base64 传输）已加载');
 
     this.addRibbonIcon('sync', 'OmniHome Sync：立即同步', () => this.manualSync());
     this.addCommand({ id: 'sync-now', name: '立即同步', callback: () => this.manualSync() });
@@ -200,7 +240,9 @@ class OmniHomeSyncPlugin extends Plugin {
   }
   remoteGet(path) { return this.api('GET', '/api/sync/file', { query: { path: path } }); }
   remotePut(path, content, clientMtime) {
-    return this.api('POST', '/api/sync/file', { body: { path: path, content: content, clientMtime: clientMtime } });
+    // 正文走 base64：请求体对内容安全网关/WAF 不透明，避免 <script>/<svg> 等特征被拦截或改写
+    return this.api('POST', '/api/sync/file',
+      { body: { path: path, contentB64: b64encode(content), clientMtime: clientMtime } });
   }
   remoteRename(oldPath, newPath) {
     return this.api('PUT', '/api/sync/file/rename', { body: { oldPath: oldPath, newPath: newPath } });
@@ -319,7 +361,11 @@ class OmniHomeSyncPlugin extends Plugin {
   }
   async pullFile(path, file, r, baseline) {
     const data = await this.remoteGet(path);
-    const content = (data && data.content) || '';
+    const content = decodeSyncContent(data);
+    if (content === null) {
+      // 既无 contentB64 也无 content：服务端与插件版本不匹配。绝不写空正文（会清空本地笔记）。
+      throw new Error('服务端响应缺少正文字段（contentB64/content），请将服务端更新到 0.2.29 及以上');
+    }
     this.markSelfWrite(path);
     let target = file;
     if (target) {
@@ -499,6 +545,11 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
     const plugin = this.plugin;
     containerEl.empty();
     containerEl.createEl('h2', { text: 'OmniHome Sync · 万事屋同步' });
+    containerEl.createEl('p', {
+      cls: 'omnihome-sync-help',
+      text: '插件版本 v' + ((plugin.manifest && plugin.manifest.version) || PLUGIN_VERSION) +
+        '　·　正文经 base64 传输（规避中间内容安全网关 / WAF 篡改响应导致的 JSON 解析崩坏）',
+    });
 
     new Setting(containerEl)
       .setName('服务端地址')

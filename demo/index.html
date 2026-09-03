@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>万事屋 · 个人门户</title>
-<link rel="stylesheet" href="css/theme.css?v=0.2.28">
-<link rel="stylesheet" href="css/layout.css?v=0.2.28">
-<link rel="stylesheet" href="css/components.css?v=0.2.28">
+<link rel="stylesheet" href="css/theme.css?v=0.2.29">
+<link rel="stylesheet" href="css/layout.css?v=0.2.29">
+<link rel="stylesheet" href="css/components.css?v=0.2.29">
 <script>
 /* 首屏绘制前确定明暗，避免主题闪烁；未登录时登录页也据此渲染。
    优先级：本机上次的选择 → 系统偏好 → 深色兜底（html 标签上的初始值）。 */
@@ -1812,29 +1812,29 @@
 <!-- Markdown 渲染与消毒：优先本地 vendor（NAS 离线可用），失败再退回 CDN。
      之前只走 CDN，内网/离线部署会降级到内置简版渲染器，
      导致表格 / 参考链接 / 自动链接等 GFM 语法全部渲染不出来。 -->
-<script src="js/vendor/marked.min.js?v=0.2.28"
+<script src="js/vendor/marked.min.js?v=0.2.29"
         onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js';s.onerror=function(){console.warn('marked 本地与 CDN 均未加载，使用内置渲染')};document.head.appendChild(s);"></script>
-<script src="js/vendor/purify.min.js?v=0.2.28"
+<script src="js/vendor/purify.min.js?v=0.2.29"
         onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js';s.onerror=function(){console.warn('DOMPurify 本地与 CDN 均未加载')};document.head.appendChild(s);"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" onerror="console.warn('QRCode CDN 未加载')"></script>
-<script src="js/demo.js?v=0.2.28"></script>
-<script src="js/api.js?v=0.2.28"></script>
-<script src="js/app.js?v=0.2.28"></script>
-<script src="js/auth.js?v=0.2.28"></script>
-<script src="js/weather.js?v=0.2.28"></script>
-<script src="js/monitor.js?v=0.2.28"></script>
-<script src="js/word.js?v=0.2.28"></script>
-<script src="js/calendar.js?v=0.2.28"></script>
-<script src="js/bookmarks.js?v=0.2.28"></script>
-<script src="js/globalsearch.js?v=0.2.28"></script>
-<script src="js/vault.js?v=0.2.28"></script>
-<script src="js/livemd.js?v=0.2.28"></script>
-<script src="js/dashboard.js?v=0.2.28"></script>
-<script src="js/notes.js?v=0.2.28"></script>
-<script src="js/localsync.js?v=0.2.28"></script>
-<script src="js/plan.js?v=0.2.28"></script>
-<script src="js/toolbox.js?v=0.2.28"></script>
-<script src="js/settings.js?v=0.2.28"></script>
+<script src="js/demo.js?v=0.2.29"></script>
+<script src="js/api.js?v=0.2.29"></script>
+<script src="js/app.js?v=0.2.29"></script>
+<script src="js/auth.js?v=0.2.29"></script>
+<script src="js/weather.js?v=0.2.29"></script>
+<script src="js/monitor.js?v=0.2.29"></script>
+<script src="js/word.js?v=0.2.29"></script>
+<script src="js/calendar.js?v=0.2.29"></script>
+<script src="js/bookmarks.js?v=0.2.29"></script>
+<script src="js/globalsearch.js?v=0.2.29"></script>
+<script src="js/vault.js?v=0.2.29"></script>
+<script src="js/livemd.js?v=0.2.29"></script>
+<script src="js/dashboard.js?v=0.2.29"></script>
+<script src="js/notes.js?v=0.2.29"></script>
+<script src="js/localsync.js?v=0.2.29"></script>
+<script src="js/plan.js?v=0.2.29"></script>
+<script src="js/toolbox.js?v=0.2.29"></script>
+<script src="js/settings.js?v=0.2.29"></script>
 <!-- 附件灯箱：点击附件图片时大图预览，点背景或按 Esc 关闭 -->
 <div class="asset-lightbox" id="assetLightbox" hidden>
   <div class="asset-lightbox-mask" data-asset-close></div>

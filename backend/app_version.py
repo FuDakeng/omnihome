@@ -2,11 +2,20 @@
 版本号唯一来源：打包、镜像构建、/api/about 均读取这里的 VERSION。
 每次发版请同步更新 VERSION 与 CHANGELOG（新版本置顶）。
 """
-VERSION = "0.2.28"
-STAGE = "Obsidian 同步插件 HTTP 层加固 · 响应非法 JSON 自动重试 + 富诊断（定位传输截断）"
+VERSION = "0.2.29"
+STAGE = "Obsidian 同步正文改走 base64 传输 · 规避中间 WAF/内容网关篡改响应导致的 JSON 崩坏 · 插件独立版本 0.0.1"
 
 # 更新日志（最新版本置顶）
 CHANGELOG = [
+    {
+        "version": "0.2.29",
+        "date": "2026-09-04",
+        "items": [
+            "修复：Obsidian 同步含 HTML/JS/SVG 的笔记时报「Expected ',' or '}' after property value in JSON at position N」并中断——本地 TestClient 复现证实服务端 FastAPI 直出的是合法 JSON（position 3581 处为字面 <svg 路径文本、Python json.loads 通过），而用户插件收到的却是同位置被 hex 化（6e636f64696e67… 解码即 ncoding=\"utf-8\"?><svg）、content-type 响应头被剥离的响应体：根因是公网反向代理 / 云 WAF / 内容安全网关扫描响应正文，把 <script>、<svg>、<?xml、document.createElement(\"iframe\") 等当成 XSS 攻击特征改写响应，令 JSON 在正文中途崩坏（0.2.28 判为「传输截断」不够准确，实为内容过滤型篡改）",
+            "方案：同步正文改走 base64 传输（双向）——GET /api/sync/file 返回 contentB64（base64(md 的 utf-8 字节)）取代明文 content；POST /api/sync/file 新增 contentB64 字段并优先解码、回退明文 content 兼容旧客户端；base64 后载荷只剩 [A-Za-z0-9+/=]，对内容过滤完全透明，WAF 无从下手。需服务端与插件一起更新（服务端 0.2.29 + 插件 0.0.1）",
+            "Obsidian 同步插件启用独立版本线（初始 0.0.1，与服务端 app 版本解耦）：版本号打进 manifest.json、插件启动 console 日志与设置页顶部，用户反馈时可一眼确认所装版本；pullFile 增加护栏——响应既无 contentB64 也无 content 时抛错而非写入空正文，杜绝版本不匹配时清空本地笔记",
+        ],
+    },
     {
         "version": "0.2.28",
         "date": "2026-09-04",
