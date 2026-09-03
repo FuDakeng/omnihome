@@ -29,8 +29,8 @@ const Notes = (() => {
   const PIN_KEY = 'omni.kb.pinned.hidden';
   const ASSET_KEY = 'omni.kb.assets.hidden';
   const SYNC_KEY = 'omni.kb.sync.hidden';   // 「同步笔记」分区折叠状态
-  const TRASH_KEY = 'omni.kb.trash.hidden'; // v0.2.15 增：「回收站」分区折叠状态
-  let trash = [];                        // 当前加载的回收站条目（懒加载，展开时拉）
+  let trash = [];                        // 当前加载的回收站条目（弹层打开时拉取）
+  let trashDays = null;                  // 回收站保留天数（后端下发；null=未知）
   const isPlan = f => f === PLAN_FOLDER || f.startsWith(PLAN_FOLDER + '/');
   const isQuick = f => f === QUICK_FOLDER || f.startsWith(QUICK_FOLDER + '/');
   const isBuiltin = f => isPlan(f) || isQuick(f);
@@ -480,9 +480,9 @@ const Notes = (() => {
       idx.sort((a, b) => (b.updated || 0) - (a.updated || 0));
       /* trashCount 用后端返回值同步头部（无需展开回收站） */
       if (typeof d.trashCount === 'number'){
-        const cnt = $('#kbTrashCount');
-        if (cnt) cnt.textContent = String(d.trashCount);
         try { localStorage.setItem('om_trash_count', String(d.trashCount)); } catch (_) {}
+        const badge = $('#kbTrashBadge');
+        if (badge){ badge.textContent = String(d.trashCount); badge.hidden = !d.trashCount; }
       }
       /* 恢复上次打开的标签页（刷新/切视图后），过滤已删除的笔记 */
       try {
@@ -499,6 +499,16 @@ const Notes = (() => {
       /* 本地同步钩子：load() 是所有站点侧变更（建/删/改名/导入/移动）的收敛点，
          防抖触发双向对账；reconcile 内部回调 Notes.load 时由 lsLoading 标志抑制回环 */
       if (window.LocalSync) LocalSync.onSiteChanged();
+      /* 初始化回收站保留天数缓存（供删除提示显示真实天数；仅首次拉） */
+      if (trashDays === null){
+        API.get('/api/notes/trash').then(d => {
+          trashDays = (d.trashDays === 0 || d.trashDays) ? d.trashDays : 30;
+          trash = d.notes || [];
+          try { localStorage.setItem('om_trash_count', String(trash.length)); } catch (_) {}
+          const badge = $('#kbTrashBadge');
+          if (badge){ badge.textContent = String(trash.length); badge.hidden = !trash.length; }
+        }).catch(() => {});
+      }
     } catch (e) { /* 未登录或网络异常，忽略 */ }
   }
 
@@ -512,14 +522,16 @@ const Notes = (() => {
   }
 
   /* ---------- 树状目录渲染（按设计图：图标 + 标题 + 修改日期，单行） ---------- */
-  function noteItemHtml(n){
+  function noteItemHtml(n, depth){
     const pinned = n.pinned;
     /* 只读笔记标题旁挂小锁；悬浮时日期位换成 ⋯ 操作按钮（弹菜单，不遮挡标题文本） */
     const lock = n.readonly ? '<svg class="ic ni-icon" style="color:var(--om-text-3);width:11px;height:11px"><use href="#i-lock"/></svg>' : '';
+    /* 嵌套层级：嵌套在多级文件夹里的笔记行也用 inline margin-left 与兄弟文件夹行对齐（v0.2.23 加强） */
+    const extraPad = (depth || 0) * 14;
     return `
       <button class="note-item${n.id === currentId ? ' active' : ''}${selNotes.has(n.id) ? ' kb-selected' : ''}" data-note-id="${n.id}"${pinned ? '' : ' draggable="true"'}>
         <svg class="ic ni-icon"><use href="${pinned ? '#i-star' : '#i-note'}"/></svg>${lock}
-        <span class="ni-title">${App.esc(n.title || '未命名笔记')}</span>
+        <span class="ni-title" style="margin-left:${extraPad}px">${App.esc(n.title || '未命名笔记')}</span>
         <span class="ni-date">${relTime(n.updated)}</span>
         <span class="ni-act" data-note-act="${n.id}" title="笔记操作：新标签页打开 / 重命名 / 副本 / 只读 / 删除"><svg class="ic"><use href="#i-more"/></svg></span>
       </button>`;
@@ -543,13 +555,15 @@ const Notes = (() => {
     const subs = childFolders(f);
     const open = !collapsed.has(f);
     const locked = f === PLAN_FOLDER || f === QUICK_FOLDER;   // 内置/专属：不可拖拽挪位
-    /* 嵌套缩进只由 .kb-folder-body 的 padding-left(12px) 表达（CSS v0.2.15）；
-       递归传 depth 仅用于给顶层（分区根下第一层）加 kb-folder-root 以决定是否画树状竖线 */
-    const inner = subs.map(s => renderFolder(s, (depth || 0) + 1)).join('')
-      + (notes.length ? notes.map(noteItemHtml).join('') : '');
+    const d = depth || 0;
+    /* 缩进完全靠 row 自带的 inline padding-left 表达（每层精确 +14px），
+       这样 CSS .kb-folder-body 不再 padding-left，多层嵌套时标题仍能完整显示（v0.2.23 加强） */
+    const rowPad = 8 + d * 14;
+    const inner = subs.map(s => renderFolder(s, d + 1)).join('')
+      + (notes.length ? notes.map(n => noteItemHtml(n, d + 1)).join('') : '');
     return `
-      <div class="kb-folder${open ? ' open' : ''}${currentFolder === f ? ' current' : ''}${(depth || 0) === 0 ? ' kb-folder-root' : ''}">
-        <div class="kb-folder-row${selFolders.has(f) ? ' kb-selected' : ''}" data-folder-toggle="${App.esc(f)}"${locked ? '' : ' draggable="true"'}>
+      <div class="kb-folder${open ? ' open' : ''}${currentFolder === f ? ' current' : ''}${d === 0 ? ' kb-folder-root' : ''}">
+        <div class="kb-folder-row${selFolders.has(f) ? ' kb-selected' : ''}" style="padding-left:${rowPad}px" data-folder-toggle="${App.esc(f)}"${locked ? '' : ' draggable="true"'}>
           <svg class="ic kb-chev"><use href="#i-chev-d"/></svg>
           <svg class="ic kb-folder-ic"><use href="#i-folder"/></svg>
           <span class="kb-folder-name" title="${App.esc(f)}">${App.esc(folderLabel(f))}</span>
@@ -568,13 +582,18 @@ const Notes = (() => {
     /* v0.2.15 增：被软删的笔记不进任何分区（拖入删除横条软删后不调 load 的场景兜底） */
     idx = idx.filter(n => !n.deleted);
     const pinned = idx.filter(n => n.pinned);
-    /* 同步判定：LocalSync 维护的同步笔记 id 快照（localStorage 同步可读） */
+    /* 同步笔记所在的一级目录集合：这些文件夹整体归入「同步笔记」分区。
+   必须排除内置根（每日计划 / 灵感速记）——否则被同步过的内置文件夹会永远挂在
+   syncRoots 里、在线上笔记区不可见且删不掉（v0.2.23 BUG 修复） */
     const isSynced = id => !!(window.LocalSync && LocalSync.isSyncedId(id));
+    const syncRoots = new Set();
+    for (const n of idx){
+      if (n.pinned || !isSynced(n.id) || !n.folder) continue;
+      const root = n.folder.split('/')[0];
+      if (root !== PLAN_FOLDER && root !== QUICK_FOLDER) syncRoots.add(root);
+    }
     const roots = idx.filter(n => !n.pinned && !n.folder && !isSynced(n.id));
     const pinHidden = localStorage.getItem(PIN_KEY) === '1';
-    /* 同步笔记所在的一级目录集合：这些文件夹整体归入「同步笔记」分区 */
-    const syncRoots = new Set();
-    for (const n of idx) if (!n.pinned && isSynced(n.id) && n.folder) syncRoots.add(n.folder.split('/')[0]);
     let html = '';
 
     /* 「线上笔记」分区（原「我的笔记」）：非同步的普通文件夹与未分组笔记归入此区 */
@@ -584,23 +603,17 @@ const Notes = (() => {
         <button class="icon-btn-xs kb-root-add" data-kb-add="" title="新建笔记或文件夹"><svg class="ic"><use href="#i-plus"/></svg></button>
       </div>`;
     for (const f of childFolders('')) if (!isBuiltin(f) && !syncRoots.has(f)) html += renderFolder(f);
-    html += roots.length ? roots.map(noteItemHtml).join('')
+    html += roots.length ? roots.map(n => noteItemHtml(n, 0)).join('')
       : '<div class="kb-empty">暂无笔记，点上方「新建笔记」开始</div>';
 
-    /* 回收站：常驻被删笔记按 pinned 重建不进此区；普通笔记进 trash 后显示计数，点击展开 */
-    const trashCount = +(document.getElementById('kbTrashCount')?.textContent || 0)
-      || +(localStorage.getItem('om_trash_count') || 0);
-    const trashHidden = localStorage.getItem(TRASH_KEY) === '1';
-    html += `
-      <div class="kb-sec-title kb-pin-head${trashHidden ? ' closed' : ''}" data-trash-toggle title="点击隐藏 / 展开回收站">
-        <svg class="ic kb-pin-chev"><use href="#i-chev-d"/></svg>
-        <svg class="ic"><use href="#i-trash"/></svg>回收站
-        <span class="kb-count num" id="kbTrashCount">${trashCount}</span>
-        ${trashCount > 0 ? '<button class="icon-btn-xs kb-root-add" data-trash-empty title="一键清空回收站"><svg class="ic"><use href="#i-trash"/></svg></button>' : ''}
-      </div>
-      <div id="kbTrashBody" ${trashHidden ? 'hidden' : ''}>
-        ${trashHidden ? '' : (trashCount ? '' : '<div class="kb-empty">回收站是空的</div>')}
-      </div>`;
+    /* 回收站不再做侧栏分区（v0.2.23 BUG 修复）：入口收进树头「回收站」按钮，弹浮层展示。
+   trashCount 同步到顶部按钮徽标 */
+    const trashCount = +(localStorage.getItem('om_trash_count') || 0);
+    const badge = $('#kbTrashBadge');
+    if (badge){
+      badge.textContent = String(trashCount);
+      badge.hidden = !trashCount;
+    }
 
     /* 「同步笔记」分区：绑定本地文件夹后，同步相关的文件/文件夹全部归入此区 */
     const syncCount = idx.filter(n => !n.pinned && isSynced(n.id)).length;
@@ -614,7 +627,7 @@ const Notes = (() => {
     if (!syncHidden){
       if (syncCount){
         for (const f of [...syncRoots].sort()) html += renderFolder(f);
-        html += idx.filter(n => !n.pinned && !n.folder && isSynced(n.id)).map(noteItemHtml).join('');
+        html += idx.filter(n => !n.pinned && !n.folder && isSynced(n.id)).map(n => noteItemHtml(n, 0)).join('');
       } else {
         html += '<div class="kb-empty">尚未绑定：知识库 ⋯ 菜单 → 本地文件夹同步</div>';
       }
@@ -651,7 +664,7 @@ const Notes = (() => {
         <span class="kb-count num">${builtinCount}</span>
       </div>`;
     if (!pinHidden){
-      html += pinned.map(noteItemHtml).join('');
+      html += pinned.map(n => noteItemHtml(n, 0)).join('');
       if (folders.includes(PLAN_FOLDER)) html += renderFolder(PLAN_FOLDER);
       if (folders.includes(QUICK_FOLDER)) html += renderFolder(QUICK_FOLDER);
     }
@@ -662,21 +675,13 @@ const Notes = (() => {
     /* 目录树附件缩略图水合：裸 <img> 请求不带凭证会被 401 拦成裂图（拖图上传后“图片损坏”的根因） */
     hydrateImages($('#noteTree'));
     updateBatchBar();
-    /* 回收站展开态：本地有缓存就用，没有就现拉一次（避免每次 renderTree 都重拉） */
-    if (!localStorage.getItem(TRASH_KEY) || localStorage.getItem(TRASH_KEY) !== '1'){
-      loadTrash();
-    }
   }
 
-  /* 回收站（v0.2.15 增）：渲染 trash 列表（受折叠状态控制） */
+  /* ---------- 回收站（v0.2.23 改为弹层：入口在树头「回收站」按钮） ---------- */
   function renderTrashList(){
-    const body = $('#kbTrashBody');
-    const head = document.querySelector('[data-trash-toggle]');
-    if (!body || !head) return;
-    const hidden = head.classList.contains('closed');
-    body.hidden = hidden;
-    if (hidden){ body.innerHTML = ''; return; }
-    if (!trash.length){ body.innerHTML = '<div class="kb-empty">回收站是空的</div>'; return; }
+    const body = $('#kbTrashList');
+    if (!body) return;
+    if (!trash.length){ body.innerHTML = '<div class="kb-trash-empty">回收站是空的</div>'; return; }
     body.innerHTML = trash.map(n => `
       <div class="note-item kb-trash-row" data-trash-id="${App.esc(n.id)}" title="${App.esc(n.deleted_title || n.title || '未命名笔记')} · ${relTime(n.deleted)}删除">
         <svg class="ic ni-icon" style="color:var(--om-text-3)"><use href="#i-trash"/></svg>
@@ -686,14 +691,25 @@ const Notes = (() => {
         <button class="icon-btn-xs kb-trash-purge" data-trash-purge="${App.esc(n.id)}" title="永久删除"><svg class="ic"><use href="#i-trash"/></svg></button>
       </div>`).join('');
   }
-  /* 拉一次回收站（懒加载：仅在展开时拉，collapse 时不重复） */
+  /* 拉回收站 + trashDays 显示 */
   async function loadTrash(){
     try {
       const d = await API.get('/api/notes/trash');
       trash = d.notes || [];
-      const cnt = $('#kbTrashCount'); if (cnt) cnt.textContent = String(trash.length);
+      trashDays = (d.trashDays === 0 || d.trashDays) ? d.trashDays : 30;
+      const dt = $('#kbTrashDaysTxt');
+      if (dt) dt.textContent = trashDays === 0 ? '永久' : trashDays;
+      const cnt = trash.length;
+      try { localStorage.setItem('om_trash_count', String(cnt)); } catch (_) {}
+      const badge = $('#kbTrashBadge');
+      if (badge){ badge.textContent = String(cnt); badge.hidden = !cnt; }
       renderTrashList();
     } catch (e) { /* 静默 */ }
+  }
+  function openTrashModal(){
+    App.openModal('kbTrashMask');
+    renderTrashList();
+    loadTrash();
   }
   async function restoreTrash(id){
     try {
@@ -748,10 +764,9 @@ const Notes = (() => {
     updateBatchBar();
   }
 
-  /* ---------- 显式多选模式：标题旁「多选」按钮开关，开启后普通点击即勾选 ---------- */
+  /* ---------- 显式多选模式：入口在树头 ⋯ 菜单（原「多选」按钮位置已改为回收站） ---------- */
   function setSelMode(on){
     selMode = on;
-    $('#kbSelModeBtn')?.classList.toggle('on', on);
     $('.kb-tree')?.classList.toggle('sel-mode', on);
     if (!on) clearAllSel();
     else renderTree();
@@ -990,7 +1005,22 @@ const Notes = (() => {
         else if (idx.length) open(idx[0].id);
       }
       renderTree();
-      showToast(r && r.softDeleted ? '已移到回收站（保留 N 天）' : '已删除');
+      if (r && r.softDeleted){
+        /* 保留天数：loadTrash 拉过就有真实值；未知时用中性文案（v0.2.23 BUG 修复：
+           原文案写死「保留 N 天」，与设置里 30 天对不上造成误导） */
+        showToast(trashDays === 0 ? '已移到回收站（未设自动清理）'
+          : trashDays ? `已移到回收站（保留 ${trashDays} 天）` : '已移到回收站');
+        /* 徽标 +1（本地估算，下次 load 对齐） */
+        try {
+          const c = parseInt(localStorage.getItem('om_trash_count') || '0', 10) + 1;
+          localStorage.setItem('om_trash_count', String(c));
+          const badge = $('#kbTrashBadge');
+          if (badge){ badge.textContent = String(c); badge.hidden = false; }
+        } catch (_) {}
+        loadTrash();   // 后台刷新真实计数与列表（弹层开着也同步）
+      } else {
+        showToast('已删除');
+      }
     } catch (e) { showToast(e.message, 'err'); }
   }
 
@@ -1276,14 +1306,18 @@ const Notes = (() => {
        原来 #noteNew / #folderNew 已从 HTML 移除，相应绑定也清掉。 */
     App.onEnter(load);
 
-    /* 顶部「多选」按钮：开关显式多选模式（免按 ⌘/Ctrl，点击即勾选） */
-    $('#kbSelModeBtn')?.addEventListener('click', () => setSelMode(!selMode));
     /* 顶部 "..." 溢出菜单：导入 / 导出（设计图把显眼按钮收纳收起） */
     $('#notesOverflowBtn')?.addEventListener('click', () => kbMenu($('#notesOverflowBtn'), [
+      ['多选模式', 'i-check', () => setSelMode(!selMode)],
       ['导入 Markdown / zip', 'i-download', () => importMd()],
       ['导出全部笔记', 'i-upload', () => API.dl('/api/notes/all')],
       ['本地文件夹同步', 'i-swap', () => window.LocalSync && LocalSync.openPanel()],
     ]));
+    /* 回收站按钮（v0.2.23 BUG 修复：替代原「多选」按钮位置，弹浮层而非侧栏分区） */
+    $('#kbTrashBtn')?.addEventListener('click', () => openTrashModal());
+    $('#kbTrashClose')?.addEventListener('click', () => App.closeModal('kbTrashMask'));
+    $('#kbTrashPurgeAll')?.addEventListener('click', purgeAllTrash);
+    $('#kbTrashMask')?.addEventListener('click', e => { if (e.target === $('#kbTrashMask')) App.closeModal('kbTrashMask'); });
     /* 编辑区顶栏由全局 .topbar 承载（#globalSearch 等 demo.js 已绑）；
        此处不再绑定 kbBack / kbEditorSearch / kbAvatar / kbDate */
     /* 单篇导出/删除已随 0.2.18 顶栏移除，入口收进笔记悬浮 ⋯ 菜单（openNoteMenu） */
@@ -1516,23 +1550,7 @@ const Notes = (() => {
         renderTree();
         return;
       }
-      /* 回收站头：点击展开/收起；展开时按需拉取 */
-      if (e.target.closest('[data-trash-toggle]') && !e.target.closest('[data-trash-empty]')){
-        const head = e.target.closest('[data-trash-toggle]');
-        head.classList.toggle('closed');
-        const closed = head.classList.contains('closed');
-        localStorage.setItem(TRASH_KEY, closed ? '1' : '0');
-        if (!closed) loadTrash();   // 展开时按需拉；收起不重复
-        else renderTrashList();
-        return;
-      }
-      /* 一键清空回收站 */
-      if (e.target.closest('[data-trash-empty]')){
-        e.stopPropagation();
-        purgeAllTrash();
-        return;
-      }
-      /* 恢复 / 永久删单条回收站条目（必须在 data-trash-id 之内，避免误判笔记点击） */
+      /* 回收站条目：恢复 / 永久删（列表在弹层内，document 委托免时序问题） */
       if (e.target.closest('[data-trash-restore]')){
         e.stopPropagation();
         restoreTrash(e.target.closest('[data-trash-restore]').dataset.trashRestore);
@@ -1678,6 +1696,14 @@ const Notes = (() => {
       idx = idx.filter(n => !delIds.includes(n.id));
       openTabs = openTabs.filter(t => !delIds.includes(t));   // 同步清理被删笔记的标签页
       persistTabs();
+      /* 徽标 +N（v0.2.23：批量删除同样进回收站） */
+      try {
+        const c = parseInt(localStorage.getItem('om_trash_count') || '0', 10) + delIds.length;
+        localStorage.setItem('om_trash_count', String(c));
+        const badge = $('#kbTrashBadge');
+        if (badge){ badge.textContent = String(c); badge.hidden = false; }
+      } catch (_) {}
+      showToast(`已移到回收站 ${delIds.length} 篇笔记`);
       if (delIds.includes(currentId)){
         currentId = null; dirty = false;
         $('#edSrc').value = ''; $('#edTitle').value = ''; renderPreview();
@@ -1690,8 +1716,9 @@ const Notes = (() => {
       renderTree();
       renderTabs();
       showToast(delIds.length - failed > 0
-        ? `已删除 ${delIds.length - failed} 篇笔记${failed ? `（${failed} 篇失败）` : ''}`
+        ? `已移到回收站 ${delIds.length - failed} 篇笔记${failed ? `（${failed} 篇失败）` : ''}`
         : '删除失败');
+      if (delIds.length - failed > 0) loadTrash();   // 后台刷新真实计数
     }
     async function bulkDeleteFolders(ids){
       const dels = ids.filter(f => f !== PLAN_FOLDER && f !== QUICK_FOLDER);

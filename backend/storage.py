@@ -155,8 +155,9 @@ _TABLES = {
         "desc": "知识库·笔记（Markdown 正文/标签/文件夹）",
         "cols": [("username", "VARCHAR(64)"), ("id", "VARCHAR(64)"),
                  ("title", "VARCHAR(255)"), ("tags", "TEXT"),
-                 ("pinned", "INTEGER"), ("folder", "VARCHAR(64)"),
-                 ("pos", "BIGINT"), ("content", "TEXT"), ("updated", "BIGINT")],
+                 ("pinned", "INTEGER"), ("folder", "VARCHAR(255)"),
+                 ("pos", "BIGINT"), ("content", "TEXT"), ("updated", "BIGINT"),
+                 ("deleted", "BIGINT"), ("deleted_title", "VARCHAR(255)")],
         "pk": ["username", "id"],
         "idx": [("username", "updated"), ("username", "pos")],
     },
@@ -313,10 +314,13 @@ def _sync_comments(conn, dialect: str):
 
 
 def _has_column(conn, table: str, col: str) -> bool:
+    """用 SELECT * ... LIMIT 0 的 cursor.description 判断列是否存在。
+    不能用 SELECT <col> ... LIMIT 1：sqlite 对此宽松（列不存在也不报错），
+    曾导致旧库补列逻辑被误跳过、新列永远补不上（v0.2.23 修复）。"""
     from sqlalchemy import text
     try:
-        conn.execute(text('SELECT "%s" FROM "%s" LIMIT 1' % (col, table)))
-        return True
+        res = conn.execute(text('SELECT * FROM "%s" LIMIT 0' % table))
+        return col in (res.keys() or [])
     except Exception:
         return False
 
@@ -326,15 +330,20 @@ def _ensure_tables(conn):
     from sqlalchemy import text
     for name, spec in _TABLES.items():
         conn.execute(text(_table_ddl(name, spec, mysql)))
-    # 已存在的旧表（hash 指纹列在旧库中缺失）补齐列（幂等）
+    # 已存在的旧表补齐缺失列（幂等）：hash 指纹列、bm_notes 软删两列（回收站 v0.2.23）
+    extra_cols = {"hash": "VARCHAR(32) NOT NULL DEFAULT ''"}
+    notes_spec = dict(_TABLES["bm_notes"])
+    for cname, ctype in notes_spec["cols"]:
+        if cname in ("deleted", "deleted_title"):
+            extra_cols[cname] = ctype
     for name, spec in _TABLES.items():
-        if any(c == "hash" for c, _ in spec["cols"]) and \
-                not _has_column(conn, name, "hash"):
-            try:
-                conn.execute(text('ALTER TABLE "%s" ADD COLUMN "hash" '
-                                  "VARCHAR(32) NOT NULL DEFAULT ''" % name))
-            except Exception:
-                pass
+        for c, t in spec["cols"]:
+            if c in extra_cols and not _has_column(conn, name, c):
+                try:
+                    conn.execute(text('ALTER TABLE "%s" ADD COLUMN "%s" %s'
+                                      % (name, c, extra_cols[c])))
+                except Exception:
+                    pass
     if not mysql:   # SQLite / PostgreSQL：建表后单独建索引（幂等）
         for name, spec in _TABLES.items():
             for idx in spec["idx"]:
@@ -790,7 +799,8 @@ def _sql_write_vault(conn, username: str, content: str):
 def _sql_read_notes_index(conn, username: str) -> str:
     from sqlalchemy import text
     rows = conn.execute(text(
-        'SELECT "id", "title", "tags", "pinned", "folder", "updated" '
+        'SELECT "id", "title", "tags", "pinned", "folder", "updated", '
+        '"deleted", "deleted_title" '
         'FROM "bm_notes" WHERE "username" = :u ORDER BY "pos", "id"'),
         {"u": username}).fetchall()
     out = []
@@ -799,9 +809,15 @@ def _sql_read_notes_index(conn, username: str) -> str:
             tags = json.loads(r.tags) if r.tags else []
         except json.JSONDecodeError:
             tags = []
-        out.append({"id": r.id, "title": r.title, "tags": tags,
-                    "pinned": bool(r.pinned), "folder": r.folder or "",
-                    "updated": r.updated})
+        item = {"id": r.id, "title": r.title, "tags": tags,
+                "pinned": bool(r.pinned), "folder": r.folder or "",
+                "updated": r.updated}
+        # 软删字段（回收站）：列可能尚不存在（旧库未补列），兜底 0/None
+        try: item["deleted"] = int(r.deleted) if r.deleted else 0
+        except (AttributeError, TypeError, ValueError): item["deleted"] = 0
+        try: item["deleted_title"] = r.deleted_title or ""
+        except AttributeError: item["deleted_title"] = ""
+        out.append(item)
     return json.dumps(out, ensure_ascii=False, indent=2)
 
 
@@ -822,27 +838,34 @@ def _sql_write_notes_index(conn, username: str, content: str):
                        "tags": json.dumps(item.get("tags") or [],
                                           ensure_ascii=False),
                        "pinned": 1 if item.get("pinned") else 0,
-                       "folder": item.get("folder") or "",
+                       "folder": (item.get("folder") or "")[:255],
                        "pos": i,
-                       "t": int(item.get("updated") or time.time())})
+                       "t": int(item.get("updated") or time.time()),
+                       "deleted": int(item.get("deleted") or 0),
+                       "deleted_title": (item.get("deleted_title") or "")[:255]})
     if params:
         sql = ('INSERT INTO "bm_notes" '
                '("username", "id", "title", "tags", "pinned", '
-               '"folder", "pos", "updated", "content") '
-               "VALUES (:u, :id, :title, :tags, :pinned, :folder, :pos, :t, '')")
+               '"folder", "pos", "updated", "content", "deleted", "deleted_title") '
+               "VALUES (:u, :id, :title, :tags, :pinned, :folder, :pos, :t, '', "
+               ":deleted, :deleted_title)")
         if _is_mysql(conn):
             sql += (" ON DUPLICATE KEY UPDATE \"title\" = VALUES(\"title\"), "
                     "\"tags\" = VALUES(\"tags\"), "
                     "\"pinned\" = VALUES(\"pinned\"), "
                     "\"folder\" = VALUES(\"folder\"), "
                     "\"pos\" = VALUES(\"pos\"), "
-                    "\"updated\" = VALUES(\"updated\")")
+                    "\"updated\" = VALUES(\"updated\"), "
+                    "\"deleted\" = VALUES(\"deleted\"), "
+                    "\"deleted_title\" = VALUES(\"deleted_title\")")
         else:
             sql += (' ON CONFLICT ("username", "id") DO UPDATE SET '
                     '"title" = excluded."title", "tags" = excluded."tags", '
                     '"pinned" = excluded."pinned", '
                     '"folder" = excluded."folder", "pos" = excluded."pos", '
-                    '"updated" = excluded."updated"')
+                    '"updated" = excluded."updated", '
+                    '"deleted" = excluded."deleted", '
+                    '"deleted_title" = excluded."deleted_title"')
         conn.execute(text(sql), params)
 
 

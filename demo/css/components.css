@@ -2273,14 +2273,20 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 .kb-count{ font-size: 10px; color: var(--om-text-3); }
 .kb-folder-del, .kb-folder-add, .kb-folder-more{ opacity: 0; transition: opacity var(--om-t-fast); }
 .kb-folder-row:hover .kb-folder-del, .kb-folder-row:hover .kb-folder-add, .kb-folder-row:hover .kb-folder-more{ opacity: 1; }
+/* 嵌套缩进：完全靠 row 自带的 inline padding-left（每层 +14px）精确表达，
+   body 不再 padding-left，避免多层累加把标题挤成 1-2 字（v0.2.23 加强） */
 .kb-folder-body{
   display: flex; flex-direction: column; gap: 2px;
-  padding-left: 12px;
 }
-/* 仅"直接挂载"在分区根下的文件夹体画树状竖线，二级往后避免叠加占空 */
+/* 顶层 row 起始缩进（覆盖 .kb-folder-row 的 7px 8px） */
+.kb-folder-root > .kb-folder-row{
+  padding-left: 8px !important;
+}
+/* 顶层 body 画树状竖线（仅第一层避免叠加占空） */
 .kb-folder-root > .kb-folder-body{
   margin-left: 13px;
   border-left: 1px solid var(--om-border);
+  padding-left: 0;
 }
 .kb-empty{ font-size: 11px; color: var(--om-text-3); padding: 6px 10px; }
 
@@ -2489,3 +2495,12 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 .ls-log-item{ font-size: 11.5px; line-height: 1.6; color: var(--om-text-2); word-break: break-all; }
 .ls-log-item.err{ color: var(--om-danger); }
 .ls-log-t{ color: var(--om-text-3); margin-right: 8px; font-variant-numeric: tabular-nums; }
+
+/* ---------- 知识库回收站弹层（v0.2.23） ---------- */
+.modal-trash{ width: min(520px, 94vw); }
+.kb-trash-row{ cursor: default; }
+.kb-trash-row .icon-btn-xs{ opacity: .6; transition: opacity var(--om-t-fast); }
+.kb-trash-row:hover .icon-btn-xs{ opacity: 1; }
+.kb-trash-row .kb-trash-restore:hover{ color: var(--om-primary); }
+.kb-trash-row .kb-trash-purge:hover{ color: var(--om-danger); }
+.kb-trash-empty{ font-size: 12px; color: var(--om-text-3); text-align: center; padding: 22px 0; }
