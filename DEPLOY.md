@@ -64,7 +64,16 @@ docker run -d --name omnihome --restart unless-stopped \
   整站迁移请连同整个 `data/` 目录一起备份；若只搬走用户数据而丢失该文件，
   已保存的 AI 密钥将无法解密，此时按「未配置」处理，在设置里重新填写即可，不影响其它数据
 
-## 四、常见问题
+## 四、Obsidian 同步（可选）
+
+0.2.27 起提供 Obsidian 双向同步插件，把门户知识库同步到 Obsidian 仓库（桌面 / 移动端）。
+
+- **无需额外挂载目录**：笔记继续存于 storage 抽象层（NAS 上是 PostgreSQL 的 `bm_notes` 表），`path`（`文件夹/标题.md`）只是逻辑寻址，**不落物理 `.md` 镜像**。因此 `docker-compose.yml` 的挂载与备份策略完全不变，`data/` 备份已涵盖同步数据。
+- **API Key 存于 `config.json`**：服务端只存 Key 的 sha256 哈希（`config.json` 的 `syncKeys`），明文不可逆推。备份 `data/` 时一并涵盖；重置 / 吊销后旧 Key 立即失效。
+- **移动端 / 公网访问安全**：手机在外网访问 NAS 门户时，需让门户可从公网到达（DDNS / 内网穿透，如 frp、Cloudflare Tunnel、Tailscale Funnel）。**强烈建议在反向代理上启用 HTTPS**——`X-API-Key` 是明文请求头，HTTP 明文传输有泄露风险。插件用 Obsidian `requestUrl` 发请求，绕过浏览器 CORS，跨域 / 移动端均可用。
+- 详细操作见 `docs/Obsidian同步插件-用户使用指南.md`，服务端 API 见 `docs/Obsidian同步插件-服务端API.md`，插件源码见 `obsidian-plugin/omnihome-sync/`。
+
+## 五、常见问题
 
 | 现象 | 处理 |
 |---|---|

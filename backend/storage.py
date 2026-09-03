@@ -10,8 +10,10 @@
 回查旧表（双读兜底），系统不会因迁移失败而不可用。
 全局配置（config.json）始终以文件存放，其中 storage 段记录当前引擎。
 """
+import hashlib
 import json
 import re
+import secrets
 import shutil
 import threading
 import time
@@ -80,6 +82,66 @@ def save_config(cfg: dict):
 
 def valid_username(name: str) -> bool:
     return bool(SAFE_NAME.match(name or ""))
+
+
+# ---------- Obsidian 同步 API Key（每用户一枚，sha256 哈希存全局 config） ----------
+# 为什么用哈希而非 secretbox 加密：API Key 只需「校验」不需「还原明文」，
+# 存单向哈希最安全——即便 config.json 泄露，攻击者也拿不到可用的原始 Key。
+# 明文仅在生成时返回一次（前端负责提示用户妥善保存）。
+# 存全局 config（始终文件存储、跨 file/sqlite/db 引擎一致），结构：
+#   config["syncKeys"] = { <sha256(raw)>: {"u": 用户名, "prefix": 明文前缀, "created": 时间戳} }
+SYNC_KEY_PREFIX = "ohs_"          # OmniHome Sync，便于识别与掩码展示
+
+
+def _sync_key_hash(raw: str) -> str:
+    return hashlib.sha256((raw or "").encode("utf-8")).hexdigest()
+
+
+def _sync_key_owner(v) -> str:
+    """兼容取值：新结构为 dict({u,prefix,created})，容忍历史字符串结构。"""
+    return v.get("u") if isinstance(v, dict) else v
+
+
+def gen_sync_key(username: str) -> str:
+    """为指定用户生成（或重置）同步 API Key，返回明文（仅此一次可见）。
+    一用户一枚：生成新 Key 会自动作废旧 Key。"""
+    raw = SYNC_KEY_PREFIX + secrets.token_urlsafe(32)
+    cfg = get_config()
+    keys = {k: v for k, v in (cfg.get("syncKeys") or {}).items()
+            if _sync_key_owner(v) != username}
+    keys[_sync_key_hash(raw)] = {"u": username, "prefix": raw[:12],
+                                 "created": int(time.time())}
+    cfg["syncKeys"] = keys
+    save_config(cfg)
+    return raw
+
+
+def verify_sync_key(raw: str) -> Optional[str]:
+    """校验明文 API Key，命中返回所属用户名，否则 None。"""
+    if not raw:
+        return None
+    v = (get_config().get("syncKeys") or {}).get(_sync_key_hash(raw))
+    return _sync_key_owner(v) if v else None
+
+
+def revoke_sync_key(username: str):
+    """吊销指定用户的全部同步 API Key。"""
+    cfg = get_config()
+    cfg["syncKeys"] = {k: v for k, v in (cfg.get("syncKeys") or {}).items()
+                       if _sync_key_owner(v) != username}
+    save_config(cfg)
+
+
+def sync_key_info(username: str) -> dict:
+    """返回掩码信息（不含明文）：是否已启用、前缀、掩码、创建时间。"""
+    for v in (get_config().get("syncKeys") or {}).values():
+        if _sync_key_owner(v) == username:
+            prefix = v.get("prefix", "") if isinstance(v, dict) else ""
+            created = v.get("created", 0) if isinstance(v, dict) else 0
+            return {"enabled": True, "prefix": prefix,
+                    "masked": (prefix + "…") if prefix else "已启用",
+                    "created": created}
+    return {"enabled": False, "prefix": "", "masked": "", "created": 0}
 
 
 # ---------- 存储引擎配置 ----------
@@ -895,10 +957,13 @@ def _sql_write_note_body(conn, username: str, key: str, content: str):
     from sqlalchemy import text
     # INSERT 补齐元数据列默认值（新行首写正文时行可能尚不存在）；
     # 冲突时仅更新正文与时间，不覆盖标题/标签/排序等元数据。
+    # deleted/deleted_title（回收站软删，v0.2.23）也必须给默认值：_table_ddl 把每列
+    # 建成 NOT NULL，全新 SQL 库若 INSERT 漏这两列，SQLite/MySQL 在 upsert 的 INSERT
+    # 阶段即触发 NOT NULL 约束失败（旧库因 ALTER ADD COLUMN 可空而未暴露）。
     sql = ('INSERT INTO "bm_notes" '
            '("username", "id", "content", "updated", "title", '
-           '"tags", "pinned", "folder", "pos") '
-           "VALUES (:username, :id, :c, :t, '', '', 0, '', 0)")
+           '"tags", "pinned", "folder", "pos", "deleted", "deleted_title") '
+           "VALUES (:username, :id, :c, :t, '', '', 0, '', 0, 0, '')")
     if _is_mysql(conn):
         sql += (" ON DUPLICATE KEY UPDATE \"content\" = VALUES(\"content\"), "
                 "\"updated\" = VALUES(\"updated\")")

@@ -1,0 +1,10 @@
+{
+  "id": "omnihome-sync",
+  "name": "OmniHome Sync（万事屋同步）",
+  "version": "0.2.27",
+  "minAppVersion": "1.4.0",
+  "description": "把 Obsidian 仓库与自托管的「万事屋」门户知识库双向同步：LWW 冲突策略、删除安全阀、API Key 鉴权。数据全程存于你自己的服务器，不经任何第三方云。",
+  "author": "JeanLaw",
+  "authorUrl": "https://git.jeanlaw.xyz/jeanlaw/omnihome",
+  "isDesktopOnly": false
+}

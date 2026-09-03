@@ -1955,6 +1955,256 @@ def delete_note(nid: str, authorization: Optional[str] = Header(None)):
     return {"ok": True, "softDeleted": True}
 
 
+# ============================================================
+# Obsidian 双向同步（v0.2.27）
+# 站点笔记仍存 storage 抽象层（NAS 上是 PostgreSQL 的 bm_notes，不落物理 .md）；
+# 以「文件夹/标题.md」相对路径逻辑寻址，映射规则与浏览器版 localsync.js 完全一致，
+# 两套同步互不破坏。鉴权用每用户一枚长期 API Key（X-API-Key 头）。
+# ============================================================
+
+def require_sync_user(x_api_key: Optional[str]) -> str:
+    """校验 X-API-Key，解析出用户名；失败抛 401。"""
+    if not x_api_key:
+        raise HTTPException(401, "缺少 X-API-Key 请求头")
+    username = storage.verify_sync_key(x_api_key)
+    if not username:
+        raise HTTPException(401, "API Key 无效或已吊销")
+    return username
+
+
+# ---------- path <-> note 映射（移植 localsync.js 规则，保证两端一致） ----------
+_SYNC_BUILTIN_ROOTS = ("每日计划", "灵感速记")   # 内置文件夹，不参与同步
+
+
+def _sync_safe_name(s: str) -> str:
+    """路径段清洗：与 localsync.js safeName 一致（非法字符 -> _）。"""
+    t = re.sub(r'[\\/:*?"<>|]', "_", str(s or "")).strip()
+    return t or "未命名笔记"
+
+
+def _note_to_path(meta: dict) -> str:
+    """笔记 -> 相对路径：folder 各段清洗 + title.md（与 localsync.js expectedPath 一致）。"""
+    segs = [_sync_safe_name(p) for p in str(meta.get("folder") or "").split("/") if p]
+    segs.append(_sync_safe_name(meta.get("title")) + ".md")
+    return "/".join(segs)
+
+
+def _in_sync_scope(n: dict) -> bool:
+    """同步范围：排除常驻(pinned)、回收站(deleted)、内置文件夹下笔记（与 localsync.js 一致）。"""
+    if not n:
+        return False
+    if n.get("pinned") or n.get("deleted"):
+        return False
+    return (n.get("folder") or "").split("/")[0] not in _SYNC_BUILTIN_ROOTS
+
+
+def _sync_path_index(username: str):
+    """构建 {path: meta} 与 {id: path} 双向索引。
+    path 分配按 (folder, title, id) 确定性排序：notes_index 会因 save_note 的
+    updated 重排而变序，若不固定顺序，同名冲突笔记的 -2 后缀会在多次 /list 间抖动。"""
+    idx = storage.notes_index(username)
+    scoped = [n for n in idx
+              if _in_sync_scope(n) and not _is_junk_path(n.get("title") or "")]
+    scoped.sort(key=lambda n: (n.get("folder") or "", n.get("title") or "",
+                               n.get("id") or ""))
+    by_path, id_to_path = {}, {}
+    for n in scoped:
+        want = _note_to_path(n)
+        p, i = want, 2
+        while p in by_path and by_path[p].get("id") != n.get("id"):
+            stem = want[:-3] if want.lower().endswith(".md") else want
+            p = "%s-%d.md" % (stem, i)
+            i += 1
+        by_path[p] = n
+        id_to_path[n.get("id")] = p
+    return by_path, id_to_path
+
+
+def _resolve_sync_path(username: str, path: str):
+    """path -> 唯一笔记 meta（供 file/rename/delete 定位）；未命中返回 None。"""
+    by_path, _ = _sync_path_index(username)
+    return by_path.get(path)
+
+
+def _validate_sync_path(path: str) -> str:
+    """规范化 + 安全校验同步路径：拒绝绝对路径、..、空段、隐藏段（.obsidian/.git）、
+    资源垃圾。因最终映射到笔记而非物理文件，遍历面小，但仍严格校验（需求 5 路径遍历防护）。"""
+    raw = (path or "").replace("\\", "/").strip()
+    if not raw or not raw.strip("/"):
+        raise HTTPException(400, "path 不能为空")
+    if raw.startswith("/"):
+        raise HTTPException(400, "path 不能为绝对路径")
+    norm = raw.strip("/")
+    for seg in norm.split("/"):
+        if not seg or seg in (".", ".."):
+            raise HTTPException(400, "path 含非法路径段")
+        if seg.startswith("."):
+            raise HTTPException(400, "path 含隐藏段（. 开头），不在同步范围")
+    if _is_junk_path(norm):
+        raise HTTPException(400, "path 为系统资源垃圾，已拒绝")
+    return norm
+
+
+def _split_sync_path(norm: str):
+    """相对路径 -> (folder, fname)。"""
+    if "/" in norm:
+        return norm.rsplit("/", 1)
+    return "", norm
+
+
+# ---------- API Key 管理端点（session 鉴权，仅本人） ----------
+@router.post("/api/sync/apikey")
+def sync_apikey_create(authorization: Optional[str] = Header(None)):
+    """生成 / 重置当前用户的同步 API Key；明文仅此一次返回，前端提示妥善保存。"""
+    username = require_user(authorization)
+    return {"ok": True, "apiKey": storage.gen_sync_key(username)}
+
+
+@router.get("/api/sync/apikey")
+def sync_apikey_info(authorization: Optional[str] = Header(None)):
+    """返回 API Key 掩码信息（不含明文）：是否启用、前缀、创建时间。"""
+    username = require_user(authorization)
+    return storage.sync_key_info(username)
+
+
+@router.delete("/api/sync/apikey")
+def sync_apikey_revoke(authorization: Optional[str] = Header(None)):
+    """吊销当前用户的同步 API Key（Obsidian 端将无法再同步，直至重新生成）。"""
+    username = require_user(authorization)
+    storage.revoke_sync_key(username)
+    return {"ok": True}
+
+
+# ---------- 同步数据端点（X-API-Key 鉴权） ----------
+@router.get("/api/sync/list")
+def sync_list(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """递归列出同步范围内的全部笔记：[{path, mtime}]。
+    mtime = note.updated * 1000（毫秒），供客户端 LWW 对账。
+    刻意不返回 size：本接口被客户端每 5-10s 轮询，读全部正文会压垮数据库；
+    size 属信息性字段，可由 GET /api/sync/file 的 content 长度得出。"""
+    username = require_sync_user(x_api_key)
+    by_path, _ = _sync_path_index(username)
+    files = [{"path": p, "mtime": int(m.get("updated") or 0) * 1000}
+             for p, m in by_path.items()]
+    return {"files": files}
+
+
+@router.get("/api/sync/file")
+def sync_get_file(path: str, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """按相对路径读取单篇笔记的完整 Markdown（标题作 H1，与浏览器端 noteToMd 一致）。"""
+    username = require_sync_user(x_api_key)
+    norm = _validate_sync_path(path)
+    meta = _resolve_sync_path(username, norm)
+    if not meta:
+        raise HTTPException(404, "文件不存在")
+    content = storage.note_read(username, meta["id"], "")
+    return {"path": norm, "content": _note_to_md(meta, content).decode("utf-8"),
+            "mtime": int(meta.get("updated") or 0) * 1000}
+
+
+class SyncFileIn(BaseModel):
+    path: str
+    content: str = ""
+    clientMtime: Optional[int] = None    # 客户端本地文件 mtime（毫秒），用于 LWW
+
+
+@router.post("/api/sync/file")
+def sync_put_file(body: SyncFileIn,
+                  x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """写入 / 更新一篇笔记。命中现有 path 则按 LWW 决定是否覆盖；未命中则新建。
+    LWW（2 秒内站点优先）：仅当客户端文件明显更新（clientMtime > 站点 mtime + 2000）
+    才覆盖站点；否则站点胜，拒绝覆盖（applied=False）并返回站点 mtime，客户端应改拉取。
+    这样站点（真源）永不会被近乎同时或更旧的推送覆盖。"""
+    username = require_sync_user(x_api_key)
+    norm = _validate_sync_path(body.path)
+    folder, fname = _split_sync_path(norm)
+    title, body_md = _parse_md(body.content.encode("utf-8"), fname)
+    meta = _resolve_sync_path(username, norm)
+    client_mtime = int(body.clientMtime or 0)
+
+    if meta:
+        site_mtime = int(meta.get("updated") or 0) * 1000
+        if client_mtime <= site_mtime + 2000:
+            return {"path": norm, "mtime": site_mtime, "id": meta["id"],
+                    "applied": False, "reason": "site-wins"}
+        nid = meta["id"]
+        storage.note_write(username, nid, body_md)
+        idx = storage.notes_index(username)
+        now = int(time.time())
+        for it in idx:
+            if it.get("id") == nid:
+                it["title"] = title or it.get("title") or "未命名笔记"
+                it["folder"] = folder
+                it["updated"] = now
+                break
+        storage.save_notes_index(username, idx)
+        return {"path": norm, "mtime": now * 1000, "id": nid, "applied": True}
+
+    # 未命中 -> 新建（先逐级补齐文件夹，否则笔记在目录树中不可见）
+    if folder:
+        _ensure_folder(username, folder)
+    nid = uuid.uuid4().hex[:8]
+    now = int(time.time())
+    stem = fname[:-3] if fname.lower().endswith(".md") else fname
+    idx = storage.notes_index(username)
+    idx.insert(0, {"id": nid, "title": title or stem or "未命名笔记",
+                   "tags": [], "folder": folder, "pinned": False, "updated": now})
+    storage.save_notes_index(username, idx)
+    storage.note_write(username, nid, body_md)
+    return {"path": norm, "mtime": now * 1000, "id": nid, "applied": True}
+
+
+class SyncRenameIn(BaseModel):
+    oldPath: str
+    newPath: str
+
+
+@router.put("/api/sync/file/rename")
+def sync_rename_file(body: SyncRenameIn,
+                     x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """重命名 / 移动一篇笔记：按 newPath 更新其 folder 与 title（正文不变）。"""
+    username = require_sync_user(x_api_key)
+    old = _validate_sync_path(body.oldPath)
+    new = _validate_sync_path(body.newPath)
+    meta = _resolve_sync_path(username, old)
+    if not meta:
+        raise HTTPException(404, "源文件不存在")
+    new_folder, new_fname = _split_sync_path(new)
+    if new_folder:
+        _ensure_folder(username, new_folder)
+    new_title = new_fname[:-3] if new_fname.lower().endswith(".md") else new_fname
+    idx = storage.notes_index(username)
+    now = int(time.time())
+    for it in idx:
+        if it.get("id") == meta["id"]:
+            it["folder"] = new_folder
+            it["title"] = new_title or it.get("title") or "未命名笔记"
+            it["updated"] = now
+            break
+    storage.save_notes_index(username, idx)
+    return {"ok": True, "path": new, "id": meta["id"], "mtime": now * 1000}
+
+
+@router.delete("/api/sync/file")
+def sync_delete_file(path: str,
+                     x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """删除一篇笔记：软删进回收站（与 Web 端删除一致，可在门户恢复），不物理删正文。"""
+    username = require_sync_user(x_api_key)
+    norm = _validate_sync_path(path)
+    meta = _resolve_sync_path(username, norm)
+    if not meta:
+        raise HTTPException(404, "文件不存在")
+    idx = storage.notes_index(username)
+    now = int(time.time())
+    for it in idx:
+        if it.get("id") == meta["id"]:
+            it["deleted"] = now
+            it["deleted_title"] = it.get("title") or ""
+            break
+    storage.save_notes_index(username, idx)
+    return {"ok": True, "softDeleted": True}
+
+
 # ---------- 今日计划（plan.md，已弃用：仪表盘改绑知识库常驻笔记） ----------
 class PlanIn(BaseModel):
     content: str

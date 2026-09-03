@@ -384,9 +384,9 @@
 
   /* 统计延迟修复：打开设置 / 切到数据面板时实时拉取，无需刷新页面 */
   $$('[data-open-settings]').forEach(el =>
-    el.addEventListener('click', () => { loadData(); loadEngine(); }));
+    el.addEventListener('click', () => { loadData(); loadEngine(); loadSyncKey(); }));
   $$('.set-item[data-set="data"]').forEach(el =>
-    el.addEventListener('click', () => { loadData(); loadEngine(); }));
+    el.addEventListener('click', () => { loadData(); loadEngine(); loadSyncKey(); }));
 
   $('#backupNow').addEventListener('click', async () => {
     $('#backupNow').disabled = true;
@@ -406,6 +406,68 @@
       await API.put('/api/settings', { trashDays: days });
       showToast(days === 0 ? '已关闭自动清理，仅手动清空' : `回收站保留 ${days} 天`);
     } catch (e) { showToast(e.message, 'err'); }
+  });
+
+  /* ---------- Obsidian 同步 API Key（v0.2.27） ---------- */
+  /* 明文仅生成时暂存一次供复制；刷新/重开设置后只能看到掩码（服务端只存哈希，无法还原）。 */
+  let _syncPlain = '';
+
+  async function loadSyncKey(){
+    const urlEl = $('#syncBaseUrl');
+    if (urlEl) urlEl.value = location.origin.replace(/\/$/, '');
+    try {
+      const info = await API.get('/api/sync/apikey');
+      const chip = $('#syncKeyChip'), show = $('#syncKeyShow');
+      const on = !!(info && info.enabled);
+      if (chip){
+        chip.textContent = on ? '已启用' : '未启用';
+        chip.classList.toggle('success', on);
+        chip.classList.toggle('no-dot', !on);
+      }
+      if (!show) return;
+      if (!on){ _syncPlain = ''; show.value = ''; show.placeholder = '尚未生成'; }
+      else if (!_syncPlain){ show.value = info.masked || '已启用'; }
+      /* _syncPlain 有值（刚生成）时保持明文显示，不覆盖 */
+    } catch (e) {}
+  }
+
+  $('#syncKeyGen')?.addEventListener('click', async () => {
+    const btn = $('#syncKeyGen');
+    const had = ($('#syncKeyChip') || {}).textContent === '已启用';
+    if (had && !await App.confirmModal({
+      title: '重置 API Key？', danger: true, okText: '重置',
+      sub: '旧 Key 将立即失效，已配置的 Obsidian 插件需填入新 Key 才能继续同步。'
+    })) return;
+    btn.disabled = true;
+    try {
+      const d = await API.post('/api/sync/apikey');
+      _syncPlain = (d && d.apiKey) || '';
+      await loadSyncKey();
+      $('#syncKeyShow').value = _syncPlain;   /* 明文优先展示，供立即复制 */
+      showToast('已生成，请立即复制保存（明文仅此一次可见）');
+    } catch (e) { showToast(e.message, 'err'); }
+    finally { btn.disabled = false; }
+  });
+
+  $('#syncKeyCopy')?.addEventListener('click', async () => {
+    if (!_syncPlain){ showToast('明文仅生成时可见，请点「生成 Key」后复制', 'err'); return; }
+    try { await navigator.clipboard.writeText(_syncPlain); showToast('API Key 已复制'); }
+    catch (e) { showToast('复制失败，请手动选中复制', 'err'); }
+  });
+
+  $('#syncBaseUrlCopy')?.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('#syncBaseUrl').value); showToast('服务端地址已复制'); }
+    catch (e) { showToast('复制失败，请手动选中复制', 'err'); }
+  });
+
+  $('#syncKeyRevoke')?.addEventListener('click', async () => {
+    if (($('#syncKeyChip') || {}).textContent !== '已启用'){ showToast('当前没有启用的 Key'); return; }
+    if (!await App.confirmModal({
+      title: '吊销 API Key？', danger: true, okText: '吊销',
+      sub: 'Obsidian 插件将立即无法同步，直至重新生成 Key；不影响本站笔记数据。'
+    })) return;
+    try { await API.del('/api/sync/apikey'); _syncPlain = ''; showToast('已吊销'); loadSyncKey(); }
+    catch (e) { showToast(e.message, 'err'); }
   });
 
   /* 备份设置：自动备份开关 / 周期 / 保留份数 */

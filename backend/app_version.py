@@ -2,11 +2,23 @@
 版本号唯一来源：打包、镜像构建、/api/about 均读取这里的 VERSION。
 每次发版请同步更新 VERSION 与 CHANGELOG（新版本置顶）。
 """
-VERSION = "0.2.26"
-STAGE = "目录行布局修复 · 回收站热区舒展 · 恢复/删除按钮修复 · 确认框置顶"
+VERSION = "0.2.27"
+STAGE = "Obsidian 双向同步插件 · /api/sync RESTful API · API Key 鉴权 · LWW 冲突 · 修复全新库笔记正文 NOT NULL"
 
 # 更新日志（最新版本置顶）
 CHANGELOG = [
+    {
+        "version": "0.2.27",
+        "date": "2026-09-04",
+        "items": [
+            "新功能：Obsidian 双向同步插件——把门户知识库与 Obsidian 仓库双向同步（桌面 / 移动端），文件夹层级对应目录、笔记对应 .md；纯 JS 交付可直接 BRAT 侧载（obsidian-plugin/omnihome-sync/）",
+            "后端新增 /api/sync RESTful API：每用户一枚长期 API Key（X-API-Key 头，sha256 哈希存 config.json，明文仅生成时返回一次），list / file 读写 / rename / delete 等 8 个端点；path 用「文件夹/标题.md」逻辑寻址映射 bm_notes，不落物理镜像；映射规则与浏览器版 localsync.js 完全一致，两套同步互不破坏",
+            "同步策略：LWW 最后修改时间优先、2 秒同刻窗口内站点优先（真源永不被近乎同时或更旧的推送覆盖）；删除走软删进门户回收站（可恢复）；单轮删除 > 10 个由客户端弹确认；路径遍历 / 隐藏段（.obsidian/.git）/ 系统垃圾一律拒绝；同名笔记确定性分配 -2/-3 序号（多次 /list 稳定不抖动）",
+            "设置 → 数据与存储 新增「Obsidian 同步」卡片：生成 / 重置 / 吊销 API Key、复制服务端地址与 Key 明文",
+            "修复：数据库引擎（SQLite / PostgreSQL）下全新库写入笔记正文报 NOT NULL constraint failed: bm_notes.deleted——_sql_write_note_body 的 INSERT 遗漏 deleted/deleted_title 列（0.2.23 只给索引写入补了这两列），而 _table_ddl 把每列建成 NOT NULL；现补两列默认值。NAS 存量库因 ALTER ADD COLUMN 可空未暴露，全新建库才触发",
+            "文档：新增《Obsidian同步插件-服务端API》《Obsidian同步插件-用户使用指南》；DEPLOY.md 补充「Obsidian 同步」部署与公网访问安全说明（DB 方案无需挂载目录、移动端建议 HTTPS）",
+        ],
+    },
     {
         "version": "0.2.26",
         "date": "2026-09-04",

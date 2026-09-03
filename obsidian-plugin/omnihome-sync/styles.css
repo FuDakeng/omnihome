@@ -1,0 +1,76 @@
+/* ============================================================
+   OmniHome Sync · 万事屋 ↔ Obsidian 双向同步插件样式
+   仅轻量修饰：状态栏着色、确认弹窗、设置页帮助文本。
+   全部以 omnihome-sync- 前缀命名，避免污染 Obsidian 全局样式。
+   ============================================================ */
+
+/* ---------- 状态栏指示器 ---------- */
+.omnihome-sync-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+
+/* 未启用 / 已暂停：弱化显示 */
+.omnihome-sync-status.mod-off,
+.omnihome-sync-status.mod-paused {
+  opacity: 0.55;
+}
+
+/* 同步中：主色 + 轻微呼吸动画 */
+.omnihome-sync-status.mod-syncing {
+  color: var(--text-accent);
+}
+.omnihome-sync-status.mod-syncing::first-letter {
+  display: inline-block;
+  animation: omnihome-sync-spin 900ms linear infinite;
+}
+@keyframes omnihome-sync-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 已同步：成功色 */
+.omnihome-sync-status.mod-synced,
+.omnihome-sync-status.mod-idle {
+  color: var(--text-success, #4caf50);
+}
+
+/* 错误：警示色 */
+.omnihome-sync-status.mod-error {
+  color: var(--text-error, #e5534b);
+}
+
+/* ---------- 确认弹窗（删除安全阀 / 解绑） ---------- */
+.omnihome-sync-confirm-sub {
+  margin: 4px 0 16px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.omnihome-sync-confirm-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.omnihome-sync-confirm-row button {
+  min-width: 72px;
+}
+
+/* ---------- 设置页帮助文本 ---------- */
+.omnihome-sync-help {
+  margin-top: 24px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--background-secondary-alt);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 0.86em;
+  line-height: 1.7;
+}
