@@ -15,41 +15,18 @@ function goView(name){
   const nav = $(`.nav-item[data-nav="${name}"]`);
   if (nav) $('#crumbTitle').textContent = nav.dataset.title;
   document.body.dataset.view = name;        // CSS 用此区分视图，给全局顶栏/.kb-layout 套样式
-  /* 知识库视图激活时：让全局 collapseBtn 视觉/语义上变成"折叠 kb-tree"。
-     其它视图则继续折叠全局侧栏（系统监控等）。 */
-  $('#collapseBtn')?.classList.toggle('kb-mode', name === 'notes');
-  $('#collapseBtn')?.setAttribute(
-    'title',
-    name === 'notes' ? '折叠 / 展开左侧目录树' : '折叠 / 展开侧边栏');
-  /* 进入知识库视图时还原 kb-tree（除非用户曾折叠） */
-  if (name === 'notes' && !$('.kb-layout')?.classList.contains('kb-collapsed-persisted')){
-    $('.kb-layout')?.classList.remove('kb-collapsed');
-  }
+  $('#collapseBtn')?.classList.remove('kb-mode');
+  $('#collapseBtn')?.setAttribute('title', '折叠 / 展开侧边栏');
   $('#userMenu').classList.remove('open');
   window.scrollTo({ top: 0 });
   document.dispatchEvent(new CustomEvent('view-change', { detail: name }));
 }
 $$('[data-nav]').forEach(el => el.addEventListener('click', () => goView(el.dataset.nav)));
 
-/* ---------- 折叠按钮：按当前视图切换折叠对象 ---------- */
+/* ---------- 折叠按钮：始终折叠左侧导航栏（知识库目录不由此按钮控制） ---------- */
 $('#collapseBtn').addEventListener('click', () => {
-  if (document.body.dataset.view === 'notes'){
-    const layout = $('.kb-layout');
-    if (!layout) return;
-    const collapsed = layout.classList.toggle('kb-collapsed');
-    if (collapsed) layout.classList.add('kb-collapsed-persisted');
-    else layout.classList.remove('kb-collapsed-persisted');
-    try { localStorage.setItem('omni.kb.tree.collapsed', collapsed ? '1' : '0'); } catch (_) {}
-  } else {
-    document.body.classList.toggle('sidebar-collapsed');
-  }
+  document.body.classList.toggle('sidebar-collapsed');
 });
-/* 进入知识库视图时还原折叠偏好 */
-try {
-  if (localStorage.getItem('omni.kb.tree.collapsed') === '1'){
-    document.addEventListener('DOMContentLoaded', () => $('.kb-layout')?.classList.add('kb-collapsed', 'kb-collapsed-persisted'));
-  }
-} catch (_) {}
 
 /* ---------- 明暗模式 ---------- */
 /* persist=false 用于初始化：只同步界面状态，不覆盖已保存的偏好
@@ -222,11 +199,12 @@ window.addEventListener('unhandledrejection', e => {
 
 /* ---------- 快捷键 ⌘K / Ctrl+K 聚焦全局搜索；Esc 关闭弹窗 ---------- */
 document.addEventListener('keydown', e => {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k'){
+  const key = String(e.key || '');
+  if ((e.metaKey || e.ctrlKey) && key.toLowerCase() === 'k'){
     e.preventDefault();
     $('#globalSearch').focus();
   }
-  if (e.key === 'Escape') openSettings(false);
+  if (key === 'Escape') openSettings(false);
 });
 
 /* ---------- 顶栏实时时钟（精确到秒；按天气定位城市时区，未定位用本机时区） ---------- */

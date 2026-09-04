@@ -460,19 +460,14 @@ window.LiveMD = (() => {
         }
       }
       root.innerHTML = html.join('');
-      /* 附件图片水合：/api/notes/assets/ 地址补鉴权 token（src 属性仅作展示，序列化走 data-pre） */
-      const tk = opts.assetToken ? opts.assetToken()
-        : (window.API && API.getToken ? API.getToken() : '');
-      if (tk) root.querySelectorAll('img.lm-img').forEach(img => {
-        const s = img.getAttribute('src');
-        if (s && s.startsWith('/api/notes/assets/') && !s.includes('token='))
-          img.src = s + '?token=' + encodeURIComponent(tk);
-      });
       updatePh();
       if (!histNo) histPush();          // 每次重建后记录新状态（供 Ctrl+Z 回退）
       root.scrollTop = st;
       /* 重建完成广播：查找高亮等外部标注需要重打 */
       try { root.dispatchEvent(new CustomEvent('omni:livemd-rebuild', { bubbles: true })); } catch (_) {}
+      if (typeof opts.afterRebuild === 'function'){
+        try { opts.afterRebuild(root); } catch (_) {}
+      }
     }
 
     function updatePh(){
@@ -1098,7 +1093,10 @@ window.LiveMD = (() => {
       });
     }
 
-    root.addEventListener('input', () => pipeline());
+    root.addEventListener('input', (e) => {
+      if (e && e.target && e.target.closest && e.target.closest('img')) return;
+      pipeline();
+    });
     root.addEventListener('keydown', onKeydown);
     root.addEventListener('paste', onPaste);
     root.addEventListener('click', onClick);
@@ -1209,5 +1207,5 @@ window.LiveMD = (() => {
     return inst;
   }
 
-  return { attach };
+  return { attach, highlightCode };
 })();

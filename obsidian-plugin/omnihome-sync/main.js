@@ -27,7 +27,7 @@ const SELF_WRITE_MS = 4000;         // 自写抑制窗口（避免回环触发�
 
 /* 插件独立版本线（与服务端 app 版本解耦；须与 manifest.json 的 version 保持一致）。
    打进启动日志与设置页，用户反馈报错时可一眼确认所装插件版本。 */
-const PLUGIN_VERSION = '0.0.3';
+const PLUGIN_VERSION = '0.0.4';
 
 const ASSET_MAX = 5 * 1024 * 1024;   // 与服务端 ASSET_MAX 一致
 const ASSET_DIR = 'OmniHome-assets';  // 从站点拉取、本地无原路径的附件落点
@@ -38,6 +38,7 @@ const DEFAULT_SETTINGS = {
   apiKey: '',
   enabled: false,
   pollSeconds: 8,
+  lastSyncAt: 0,
   log: [],
   // baseline: path -> { lm: 本地上次同步 mtime(ms), rm: 远端上次同步 mtime(ms) }
   baseline: {},
@@ -171,11 +172,39 @@ function confirmDialog(app, opts) {
   return new Promise(function (resolve) { new ConfirmModal(app, opts, resolve).open(); });
 }
 
+function parseOmnihomeSyncBlob(text) {
+  const t = String(text || '').replace(/^\uFEFF/, '').trim();
+  let url = '', key = '';
+  const lines = t.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\s*(url|key|server|apikey|api[_-]?key)\s*[:：]\s*(.+?)\s*$/i);
+    if (!m) continue;
+    const k = m[1].toLowerCase().replace(/[_-]/g, '');
+    const v = m[2].trim();
+    if (k === 'url' || k === 'server') url = v.replace(/\/+$/, '');
+    else key = v;
+  }
+  if (!key) {
+    const km = t.match(/ohs_[A-Za-z0-9_-]+/);
+    if (km) key = km[0];
+  }
+  if (!url) {
+    const um = t.match(/https?:\/\/[^\s]+/i);
+    if (um) url = um[0].replace(/\/+$/, '');
+  }
+  return { url: url, key: key };
+}
+
 class InfoModal extends Modal {
-  constructor(app, lines) { super(app); this.lines = lines || []; }
+  constructor(app, rows) { super(app); this.rows = rows || []; }
   onOpen() {
     this.titleEl.setText('OmniHome Sync 信息');
-    this.lines.forEach((t) => this.contentEl.createEl('p', { text: t }));
+    this.contentEl.addClass('omnihome-sync-info');
+    this.rows.forEach((row) => {
+      const dl = this.contentEl.createDiv({ cls: 'omnihome-sync-info-row' });
+      dl.createEl('div', { text: row.label, cls: 'k' });
+      dl.createEl('div', { text: row.value, cls: 'v' });
+    });
   }
 }
 
@@ -357,22 +386,110 @@ class OmniHomeSyncPlugin extends Plugin {
       window.open(u, '_blank');
     }));
     menu.addItem((i) => i.setTitle('查看信息').setIcon('info').onClick(() => this.showInfoModal()));
+    menu.addItem((i) => i.setTitle('插件设置').setIcon('settings').onClick(() => this.openPluginSettings()));
+    menu.addSeparator();
+    menu.addItem((i) => {
+      i.setTitle('用当前仓库覆盖服务端').setIcon('upload');
+      if (typeof i.setWarning === 'function') i.setWarning();
+      i.onClick(() => this.forceOverwrite('push'));
+    });
+    menu.addItem((i) => {
+      i.setTitle('用服务端覆盖当前仓库').setIcon('download');
+      if (typeof i.setWarning === 'function') i.setWarning();
+      i.onClick(() => this.forceOverwrite('pull'));
+    });
     menu.showAtMouseEvent(evt);
+  }
+
+  openPluginSettings() {
+    try {
+      this.app.setting.open();
+      this.app.setting.openTabById(this.manifest.id);
+    } catch (e) {
+      new Notice('请到 设置 → 第三方插件 → OmniHome Sync 打开', 5000);
+    }
+  }
+
+  fmtTime(ms) {
+    if (!ms) return '尚未同步';
+    const d = new Date(ms);
+    const p = (n) => (n < 10 ? '0' : '') + n;
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+      p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
   }
 
   async showInfoModal() {
     let hello = this.remote || {};
     try {
-      if (this.canSync()) hello = await this.api('GET', '/api/sync/hello');
+      if (this.settings.serverUrl && this.settings.apiKey) hello = await this.api('GET', '/api/sync/hello');
     } catch (e) { hello = { error: (e && e.message) || String(e) }; }
-    const lines = [
-      '插件版本：v' + ((this.manifest && this.manifest.version) || PLUGIN_VERSION),
-      '万事屋版本：' + (hello.version ? ('v' + hello.version) : (hello.error || '未连接')),
-      '仓库：' + (hello.vaultName || hello.vault || '—'),
-      '服务端：' + (this.settings.serverUrl || '未配置'),
-      '同步：' + (this.settings.enabled ? '已启用' : '已暂停'),
-    ];
-    new InfoModal(this.app, lines).open();
+    new InfoModal(this.app, [
+      { label: '插件版本', value: 'v' + ((this.manifest && this.manifest.version) || PLUGIN_VERSION) },
+      { label: '万事屋版本', value: hello.version ? ('v' + hello.version) : (hello.error || '未连接') },
+      { label: '绑定仓库', value: hello.vaultName || hello.vault || '—' },
+      { label: '服务端', value: this.settings.serverUrl || '未配置' },
+      { label: '同步状态', value: this.settings.enabled ? '已启用' : '已暂停' },
+      { label: '上次同步', value: this.fmtTime(this.settings.lastSyncAt || this.lastSync) },
+      { label: '同步策略', value: '最后修改时间优先（LWW）；2 秒内站点优先；服务端无独立变更不回拉；单轮删除超过 ' + DELETE_VALVE + ' 个需确认' },
+    ]).open();
+  }
+
+  async forceOverwrite(dir) {
+    if (!this.settings.serverUrl || !this.settings.apiKey) {
+      new Notice('请先填写服务端地址与 API Key', 6000);
+      return;
+    }
+    const push = dir === 'push';
+    const ok = await confirmDialog(this.app, {
+      title: push ? '用当前仓库覆盖服务端？' : '用服务端覆盖当前仓库？',
+      sub: push
+        ? '高危操作：服务端该笔记仓库将与本地 Obsidian 仓库对齐，服务端多出的笔记会进回收站，同路径笔记以本地为准。不可自动撤销。'
+        : '高危操作：本地仓库将与服务端对齐，本地多出的笔记会移入回收站，同路径笔记以服务端为准。不可自动撤销。',
+      okText: '确认覆盖', danger: true,
+    });
+    if (!ok) return;
+    this.setStatus('syncing');
+    const baseline = this.settings.baseline || {};
+    let n = 0;
+    try {
+      const localFiles = this.scanVault();
+      const localByPath = {};
+      for (let i = 0; i < localFiles.length; i++) localByPath[localFiles[i].path] = localFiles[i];
+      const remote = await this.remoteList();
+      const remoteByPath = {};
+      for (let i = 0; i < remote.length; i++) remoteByPath[remote[i].path] = remote[i];
+      if (push) {
+        for (let i = 0; i < localFiles.length; i++) {
+          const f = localFiles[i];
+          const content = await this.app.vault.read(f.file);
+          const wire = await this.toServerMarkdown(f.path, content);
+          const resp = await this.remotePut(f.path, wire, nowMs() + 86400000, 0);
+          baseline[f.path] = { lm: f.mtime, rm: (resp && resp.mtime) || nowMs() };
+          n++;
+        }
+        for (let i = 0; i < remote.length; i++) {
+          if (!localByPath[remote[i].path]) { await this.deleteRemote(remote[i].path, baseline); n++; }
+        }
+      } else {
+        for (let i = 0; i < remote.length; i++) {
+          const r = remote[i];
+          const loc = localByPath[r.path];
+          await this.pullFile(r.path, loc ? loc.file : null, r, baseline);
+          n++;
+        }
+        for (let i = 0; i < localFiles.length; i++) {
+          if (!remoteByPath[localFiles[i].path]) { await this.trashLocal(localFiles[i], baseline); n++; }
+        }
+      }
+      this.settings.lastSyncAt = nowMs();
+      await this.saveSettings();
+      this.setStatus('idle');
+      this.pushLog('warn', (push ? '本地覆盖服务端' : '服务端覆盖本地') + ' 完成（' + n + '）');
+      new Notice('覆盖完成（处理 ' + n + ' 项）', 6000);
+    } catch (e) {
+      this.setStatus('error');
+      new Notice('覆盖失败：' + ((e && e.message) || e), 8000);
+    }
   }
 
   pushLog(level, msg) {
@@ -746,13 +863,16 @@ class OmniHomeSyncPlugin extends Plugin {
           title: '检测到大量删除',
           sub: '本轮同步将删除 ' + totalDeletes + ' 个文件（本地 ' + plannedLocalDeletes.length +
                ' / 远端 ' + plannedRemoteDeletes.length + '）。这可能是误操作或首次绑定错位。' +
-               '「继续删除」将执行；「取消」则跳过删除（其余变更已应用），请人工确认后重同步。',
+               '「继续删除」将执行；「取消」会暂停同步，在你手动恢复之前不再弹出此确认。',
           okText: '继续删除', danger: true,
         });
         if (!ok) {
+          this.settings.enabled = false;
+          this.stopPolling();
           await this.saveSettings();
-          this.setStatus('paused');
-          new Notice('OmniHome Sync：已暂停删除同步（' + totalDeletes + ' 项），请人工确认后「立即同步」', 8000);
+          this.setStatus('off');
+          this.pushLog('warn', '大量删除已取消，同步已暂停，直至手动恢复');
+          new Notice('OmniHome Sync：已暂停同步。确认无误后请手动「恢复同步」，此前不会再弹出大量删除确认。', 10000);
           if (changes) this.notifyChanges(changes);
           return;
         }
@@ -760,8 +880,9 @@ class OmniHomeSyncPlugin extends Plugin {
       for (let i = 0; i < plannedLocalDeletes.length; i++) { if (await this.trashLocal(plannedLocalDeletes[i], baseline)) changes++; }
       for (let i = 0; i < plannedRemoteDeletes.length; i++) { if (await this.deleteRemote(plannedRemoteDeletes[i], baseline)) changes++; }
 
-      await this.saveSettings();
+      this.settings.lastSyncAt = nowMs();
       this.lastSync = nowMs();
+      await this.saveSettings();
       this.lastError = '';
       this.setStatus(changes ? 'synced' : 'idle');
       if (changes) this.notifyChanges(changes);
@@ -853,6 +974,35 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName('一键粘贴连接信息')
+      .setDesc('粘贴万事屋「一键复制」生成的 OMNIHOME_SYNC 文本（含 url / key），自动填写上方两项。')
+      .addButton((b) => b.setButtonText('从剪贴板粘贴').onClick(async () => {
+        let t = '';
+        try { t = await navigator.clipboard.readText(); } catch (e) { t = ''; }
+        if (!t) {
+          t = window.prompt('请粘贴 OMNIHOME_SYNC 连接信息', '') || '';
+        }
+        const p = parseOmnihomeSyncBlob(t);
+        if (!p.url && !p.key) { new Notice('未识别到服务端地址或 API Key', 6000); return; }
+        if (p.url) plugin.settings.serverUrl = p.url.replace(/\/+$/, '');
+        if (p.key) plugin.settings.apiKey = p.key;
+        await plugin.saveSettings();
+        this.display();
+        new Notice('已填入服务端地址与 API Key', 4000);
+      }));
+
+    new Setting(containerEl)
+      .setName('启用同步')
+      .setDesc('开启后双向同步；关闭仅停止同步，不删除任何本地或服务端笔记。取消大量删除确认后也会关闭此项。')
+      .addToggle((t) => t.setValue(plugin.settings.enabled)
+        .onChange(async (v) => {
+          plugin.settings.enabled = !!v;
+          await plugin.saveSettings();
+          if (v) { plugin.startPolling(); plugin.reconcile('toggle-on'); }
+          else { plugin.stopPolling(); plugin.setStatus('off'); }
+        }));
+
+    new Setting(containerEl)
       .setName('轮询间隔（秒）')
       .setDesc('定期检查服务端变更，建议 5-10 秒（3-300）。')
       .addText((t) => t.setValue(String(plugin.settings.pollSeconds))
@@ -861,17 +1011,6 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
           plugin.settings.pollSeconds = isNaN(n) ? 8 : Math.max(3, Math.min(300, n));
           await plugin.saveSettings();
           plugin.startPolling();
-        }));
-
-    new Setting(containerEl)
-      .setName('启用同步')
-      .setDesc('开启后双向同步；关闭仅停止同步，不删除任何本地或服务端笔记。')
-      .addToggle((t) => t.setValue(plugin.settings.enabled)
-        .onChange(async (v) => {
-          plugin.settings.enabled = !!v;
-          await plugin.saveSettings();
-          if (v) { plugin.startPolling(); plugin.reconcile('toggle-on'); }
-          else { plugin.stopPolling(); plugin.setStatus('off'); }
         }));
 
     new Setting(containerEl)
@@ -889,6 +1028,24 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
       .setName('立即同步')
       .setDesc('手动触发一次全量对账。')
       .addButton((b) => b.setButtonText('立即同步').onClick(() => plugin.manualSync()));
+
+    containerEl.createEl('h3', { text: '高危操作' }).style.marginTop = '18px';
+    new Setting(containerEl)
+      .setName('用当前仓库覆盖服务端')
+      .setDesc('服务端该笔记仓库将与本地对齐：同路径以本地为准，服务端多出的笔记进回收站。需确认。')
+      .addButton((b) => {
+        b.setButtonText('覆盖服务端');
+        if (typeof b.setWarning === 'function') b.setWarning();
+        b.onClick(() => plugin.forceOverwrite('push'));
+      });
+    new Setting(containerEl)
+      .setName('用服务端覆盖当前仓库')
+      .setDesc('本地仓库将与服务端对齐：同路径以服务端为准，本地多出的笔记进回收站。需确认。')
+      .addButton((b) => {
+        b.setButtonText('覆盖本地');
+        if (typeof b.setWarning === 'function') b.setWarning();
+        b.onClick(() => plugin.forceOverwrite('pull'));
+      });
 
     new Setting(containerEl)
       .setName('解绑')

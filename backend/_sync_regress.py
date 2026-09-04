@@ -387,6 +387,42 @@ def run_suite(engine):
     check(f"[{engine}] 切换当前仓库", r.status_code == 200 and r.json().get("current") == "system",
           r.text[:80])
 
+    # ---------- 12. 笔记详情 + 分享 ----------
+    print("-- 12. 分享 / get_note --")
+    r = client.put("/api/notes/vaults/select", headers=HA(tok), json={"vault": "default"})
+    check(f"[{engine}] 切回默认仓库", r.status_code == 200, r.text[:80])
+    r = client.post("/api/notes", headers=HA(tok), json={"title": "分享测试"})
+    nid = (r.json() or {}).get("id")
+    check(f"[{engine}] 新建笔记", r.status_code == 200 and bool(nid), r.text[:80])
+    r = client.put(f"/api/notes/{nid}", headers=HA(tok), json={"content": "hello share"})
+    check(f"[{engine}] 写入正文", r.status_code == 200, r.text[:80])
+    r = client.get(f"/api/notes/{nid}", headers=HA(tok))
+    check(f"[{engine}] GET 笔记含正文", r.status_code == 200 and r.json().get("content") == "hello share",
+          r.text[:80])
+    r = client.post("/api/notes/shares", headers=HA(tok),
+                    json={"kind": "note", "noteId": nid, "expireDays": 7, "canEdit": True})
+    token = (r.json() or {}).get("token") or ""
+    check(f"[{engine}] 创建笔记分享", r.status_code == 200 and token.startswith("s_"), token[:12])
+    r = client.get(f"/api/share/{token}")
+    check(f"[{engine}] 公开读取分享", r.status_code == 200 and r.json().get("canEdit") is True, r.text[:80])
+    r = client.get(f"/api/share/{token}/notes/{nid}")
+    check(f"[{engine}] 公开读笔记", r.status_code == 200 and r.json().get("content") == "hello share",
+          r.text[:80])
+    r = client.put(f"/api/share/{token}/notes/{nid}", json={"content": "edited via share"})
+    check(f"[{engine}] 分享可编辑", r.status_code == 200, r.text[:80])
+    r = client.get(f"/api/notes/{nid}", headers=HA(tok))
+    check(f"[{engine}] 分享写入生效", r.status_code == 200 and r.json().get("content") == "edited via share",
+          r.text[:80])
+    r = client.post("/api/notes/folders", headers=HA(tok), json={"name": "sharefold"})
+    check(f"[{engine}] 建文件夹", r.status_code == 200, r.text[:80])
+    r = client.post("/api/notes/shares", headers=HA(tok),
+                    json={"kind": "folder", "folder": "sharefold", "expireDays": 1})
+    check(f"[{engine}] 分享文件夹", r.status_code == 200 and (r.json() or {}).get("token", "").startswith("s_"),
+          r.text[:80])
+    r = client.get("/api/notes", headers=HA(tok))
+    check(f"[{engine}] 列表含 shares", isinstance((r.json() or {}).get("shares"), list)
+          and len(r.json().get("shares") or []) >= 1, r.text[:80])
+
 
 try:
     run_suite("file")

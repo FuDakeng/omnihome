@@ -8,6 +8,10 @@ const Notes = (() => {
   let idx = [];            // [{id,title,tags,folder,pinned,updated}]
   let folders = [];        // [文件夹名]
   let vaults = [];         // [{id,name,kind}]
+  let shares = [];         // 当前有效分享
+  let lastKnownUpdated = 0;
+  let trashSort = 'deleted';
+  const trashExpanded = new Set();
   let currentVault = 'default';
   let folderVault = {};    // folderPath -> vaultId
   let currentId = null;
@@ -415,44 +419,57 @@ const Notes = (() => {
     } catch (e) { showToast(e.message, 'err'); }
   }
 
-  /* ---------- 附件图片水合：fetch 带鉴权头 → data URL ----------
-     <img> 裸请求不带 Authorization 会被 401 拦截成裂图，
-     这里改为 JS 携带凭证取回后转 data URL，彻底规避鉴权裂图。 */
+  /* ---------- 附件图片水合：fetch 带鉴权头 → 缓存 data URL ----------
+     同一附件只取一次；实时重建 DOM 时立刻套缓存，避免反复裂图/闪烁。 */
   const hydrated = new WeakSet();
+  const assetDataCache = new Map();   // path -> data URL
+  const assetPending = new Map();     // path -> Promise
+  function assetPathOf(src){
+    const s = String(src || '').split('?')[0];
+    return s.startsWith('/api/notes/assets/') ? s : '';
+  }
+  function applyCachedSrc(img, path){
+    const data = assetDataCache.get(path);
+    if (data){ img.src = data; img.removeAttribute('onerror'); img.style.opacity = ''; return true; }
+    return false;
+  }
   function hydrateImages(box){
     if (!box) return;
     box.querySelectorAll('img').forEach(img => {
-      /* data-asset-src 承载原始附件地址（如目录缩略图）：src 初始留空，
-         避免浏览器先发裸请求撞 401 触发 onerror 变 📎 */
       let s = img.getAttribute('data-asset-src') || img.getAttribute('src') || '';
-      if (!s.startsWith('/api/notes/assets/') || hydrated.has(img)) return;
+      const path = assetPathOf(s);
+      if (!path) return;
+      if (applyCachedSrc(img, path)) return;
+      img.setAttribute('data-asset-src', path);
+      if (hydrated.has(img)) return;
       hydrated.add(img);
-      s = s.split('?')[0];   // 去掉旧式 token 参数，统一走带凭证的 fetch
-      fetch(s, { headers: { Authorization: 'Bearer ' + API.getToken() } })
-        .then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); })
-        .then(b => {
-          const rd = new FileReader();
-          rd.onload = () => {
-            img.removeAttribute('onerror');   // data URL 不会失败，去掉 📎 兜底防误触
-            img.src = rd.result;
-          };
-          rd.readAsDataURL(b);
-        })
-        .catch(() => {});   // 失败保持占位，下次水合重试
+      img.style.opacity = '0';
+      let p = assetPending.get(path);
+      if (!p){
+        p = fetch(path, { headers: { Authorization: 'Bearer ' + API.getToken() } })
+          .then(r => { if (!r.ok) throw new Error(r.status); return r.blob(); })
+          .then(b => new Promise((resolve, reject) => {
+            const rd = new FileReader();
+            rd.onload = () => { assetDataCache.set(path, rd.result); resolve(rd.result); };
+            rd.onerror = reject;
+            rd.readAsDataURL(b);
+          }))
+          .catch(() => { assetPending.delete(path); });
+        assetPending.set(path, p);
+      }
+      p.then(data => {
+        if (data){
+          img.src = data;
+          img.removeAttribute('onerror');
+          img.style.opacity = '';
+        }
+      });
     });
   }
-  /* 对当前笔记可见的编辑 / 预览区持续水合（覆盖实时渲染重建时机） */
-  let hyTimer = 0;
   function hydrateNow(){
-    clearInterval(hyTimer);
-    const run = () => {
-      if (liveEd && liveEd.isShown()) hydrateImages(liveEd.el);
-      const pv = $('#edPreview');
-      if (pv && pv.style.display !== 'none') hydrateImages(pv);
-    };
-    run();
-    hyTimer = setInterval(run, 800);
-    setTimeout(() => clearInterval(hyTimer), 3200);
+    if (liveEd && liveEd.isShown()) hydrateImages(liveEd.el);
+    const pv = $('#edPreview');
+    if (pv && pv.style.display !== 'none') hydrateImages(pv);
   }
 
   /* ---------- 加号小菜单（选择新建笔记 / 文件夹） ---------- */
@@ -494,6 +511,7 @@ const Notes = (() => {
       idx = d.notes || [];
       folders = d.folders || [];
       vaults = d.vaults || [];
+      shares = d.shares || [];
       folderVault = d.folderVault || {};
       if (d.currentVault) currentVault = d.currentVault;
       else {
@@ -547,17 +565,26 @@ const Notes = (() => {
     return new Date(ts * 1000).toLocaleDateString('zh-CN');
   }
 
+  function shareOfNote(id){
+    const now = Date.now() / 1000;
+    return shares.find(s => s.kind === 'note' && s.noteId === id && (!s.expireAt || s.expireAt > now));
+  }
+  function shareOfFolder(f){
+    const now = Date.now() / 1000;
+    return shares.find(s => s.kind === 'folder' && s.folder === f && (!s.expireAt || s.expireAt > now));
+  }
+  const shareMark = title => `<span class="kb-share-mark" title="${App.esc(title || '已分享')}">享</span>`;
+
   /* ---------- 树状目录渲染（图标 + 标题 + ⋯，单行） ---------- */
   function noteItemHtml(n){
     const pinned = n.pinned;
-    /* 只读笔记标题旁挂小锁；悬浮时右侧为 ⋯ 操作按钮。
-       v0.2.25：不再显示最近修改时间，标题占满整行；时间/字数/大小收进 ⋯ → 查看详细 */
     const lock = n.readonly ? '<svg class="ic ni-icon" style="color:var(--om-text-3);width:11px;height:11px"><use href="#i-lock"/></svg>' : '';
+    const sh = shareOfNote(n.id) ? shareMark('此笔记已分享') : '';
     return `
       <button class="note-item${n.id === currentId ? ' active' : ''}${selNotes.has(n.id) ? ' kb-selected' : ''}" data-note-id="${n.id}"${pinned ? '' : ' draggable="true"'}>
-        <svg class="ic ni-icon"><use href="${pinned ? '#i-star' : '#i-note'}"/></svg>${lock}
+        <svg class="ic ni-icon"><use href="${pinned ? '#i-star' : '#i-note'}"/></svg>${lock}${sh}
         <span class="ni-title">${App.esc(n.title || '未命名笔记')}</span>
-        <span class="ni-act" data-note-act="${n.id}" title="笔记操作：查看详细 / 新标签页打开 / 重命名 / 副本 / 只读 / 删除"><svg class="ic"><use href="#i-more"/></svg></span>
+        <span class="ni-act" data-note-act="${n.id}" title="笔记操作"><svg class="ic"><use href="#i-more"/></svg></span>
       </button>`;
   }
 
@@ -588,6 +615,7 @@ const Notes = (() => {
           <svg class="ic kb-chev"><use href="#i-chev-d"/></svg>
           <svg class="ic kb-folder-ic"><use href="#i-folder"/></svg>
           <span class="kb-folder-name" title="${App.esc(f)}">${App.esc(folderLabel(f))}</span>
+          ${shareOfFolder(f) ? shareMark('此文件夹已分享') : ''}
           <span class="kb-count num">${noteCountIn(f)}</span>
           ${locked ? '<span class="chip no-dot" style="font-size:10px;padding:2px 6px" title="系统内置文件夹，不可删除">内置</span>'
             : `<button class="icon-btn-xs kb-folder-add" data-kb-add="${App.esc(f)}" title="在此文件夹内新建笔记或子文件夹"><svg class="ic"><use href="#i-plus"/></svg></button>
@@ -722,14 +750,65 @@ const Notes = (() => {
     } catch (e) { showToast(e.message, 'err'); }
   }
 
-  /* ---------- 回收站（v0.2.25：按原文件夹分组显示） ---------- */
+  /* ---------- 回收站：树形展开 + 排序 ---------- */
+  function sortTrashNotes(arr){
+    const a = arr.slice();
+    if (trashSort === 'updated')
+      a.sort((x, y) => (y.updated || 0) - (x.updated || 0));
+    else if (trashSort === 'title')
+      a.sort((x, y) => String(x.deleted_title || x.title || '').localeCompare(
+        String(y.deleted_title || y.title || ''), 'zh'));
+    else
+      a.sort((x, y) => (y.deleted || 0) - (x.deleted || 0));
+    return a;
+  }
+  function trashNoteRow(n){
+    return `
+      <div class="note-item kb-trash-row" data-trash-id="${App.esc(n.id)}">
+        <svg class="ic ni-icon" style="color:var(--om-text-3)"><use href="#i-note"/></svg>
+        <span class="ni-title">${App.esc(n.deleted_title || n.title || '未命名笔记')}</span>
+        <span class="ni-date">${relTime(trashSort === 'updated' ? n.updated : n.deleted)}</span>
+        <button class="icon-btn-xs kb-trash-restore" data-trash-restore="${App.esc(n.id)}" title="恢复"><svg class="ic"><use href="#i-reply"/></svg></button>
+        <button class="icon-btn-xs kb-trash-purge" data-trash-purge="${App.esc(n.id)}" title="永久删除"><svg class="ic"><use href="#i-trash"/></svg></button>
+      </div>`;
+  }
+  function renderTrashFolder(prefix, notes, allFolders){
+    const kids = allFolders.filter(f => {
+      if (prefix) return f.startsWith(prefix + '/') && !f.slice(prefix.length + 1).includes('/');
+      return f && !f.includes('/');
+    });
+    const here = notes.filter(n => (n.folder || '') === prefix);
+    const open = !prefix || trashExpanded.has(prefix);
+    const inner = kids.map(k => renderTrashFolder(k, notes, allFolders)).join('')
+      + sortTrashNotes(here).map(trashNoteRow).join('');
+    if (!prefix) return inner || '<div class="kb-trash-empty">该仓库没有已删除笔记</div>';
+    const gone = !folders.includes(prefix);
+    return `
+      <div class="kb-folder${open ? ' open' : ''} kb-trash-fold">
+        <div class="kb-folder-row" data-trash-fold="${App.esc(prefix)}">
+          <svg class="ic kb-chev"><use href="#i-chev-d"/></svg>
+          <svg class="ic kb-folder-ic"><use href="#i-folder"/></svg>
+          <span class="kb-folder-name">${App.esc(folderLabel(prefix))}</span>
+          ${gone ? '<span class="chip no-dot" style="font-size:10px;margin-left:6px">已删除</span>' : ''}
+          <span class="kb-count num">${notes.filter(n => n.folder === prefix || (n.folder || '').startsWith(prefix + '/')).length}</span>
+        </div>
+        <div class="kb-folder-body" ${open ? '' : 'hidden'}>${inner || '<div class="kb-empty">空</div>'}</div>
+      </div>`;
+  }
   function renderTrashList(){
     const body = $('#kbTrashList');
     if (!body) return;
-    if (!trash.length){ body.innerHTML = '<div class="kb-trash-empty">回收站是空的</div>'; return; }
+    const sortBar = `<div class="kb-trash-sort">
+      <span>排序</span>
+      <div class="seg">
+        <button type="button" class="seg-btn${trashSort === 'deleted' ? ' active' : ''}" data-trash-sort="deleted">删除时间</button>
+        <button type="button" class="seg-btn${trashSort === 'updated' ? ' active' : ''}" data-trash-sort="updated">修改时间</button>
+        <button type="button" class="seg-btn${trashSort === 'title' ? ' active' : ''}" data-trash-sort="title">名称</button>
+      </div>
+    </div>`;
+    if (!trash.length){ body.innerHTML = sortBar + '<div class="kb-trash-empty">回收站是空的</div>'; return; }
     const vlist = trashVaults.length ? trashVaults : vaults;
     const vname = id => (vlist.find(v => v.id === id) || {}).name || vaultLabel(id);
-    /* 先按仓库，再按文件夹路径层级分组 */
     const byVault = new Map();
     for (const n of trash){
       const vid = noteVault(n);
@@ -740,40 +819,20 @@ const Notes = (() => {
       const rank = id => id === VAULT_DEFAULT ? 0 : id === VAULT_SYSTEM ? 2 : 1;
       return rank(a) - rank(b) || vname(a).localeCompare(vname(b), 'zh');
     });
-    const activeFolders = new Set(folders);
-    body.innerHTML = vaultOrder.map(vid => {
+    body.innerHTML = sortBar + vaultOrder.map(vid => {
       const notes = byVault.get(vid);
-      const groups = new Map();
-      const order = [];
+      const folderSet = new Set();
       for (const n of notes){
         const f = n.folder || '';
-        if (!groups.has(f)){ groups.set(f, []); order.push(f); }
-        groups.get(f).push(n);
+        if (!f) continue;
+        let cur = '';
+        f.split('/').forEach(seg => { cur = cur ? cur + '/' + seg : seg; folderSet.add(cur); });
       }
-      const inner = order.map(f => {
-        const items = groups.get(f);
-        const segs = f ? f.split('/') : [];
-        const gone = f && !activeFolders.has(f);
-        const tree = segs.length
-          ? segs.map((s, i) => `<span class="kb-trash-seg">${App.esc(s)}</span>${i < segs.length - 1 ? '<span class="kb-trash-sep">/</span>' : ''}`).join('')
-          : '未分组';
-        return `
-        <div class="kb-trash-folder" style="padding-left:${Math.min(segs.length, 6) * 10}px">
-          <div class="kb-sec-title" style="padding:6px 0 2px"><svg class="ic"><use href="#i-folder"/></svg>${tree}${gone ? '<span class="chip no-dot" style="font-size:10px;padding:1px 6px;margin-left:6px">文件夹已删除</span>' : ''}<span class="kb-count num" style="margin-left:auto">${items.length}</span></div>
-          ${items.map(n => `
-          <div class="note-item kb-trash-row" data-trash-id="${App.esc(n.id)}">
-            <svg class="ic ni-icon" style="color:var(--om-text-3)"><use href="#i-trash"/></svg>
-            <span class="ni-title">${App.esc(n.deleted_title || n.title || '未命名笔记')}</span>
-            <span class="ni-date">${relTime(n.deleted)}</span>
-            <button class="icon-btn-xs kb-trash-restore" data-trash-restore="${App.esc(n.id)}" title="恢复到原文件夹"><svg class="ic"><use href="#i-reply"/></svg></button>
-            <button class="icon-btn-xs kb-trash-purge" data-trash-purge="${App.esc(n.id)}" title="永久删除"><svg class="ic"><use href="#i-trash"/></svg></button>
-          </div>`).join('')}
-        </div>`;
-      }).join('');
+      const allFolders = [...folderSet].sort();
       return `
       <div class="kb-trash-vault">
         <div class="kb-trash-vault-head"><svg class="ic"><use href="#i-inbox"/></svg>${App.esc(vname(vid))}<span class="chip no-dot" style="margin-left:8px;font-size:10px">${vid === VAULT_SYSTEM ? '系统内置' : vid === VAULT_DEFAULT ? '默认' : '自建'}</span><span class="kb-count num" style="margin-left:auto">${notes.length}</span></div>
-        ${inner}
+        ${renderTrashFolder('', notes, allFolders)}
       </div>`;
     }).join('');
   }
@@ -932,6 +991,7 @@ const Notes = (() => {
     if (!meta) return;
     kbMenu(anchor, [
       ['查看详细', 'i-search', () => showNoteInfo(id)],
+      ['分享笔记', 'i-link', () => openShareModal({ kind: 'note', noteId: id, name: meta.title })],
       ['在新标签页打开', 'i-note', () => open(id)],
       ['导出为 .md', 'i-download', () => API.dl('/api/notes/' + id + '/export')],
       ['重命名', 'i-pen', async () => {
@@ -1014,7 +1074,9 @@ const Notes = (() => {
     try {
       const d = await API.get('/api/notes/' + id);
       $('#edSrc').value = d.content;
-      $('#edTitle').value = meta ? meta.title : '';
+      $('#edTitle').value = (d.title != null && d.title !== '') ? d.title : (meta ? meta.title : '');
+      if (meta && d.title) meta.title = d.title;
+      lastKnownUpdated = d.updated || Math.floor(Date.now() / 1000);
       dirty = false;
       renderPreview();
       if (liveEd) liveEd.refresh();
@@ -1078,6 +1140,7 @@ const Notes = (() => {
         title: $('#edTitle').value.trim() || '未命名笔记',
       });
       dirty = false;
+      lastKnownUpdated = Math.floor(Date.now() / 1000);
       const meta = idx.find(n => n.id === currentId);
       if (meta){ meta.title = $('#edTitle').value.trim() || '未命名笔记'; meta.updated = Date.now() / 1000; }
       $('#edFootTime').textContent = '已自动保存（刚刚）';
@@ -1214,6 +1277,7 @@ const Notes = (() => {
           showToast(`文件夹已重命名为「${trimmed}」`);
         } catch (e) { showToast(e.message, 'err'); }
       }],
+      ['分享文件夹', 'i-link', () => openShareModal({ kind: 'folder', folder: f, name: folderLabel(f) })],
       ['复制文件夹', 'i-copy', () => copyFolder(f)],
       ['导出文件夹', 'i-download', () => API.dl('/api/notes/folder/export?path=' + encodeURIComponent(f))],
       ['删除文件夹', 'i-trash', () => delFolder(f)],
@@ -1333,12 +1397,22 @@ const Notes = (() => {
     el.innerHTML = html;
   }
 
+  function highlightPreviewCode(box){
+    if (!box || !window.LiveMD || !LiveMD.highlightCode) return;
+    const esc = (window.App && App.esc) ? App.esc : s => String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    box.querySelectorAll('pre code').forEach(el => {
+      if (el.dataset.hl === '1') return;
+      el.dataset.hl = '1';
+      el.innerHTML = LiveMD.highlightCode(esc(el.textContent || ''));
+    });
+  }
+
   function renderPreview(){
     $('#edPreview').innerHTML = mdRender($('#edSrc').value) ||
       '<p style="color:var(--om-text-3)">开始输入，右侧实时预览…</p>';
-    /* 预览区附件图片水合：鉴权取图转 data URL，避免裸请求被 401 拦截 */
+    highlightPreviewCode($('#edPreview'));
     hydrateImages($('#edPreview'));
-    /* 预览重渲染广播：查找高亮需重打 */
     try { $('#edPreview').dispatchEvent(new CustomEvent('omni:preview-rendered', { bubbles: true })); } catch (_) {}
   }
 
@@ -1381,6 +1455,7 @@ const Notes = (() => {
     liveEd = LiveMD.attach(ta, {
       uploadImage,
       onImageError: e => showToast('图片上传失败：' + (e.message || e), 'err'),
+      afterRebuild: el => hydrateImages(el),
     });
     liveEd.hide();   // 默认显示状态由 setMode 决定
   }
@@ -1412,11 +1487,164 @@ const Notes = (() => {
     ta.focus();
   }
 
+  /* ---------- 分享 ---------- */
+  let shareTarget = null;
+  async function openShareModal(target){
+    shareTarget = target;
+    $('#kbShareTitle').textContent = '分享「' + (target.name || '') + '」';
+    $('#kbShareEdit').classList.remove('on');
+    $$('#kbShareExpire .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.days === '7'));
+    $('#kbShareLinkRow').hidden = true;
+    $('#kbShareLink').value = '';
+    const exist = target.kind === 'note' ? shareOfNote(target.noteId) : shareOfFolder(target.folder);
+    $('#kbShareRevoke').hidden = !exist;
+    $('#kbShareRevoke').dataset.sid = exist ? exist.id : '';
+    App.openModal('kbShareMask');
+  }
+  async function createShareLink(){
+    if (!shareTarget) return;
+    const days = parseInt($('#kbShareExpire .seg-btn.active')?.dataset.days || '7', 10);
+    try {
+      const d = await API.post('/api/notes/shares', {
+        kind: shareTarget.kind,
+        noteId: shareTarget.noteId || '',
+        folder: shareTarget.folder || '',
+        vault: currentVault,
+        expireDays: days,
+        canEdit: $('#kbShareEdit').classList.contains('on'),
+      });
+      const url = location.origin.replace(/\/$/, '') + '/?s=' + encodeURIComponent(d.token);
+      $('#kbShareLink').value = url;
+      $('#kbShareLinkRow').hidden = false;
+      showToast('链接已生成，默认开启查看权限');
+      await load();
+    } catch (e) { showToast(e.message, 'err'); }
+  }
+
+  async function pollOpenNote(){
+    if (!currentId || dirty) return;
+    if (document.body.dataset.view !== 'notes' || document.hidden) return;
+    try {
+      const d = await API.get('/api/notes/' + currentId);
+      const ts = d.updated || 0;
+      if (ts && lastKnownUpdated && ts > lastKnownUpdated + 1){
+        $('#edSrc').value = d.content || '';
+        if (d.title){
+          $('#edTitle').value = d.title;
+          const meta = idx.find(n => n.id === currentId);
+          if (meta){ meta.title = d.title; meta.updated = ts; }
+        }
+        lastKnownUpdated = ts;
+        dirty = false;
+        if (liveEd) liveEd.refresh();
+        renderPreview();
+        hydrateNow();
+        renderTree();
+        renderTabs();
+        updateCrumb();
+        updateStat();
+        $('#edFootTime').textContent = '已同步远端更新';
+      } else if (ts) lastKnownUpdated = Math.max(lastKnownUpdated, ts);
+    } catch (_) {}
+  }
+
+  async function openShareOverlay(token){
+    const mask = $('#kbShareViewMask');
+    if (!mask) return;
+    mask.classList.add('open');
+    const list = $('#kbShareViewList');
+    const body = $('#kbShareViewBody');
+    const title = $('#kbShareViewTitle');
+    const sub = $('#kbShareViewSub');
+    list.innerHTML = '加载中…';
+    body.innerHTML = '';
+    try {
+      const d = await fetch('/api/share/' + encodeURIComponent(token)).then(r => {
+        if (!r.ok) throw new Error('分享不存在或已过期');
+        return r.json();
+      });
+      title.textContent = d.name || '分享';
+      sub.textContent = (d.canEdit ? '可编辑 · ' : '只读 · ') +
+        (d.expireAt ? ('有效至 ' + new Date(d.expireAt * 1000).toLocaleString('zh-CN')) : '');
+      const notes = d.notes || [];
+      list.innerHTML = notes.map(n =>
+        `<button class="note-item" data-share-nid="${App.esc(n.id)}"><svg class="ic ni-icon"><use href="#i-note"/></svg><span class="ni-title">${App.esc(n.title)}</span></button>`
+      ).join('') || '<div class="kb-empty">没有可查看的笔记</div>';
+      const loadOne = async nid => {
+        const n = await fetch('/api/share/' + encodeURIComponent(token) + '/notes/' + encodeURIComponent(nid)).then(r => r.json());
+        let html = mdRender(n.content || '') || '<p style="color:var(--om-text-3)">空笔记</p>';
+        html = html.replace(/src="\/api\/notes\/assets\//g,
+          'src="/api/share/' + encodeURIComponent(token) + '/assets/');
+        body.innerHTML = '<h3 style="margin:0 0 12px">' + App.esc(n.title || '') + '</h3>' + html;
+        highlightPreviewCode(body);
+        if (n.canEdit){
+          const editor = document.createElement('div');
+          editor.style.marginTop = '16px';
+          editor.innerHTML =
+            '<div class="set-row-label" style="margin-bottom:8px">编辑笔记</div>' +
+            '<textarea class="input" id="kbShareEditSrc" style="width:100%;min-height:220px;padding:12px 14px;font-family:var(--om-font-mono);line-height:1.6"></textarea>' +
+            '<div style="margin-top:10px;display:flex;justify-content:flex-end"><button class="btn btn-primary btn-sm" type="button" id="kbShareSave">保存</button></div>';
+          body.appendChild(editor);
+          const ta = editor.querySelector('#kbShareEditSrc');
+          ta.value = n.content || '';
+          editor.querySelector('#kbShareSave').addEventListener('click', async () => {
+            try {
+              const resp = await fetch('/api/share/' + encodeURIComponent(token) + '/notes/' + encodeURIComponent(nid), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: ta.value }),
+              });
+              if (!resp.ok) throw new Error('保存失败');
+              showToast('已保存');
+              loadOne(nid);
+            } catch (err) { showToast(err.message || '保存失败', 'err'); }
+          });
+        }
+      };
+      list.onclick = e => {
+        const b = e.target.closest('[data-share-nid]');
+        if (b) loadOne(b.dataset.shareNid);
+      };
+      if (notes[0]) loadOne(notes[0].id);
+    } catch (e) {
+      title.textContent = '无法打开分享';
+      sub.textContent = e.message || '';
+      list.innerHTML = '';
+    }
+  }
+
   /* ---------- 事件 ---------- */
   function init(){
     /* 新建笔记：所有 + 号按钮都通过 kbMenu 弹出选择，不再常驻顶栏。
        原来 #noteNew / #folderNew 已从 HTML 移除，相应绑定也清掉。 */
     App.onEnter(load);
+    setInterval(pollOpenNote, 4000);
+    try {
+      const s = new URLSearchParams(location.search).get('s');
+      if (s) openShareOverlay(s);
+    } catch (_) {}
+    $('#kbShareCreate')?.addEventListener('click', createShareLink);
+    $('#kbShareCopy')?.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText($('#kbShareLink').value); showToast('链接已复制'); }
+      catch (e) { showToast('复制失败', 'err'); }
+    });
+    $('#kbShareClose')?.addEventListener('click', () => App.closeModal('kbShareMask'));
+    $('#kbShareRevoke')?.addEventListener('click', async () => {
+      const sid = $('#kbShareRevoke').dataset.sid;
+      if (!sid) return;
+      try {
+        await API.del('/api/notes/shares/' + encodeURIComponent(sid));
+        showToast('已取消分享');
+        App.closeModal('kbShareMask');
+        await load();
+      } catch (e) { showToast(e.message, 'err'); }
+    });
+    $('#kbShareExpire')?.addEventListener('click', e => {
+      const b = e.target.closest('.seg-btn');
+      if (!b) return;
+      $$('#kbShareExpire .seg-btn').forEach(x => x.classList.toggle('active', x === b));
+    });
+    $('#kbShareViewClose')?.addEventListener('click', () => $('#kbShareViewMask')?.classList.remove('open'));
 
     /* 顶部 "..." 溢出菜单：导入 / 导出（设计图把显眼按钮收纳收起） */
     $('#notesOverflowBtn')?.addEventListener('click', () => kbMenu($('#notesOverflowBtn'), [
@@ -1612,6 +1840,20 @@ const Notes = (() => {
       if (rst){ e.stopPropagation(); restoreTrash(rst.dataset.trashRestore); return; }
       const prg = e.target.closest('[data-trash-purge]');
       if (prg){ e.stopPropagation(); purgeTrash(prg.dataset.trashPurge); return; }
+      const fold = e.target.closest('[data-trash-fold]');
+      if (fold){
+        e.stopPropagation();
+        const p = fold.dataset.trashFold;
+        if (trashExpanded.has(p)) trashExpanded.delete(p); else trashExpanded.add(p);
+        renderTrashList();
+        return;
+      }
+      const ts = e.target.closest('[data-trash-sort]');
+      if (ts){
+        e.stopPropagation();
+        trashSort = ts.dataset.trashSort || 'deleted';
+        renderTrashList();
+      }
     });
 
     /* 编辑区拖入附件 → 在光标处插入引用 */
@@ -2200,7 +2442,7 @@ const Notes = (() => {
     /* ---------- 撤销 / 重做（实时渲染模式接管；源码模式交给 textarea 原生） ---------- */
     document.addEventListener('keydown', e => {
       if (!liveOn()) return;
-      const k = e.key.toLowerCase();
+      const k = String(e.key || '').toLowerCase();
       if (!(e.metaKey || e.ctrlKey)) return;
       if (k === 'z'){
         if (e.shiftKey){ if (liveEd.redo()) e.preventDefault(); }

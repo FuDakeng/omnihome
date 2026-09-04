@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>万事屋 · 个人门户</title>
-<link rel="stylesheet" href="css/theme.css?v=0.2.31">
-<link rel="stylesheet" href="css/layout.css?v=0.2.31">
-<link rel="stylesheet" href="css/components.css?v=0.2.31">
+<link rel="stylesheet" href="css/theme.css?v=0.2.32">
+<link rel="stylesheet" href="css/layout.css?v=0.2.32">
+<link rel="stylesheet" href="css/components.css?v=0.2.32">
 <script>
 /* 首屏绘制前确定明暗，避免主题闪烁；未登录时登录页也据此渲染。
    优先级：本机上次的选择 → 系统偏好 → 深色兜底（html 标签上的初始值）。 */
@@ -1066,7 +1066,7 @@
                   </div>
                 </div>
               </article>
-              <article class="card">
+              <article class="card obsidian-sync-card">
                 <div class="card-head">
                   <h3 class="card-title"><svg class="ic"><use href="#i-swap"/></svg>Obsidian 插件同步</h3>
                   <span class="chip no-dot" id="obsidianSyncChip">未开启</span>
@@ -1082,19 +1082,24 @@
                       <div class="set-row-sub">下载后把 <code>omnihome-sync</code> 文件夹放到仓库的 <code>.obsidian/plugins/</code> 下并启用。也可使用 BRAT 侧载。</div></div>
                     <button class="btn btn-sm btn-primary" id="pluginDownload"><svg class="ic"><use href="#i-download"/></svg>下载插件</button>
                   </div>
-                  <div id="obsidianSyncBody" hidden>
-                    <div class="set-row" style="align-items:center">
+                  <div id="obsidianSyncBody" class="obsidian-sync-body" hidden>
+                    <div class="set-row">
                       <div class="set-row-info"><div class="set-row-label">服务端地址</div>
                         <div class="set-row-sub">填入插件「服务端地址」（含协议与端口，无末尾斜杠）</div></div>
-                      <div style="display:flex;align-items:center;gap:8px">
-                        <div class="input-wrap" style="width:280px"><input class="input" id="syncBaseUrl" readonly style="padding-left:14px;height:34px;font-family:ui-monospace,Menlo,Consolas,monospace"></div>
-                        <button class="btn btn-outline btn-sm" id="syncBaseUrlCopy"><svg class="ic"><use href="#i-copy"/></svg>复制</button>
+                      <div class="set-row-ctrl obsidian-url-ctrl">
+                        <div class="input-wrap"><input class="input" id="syncBaseUrl" readonly></div>
+                        <button class="btn btn-outline btn-sm" id="syncBaseUrlCopy"><svg class="ic"><use href="#i-copy"/></svg>复制地址</button>
                       </div>
                     </div>
-                    <div class="set-row-label" style="margin:8px 0 6px">各仓库同步令牌</div>
-                    <div id="syncVaultKeys" class="sync-vault-keys"></div>
-                    <div class="set-row-label" style="margin:14px 0 6px">同步日志</div>
-                    <div class="sync-log" id="syncLogBox">暂无记录</div>
+                    <div class="obsidian-sync-block">
+                      <div class="set-row-label">各仓库同步令牌</div>
+                      <div class="set-row-sub" style="margin-bottom:10px">明文仅生成时可见。一键复制会带上服务端地址与 API Key，可在 Obsidian 插件设置里粘贴导入。</div>
+                      <div id="syncVaultKeys" class="sync-vault-keys"></div>
+                    </div>
+                    <div class="obsidian-sync-block">
+                      <div class="set-row-label">同步日志</div>
+                      <div class="sync-log" id="syncLogBox">暂无记录</div>
+                    </div>
                   </div>
                 </div>
               </article>
@@ -1517,7 +1522,7 @@
   <div class="modal modal-trash">
     <div class="m-head">
       <h3>回收站</h3>
-      <p>被删除的笔记按仓库与文件夹层级展示，保留 <b id="kbTrashDaysTxt">30</b> 天后自动清除（可在 设置 · 数据与存储 调整）。常驻笔记删除后自动重建，不进回收站。</p>
+      <p>被删除的笔记按仓库以文件夹树展示，点击文件夹展开。保留 <b id="kbTrashDaysTxt">30</b> 天后自动清除。</p>
     </div>
     <div class="m-body" style="padding:0">
       <div id="kbTrashList" style="max-height:46vh;overflow:auto;padding:6px 14px"></div>
@@ -1542,6 +1547,65 @@
     </div>
     <div class="m-foot">
       <button class="btn btn-primary" id="kbInfoClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="kbShareMask">
+  <div class="modal modal-trash">
+    <div class="m-head">
+      <h3 id="kbShareTitle">分享</h3>
+      <p>生成链接后任何人可在有效期内打开。默认开启查看权限，可额外允许编辑。</p>
+    </div>
+    <div class="m-body">
+      <div class="set-row">
+        <div class="set-row-info"><div class="set-row-label">查看权限</div>
+          <div class="set-row-sub">持有链接即可阅读分享范围内的笔记</div></div>
+        <button class="switch on" id="kbShareViewPerm" disabled role="switch"></button>
+      </div>
+      <div class="set-row">
+        <div class="set-row-info"><div class="set-row-label">编辑权限</div>
+          <div class="set-row-sub">允许通过分享接口改写笔记正文（只读/常驻笔记除外）</div></div>
+        <button class="switch" id="kbShareEdit" role="switch"></button>
+      </div>
+      <div class="set-row" style="align-items:center">
+        <div class="set-row-info"><div class="set-row-label">有效期</div>
+          <div class="set-row-sub">到期后链接自动失效</div></div>
+        <div class="seg" id="kbShareExpire">
+          <button class="seg-btn" data-days="1">1 天</button>
+          <button class="seg-btn active" data-days="7">7 天</button>
+          <button class="seg-btn" data-days="30">30 天</button>
+          <button class="seg-btn" data-days="0">长期</button>
+        </div>
+      </div>
+      <div id="kbShareLinkRow" hidden>
+        <div class="set-row-label" style="margin-bottom:8px">分享链接</div>
+        <div style="display:flex;gap:8px">
+          <div class="input-wrap" style="flex:1"><input class="input" id="kbShareLink" readonly style="padding-left:14px"></div>
+          <button class="btn btn-outline btn-sm" id="kbShareCopy"><svg class="ic"><use href="#i-copy"/></svg>复制</button>
+        </div>
+      </div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-ghost btn-sm" id="kbShareRevoke" hidden style="margin-right:auto;color:var(--om-danger)">取消已有分享</button>
+      <button class="btn btn-outline" id="kbShareClose">关闭</button>
+      <button class="btn btn-primary" id="kbShareCreate">生成链接</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="kbShareViewMask">
+  <div class="modal" style="width:min(920px,96vw);max-height:86vh;display:flex;flex-direction:column">
+    <div class="m-head">
+      <h3 id="kbShareViewTitle">分享</h3>
+      <p id="kbShareViewSub"></p>
+    </div>
+    <div class="m-body" style="display:grid;grid-template-columns:220px 1fr;gap:16px;min-height:0;flex:1">
+      <div id="kbShareViewList" style="overflow:auto;border-right:1px solid var(--om-border);padding-right:8px"></div>
+      <div id="kbShareViewBody" class="md-preview" style="overflow:auto"></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-primary" id="kbShareViewClose">关闭</button>
     </div>
   </div>
 </div>
@@ -1807,7 +1871,7 @@
 <script src="js/vendor/purify.min.js?v=0.2.29"
         onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js';s.onerror=function(){console.warn('DOMPurify 本地与 CDN 均未加载')};document.head.appendChild(s);"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js" onerror="console.warn('QRCode CDN 未加载')"></script>
-<script src="js/demo.js?v=0.2.29"></script>
+<script src="js/demo.js?v=0.2.32"></script>
 <script src="js/api.js?v=0.2.29"></script>
 <script src="js/app.js?v=0.2.29"></script>
 <script src="js/auth.js?v=0.2.29"></script>
@@ -1818,12 +1882,12 @@
 <script src="js/bookmarks.js?v=0.2.29"></script>
 <script src="js/globalsearch.js?v=0.2.29"></script>
 <script src="js/vault.js?v=0.2.29"></script>
-<script src="js/livemd.js?v=0.2.29"></script>
+<script src="js/livemd.js?v=0.2.32"></script>
 <script src="js/dashboard.js?v=0.2.29"></script>
-<script src="js/notes.js?v=0.2.31"></script>
+<script src="js/notes.js?v=0.2.32"></script>
 <script src="js/plan.js?v=0.2.31"></script>
 <script src="js/toolbox.js?v=0.2.29"></script>
-<script src="js/settings.js?v=0.2.31"></script>
+<script src="js/settings.js?v=0.2.32"></script>
 <!-- 附件灯箱：点击附件图片时大图预览，点背景或按 Esc 关闭 -->
 <div class="asset-lightbox" id="assetLightbox" hidden>
   <div class="asset-lightbox-mask" data-asset-close></div>

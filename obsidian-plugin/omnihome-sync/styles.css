@@ -96,3 +96,26 @@
 .omnihome-sync-log-line:last-child { border-bottom: 0; }
 .omnihome-sync-log-line .ts { color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .omnihome-sync-log-line .err { color: var(--text-error); }
+
+/* ---------- 查看信息 ---------- */
+.omnihome-sync-info { padding-bottom: 8px; }
+.omnihome-sync-info-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 10px 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  align-items: start;
+}
+.omnihome-sync-info-row:last-child { border-bottom: 0; }
+.omnihome-sync-info-row .k {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding-top: 2px;
+}
+.omnihome-sync-info-row .v {
+  color: var(--text-normal);
+  font-size: 13px;
+  line-height: 1.55;
+  word-break: break-word;
+}

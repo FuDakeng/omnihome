@@ -473,9 +473,12 @@
       return `<div class="sync-vault-row" data-sv="${App.esc(v.id)}">
         <div class="nm">${App.esc(v.name)}${sys ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">不可同步</span>' : ''}</div>
         <div class="key">${sys ? '—' : App.esc(shown)}</div>
-        ${sys ? '' : `<button class="btn btn-outline btn-sm" data-sv-copy="${App.esc(v.id)}">复制</button>
+        ${sys ? '' : `<div class="sv-actions">
+          <button class="btn btn-outline btn-sm" data-sv-copy="${App.esc(v.id)}">复制 Key</button>
+          ${plain ? `<button class="btn btn-outline btn-sm" data-sv-bundle="${App.esc(v.id)}">一键复制连接信息</button>` : ''}
           <button class="btn btn-primary btn-sm" data-sv-gen="${App.esc(v.id)}">${k ? '重置' : '生成令牌'}</button>
-          ${k ? `<button class="btn btn-outline btn-sm" style="color:var(--om-danger)" data-sv-rev="${App.esc(v.id)}">吊销</button>` : ''}`}
+          ${k ? `<button class="btn btn-outline btn-sm" style="color:var(--om-danger)" data-sv-rev="${App.esc(v.id)}">吊销</button>` : ''}
+        </div>`}
       </div>`;
     }).join('') || '<div style="font-size:12px;color:var(--om-text-3)">暂无笔记仓库</div>';
   }
@@ -518,6 +521,7 @@
   document.addEventListener('click', async e => {
     const gen = e.target.closest('[data-sv-gen]');
     const copy = e.target.closest('[data-sv-copy]');
+    const bundle = e.target.closest('[data-sv-bundle]');
     const rev = e.target.closest('[data-sv-rev]');
     if (gen){
       const vid = gen.dataset.svGen;
@@ -540,6 +544,15 @@
       const plain = _syncPlainByVault[vid];
       if (!plain){ showToast('明文仅生成时可见，请先生成令牌', 'err'); return; }
       try { await navigator.clipboard.writeText(plain); showToast('令牌已复制'); }
+      catch (err) { showToast('复制失败', 'err'); }
+    }
+    if (bundle){
+      const vid = bundle.dataset.svBundle;
+      const plain = _syncPlainByVault[vid];
+      if (!plain){ showToast('请先生成令牌后再复制连接信息', 'err'); return; }
+      const url = ($('#syncBaseUrl')?.value || location.origin).replace(/\/$/, '');
+      const blob = 'OMNIHOME_SYNC\nurl: ' + url + '\nkey: ' + plain + '\n';
+      try { await navigator.clipboard.writeText(blob); showToast('已复制服务端地址与 API Key，可在插件设置里一键粘贴'); }
       catch (err) { showToast('复制失败', 'err'); }
     }
     if (rev){

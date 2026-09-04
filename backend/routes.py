@@ -3,6 +3,7 @@
 """
 import re
 import hashlib
+import secrets
 import threading
 import time
 import uuid
@@ -1311,6 +1312,100 @@ def _rename_quick(old: str, new: str):
     return _ren
 
 
+def _share_hash(raw: str) -> str:
+    return hashlib.sha256(("note-share:" + (raw or "")).encode("utf-8")).hexdigest()
+
+
+def _shares_load(username: str) -> list:
+    items = storage.user_json(username, "notes/shares.json", [])
+    return items if isinstance(items, list) else []
+
+
+def _shares_save(username: str, items: list):
+    storage.save_user_json(username, "notes/shares.json", items)
+
+
+def _share_index_put(raw_hash: str, username: str, sid: str):
+    cfg = storage.get_config()
+    idxm = dict(cfg.get("noteShareIndex") or {})
+    idxm[raw_hash] = {"u": username, "id": sid}
+    cfg["noteShareIndex"] = idxm
+    storage.save_config(cfg)
+
+
+def _share_index_del(raw_hash: str):
+    cfg = storage.get_config()
+    idxm = dict(cfg.get("noteShareIndex") or {})
+    idxm.pop(raw_hash, None)
+    cfg["noteShareIndex"] = idxm
+    storage.save_config(cfg)
+
+
+def _share_gc(username: str) -> list:
+    now = int(time.time())
+    items, alive = _shares_load(username), []
+    for x in items:
+        exp = int(x.get("expireAt") or 0)
+        if exp and exp <= now:
+            h = x.get("hash") or ""
+            if h:
+                _share_index_del(h)
+            continue
+        alive.append(x)
+    if len(alive) != len(items):
+        _shares_save(username, alive)
+    return alive
+
+
+def _share_public_list(username: str) -> list:
+    out = []
+    for x in _share_gc(username):
+        out.append({"id": x.get("id"), "kind": x.get("kind"),
+                    "noteId": x.get("noteId") or "", "folder": x.get("folder") or "",
+                    "vault": x.get("vault") or "", "canEdit": bool(x.get("canEdit")),
+                    "expireAt": int(x.get("expireAt") or 0),
+                    "name": x.get("name") or ""})
+    return out
+
+
+def _resolve_share(raw: str):
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    hit = (storage.get_config().get("noteShareIndex") or {}).get(_share_hash(raw))
+    if not hit:
+        return None
+    username, sid = hit.get("u"), hit.get("id")
+    if not username or not sid:
+        return None
+    rec = next((x for x in _share_gc(username) if x.get("id") == sid), None)
+    if not rec:
+        return None
+    return username, rec
+
+
+def _share_scope_notes(username: str, rec: dict) -> list:
+    idx = storage.notes_index(username)
+    if rec.get("kind") == "note":
+        nid = rec.get("noteId")
+        return [n for n in idx if n.get("id") == nid and not n.get("deleted")]
+    folder = rec.get("folder") or ""
+    vault = rec.get("vault") or ""
+    out = []
+    for n in idx:
+        if n.get("deleted"):
+            continue
+        if vault and _infer_note_vault(n) != vault:
+            continue
+        f = n.get("folder") or ""
+        if folder == "":
+            if _infer_note_vault(n) == vault:
+                out.append(n)
+        elif f == folder or f.startswith(folder + "/"):
+            out.append(n)
+    return out
+
+
 def _ensure_pinned(username: str):
     """常驻笔记缺失时自动创建（删除后再次拉取即重建）；并确保「每日计划」「灵感速记」文件夹存在。"""
     idx = storage.notes_index(username)
@@ -1396,6 +1491,7 @@ def list_notes(authorization: Optional[str] = Header(None)):
             "folderVault": vaults.get("folderVault") or {},
             "vaults": vaults["items"],
             "currentVault": _active_vault_id(username),
+            "shares": _share_public_list(username),
             "trashCount": trash_count}
 
 
@@ -2115,6 +2211,151 @@ def trash_purge_all(authorization: Optional[str] = Header(None)):
     return {"ok": True, "purged": purged}
 
 
+class ShareIn(BaseModel):
+    kind: str = "note"          # note | folder
+    noteId: str = ""
+    folder: str = ""
+    vault: str = ""
+    expireDays: int = 7         # 0 = 十年
+    canEdit: bool = False
+
+
+@router.get("/api/notes/shares")
+def list_shares(authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    return {"shares": _share_public_list(username)}
+
+
+@router.post("/api/notes/shares")
+def create_share(body: ShareIn, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    kind = (body.kind or "note").strip()
+    if kind not in ("note", "folder"):
+        raise HTTPException(400, "分享类型无效")
+    days = max(0, min(3650, int(body.expireDays)))
+    expire_at = int(time.time()) + (3650 if days == 0 else days) * 86400
+    name = ""
+    note_id, folder, vault = "", "", body.vault or _active_vault_id(username)
+    if kind == "note":
+        note_id = (body.noteId or "").strip()
+        idx = storage.notes_index(username)
+        hit = next((n for n in idx if n.get("id") == note_id and not n.get("deleted")), None)
+        if not hit:
+            raise HTTPException(404, "笔记不存在")
+        name = hit.get("title") or "未命名笔记"
+        folder = hit.get("folder") or ""
+        vault = _infer_note_vault(hit)
+    else:
+        folder = (body.folder or "").strip().strip("/")
+        name = folder or "仓库根目录"
+        if not _vault_by_id(username, vault):
+            raise HTTPException(404, "笔记仓库不存在")
+    raw = "s_" + secrets.token_urlsafe(18)
+    sid = uuid.uuid4().hex[:10]
+    h = _share_hash(raw)
+    rec = {"id": sid, "hash": h, "kind": kind, "noteId": note_id, "folder": folder,
+           "vault": vault, "canEdit": bool(body.canEdit), "canView": True,
+           "expireAt": expire_at, "created": int(time.time()), "name": name,
+           "prefix": raw[:8]}
+    items = _share_gc(username)
+    items.append(rec)
+    _shares_save(username, items)
+    _share_index_put(h, username, sid)
+    origin = ""
+    return {"ok": True, "id": sid, "token": raw, "expireAt": expire_at,
+            "canEdit": rec["canEdit"], "name": name}
+
+
+@router.delete("/api/notes/shares/{sid}")
+def revoke_share(sid: str, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    items = _share_gc(username)
+    hit = next((x for x in items if x.get("id") == sid), None)
+    if not hit:
+        raise HTTPException(404, "分享不存在")
+    if hit.get("hash"):
+        _share_index_del(hit["hash"])
+    _shares_save(username, [x for x in items if x.get("id") != sid])
+    return {"ok": True}
+
+
+def _require_share(token: str):
+    found = _resolve_share(token)
+    if not found:
+        raise HTTPException(404, "分享不存在或已过期")
+    return found
+
+
+@router.get("/api/share/{token}")
+def share_get(token: str):
+    username, rec = _require_share(token)
+    notes = _share_scope_notes(username, rec)
+    items = [{"id": n["id"], "title": n.get("title") or "未命名笔记",
+              "folder": n.get("folder") or "", "updated": int(n.get("updated") or 0)}
+             for n in notes]
+    return {"ok": True, "kind": rec.get("kind"), "name": rec.get("name") or "",
+            "canEdit": bool(rec.get("canEdit")), "canView": True,
+            "expireAt": int(rec.get("expireAt") or 0), "notes": items}
+
+
+@router.get("/api/share/{token}/notes/{nid}")
+def share_get_note(token: str, nid: str):
+    username, rec = _require_share(token)
+    notes = _share_scope_notes(username, rec)
+    hit = next((n for n in notes if n["id"] == nid), None)
+    if not hit:
+        raise HTTPException(404, "不在此分享范围内")
+    return {"id": nid, "title": hit.get("title") or "", "folder": hit.get("folder") or "",
+            "content": storage.note_read(username, nid),
+            "updated": int(hit.get("updated") or 0), "canEdit": bool(rec.get("canEdit"))}
+
+
+class ShareNoteIn(BaseModel):
+    content: Optional[str] = None
+    title: Optional[str] = None
+
+
+@router.put("/api/share/{token}/notes/{nid}")
+def share_put_note(token: str, nid: str, body: ShareNoteIn):
+    username, rec = _require_share(token)
+    if not rec.get("canEdit"):
+        raise HTTPException(403, "此分享仅可查看")
+    notes = _share_scope_notes(username, rec)
+    hit = next((n for n in notes if n["id"] == nid), None)
+    if not hit:
+        raise HTTPException(404, "不在此分享范围内")
+    if hit.get("readonly") or hit.get("pinned"):
+        raise HTTPException(403, "该笔记不可编辑")
+    if body.content is not None:
+        storage.note_write(username, nid, body.content)
+    idx = storage.notes_index(username)
+    for item in idx:
+        if item["id"] == nid:
+            item["updated"] = int(time.time())
+            if body.title is not None:
+                item["title"] = body.title
+            break
+    storage.save_notes_index(username, idx)
+    return {"ok": True}
+
+
+@router.get("/api/share/{token}/assets/{name}")
+def share_get_asset(token: str, name: str):
+    username, rec = _require_share(token)
+    if not _ASSET_NAME.match(name):
+        raise HTTPException(400, "非法附件名")
+    raw = storage.asset_read(username, name)
+    if raw is None:
+        raise HTTPException(404, "附件不存在")
+    try:
+        meta = json.loads(raw)
+        body = base64.b64decode(meta["d"])
+    except Exception:
+        raise HTTPException(500, "附件数据损坏")
+    return Response(content=body, media_type=meta.get("t", "image/png"),
+                    headers={"Cache-Control": "public, max-age=3600"})
+
+
 @router.post("/api/notes/{nid}/restore")
 def restore_note(nid: str, authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
@@ -2150,9 +2391,14 @@ def get_note(nid: str, authorization: Optional[str] = Header(None)):
     if not storage.note_key(username, nid):
         raise HTTPException(400, "非法笔记 ID")
     idx = storage.notes_index(username)
-    if not any(i["id"] == nid for i in idx):
+    hit = next((i for i in idx if i["id"] == nid), None)
+    if not hit:
         raise HTTPException(404, "笔记不存在")
-    return {"id": nid, "content": storage.note_read(username, nid)}
+    return {"id": nid, "content": storage.note_read(username, nid),
+            "title": hit.get("title") or "", "folder": hit.get("folder") or "",
+            "updated": int(hit.get("updated") or 0),
+            "readonly": bool(hit.get("readonly")),
+            "vault": _infer_note_vault(hit)}
 
 
 class NoteContentIn(BaseModel):
@@ -2382,7 +2628,7 @@ def sync_hello(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     vmeta = _vault_by_id(username, vault_id) or {}
     return {"ok": True, "name": "万事屋", "version": app_version.VERSION,
             "stage": app_version.STAGE, "vault": vault_id,
-            "vaultName": vmeta.get("name") or "", "pluginMin": "0.0.3"}
+            "vaultName": vmeta.get("name") or "", "pluginMin": "0.0.4"}
 
 
 @router.get("/api/sync/log")

@@ -931,7 +931,19 @@
   border: 1px solid var(--om-border);
   overflow-x: auto;
 }
-.md-preview pre code{ background: transparent; color: var(--om-text-1); padding: 0; }
+.md-preview pre code{
+  display: block;
+  padding: 0;
+  background: transparent;
+  color: #c8d3f5;
+  white-space: pre;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+.md-preview pre code .hl-kw{ color: #c792ea; font-weight: 600; }
+.md-preview pre code .hl-str{ color: #a5d6a7; }
+.md-preview pre code .hl-num{ color: #f0b36a; }
+.md-preview pre code .hl-com{ color: var(--om-text-3); font-style: italic; }
 .md-preview ul{ margin: 8px 0; padding-left: 20px; color: var(--om-text-2); }
 .md-preview li{ margin: 4px 0; }
 /* 任务列表（- [ ]）：marked 输出 li 内嵌 checkbox，去掉列表点避免「圆点 + 复选框」 */
@@ -1620,17 +1632,57 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
   font-size: 12.5px; font-weight: 700; color: var(--om-text-1);
   padding: 4px 0 6px;
 }
-.kb-trash-vault-head .ic{ width: 14px; height: 14px; color: var(--om-primary); }
+.kb-share-mark{
+  flex: none; font-size: 10px; font-weight: 700; line-height: 1;
+  padding: 2px 5px; border-radius: 4px;
+  color: var(--om-primary); background: var(--om-primary-ghost);
+  border: 1px solid var(--om-primary-border, var(--om-primary));
+}
+.kb-trash-sort{
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 10px 0 12px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--om-border);
+  font-size: 12px; color: var(--om-text-3);
+}
+.kb-trash-sort .seg-btn{ padding: 4px 10px; font-size: 12px; }
 .kb-trash-seg{ color: var(--om-text-2); }
 .kb-trash-sep{ color: var(--om-text-3); margin: 0 3px; }
-.sync-vault-keys{ display: flex; flex-direction: column; gap: 8px; }
+.obsidian-sync-card .card-pad{ display: flex; flex-direction: column; gap: 0; }
+.obsidian-sync-card .set-row{
+  align-items: flex-start; padding: 18px 0;
+}
+.obsidian-sync-card .set-row + .set-row{ border-top: 1px solid var(--om-border); }
+.obsidian-sync-card .set-row .switch{ margin-top: 4px; }
+.obsidian-sync-body{
+  margin-top: 4px; padding-top: 4px;
+  border-top: 1px solid var(--om-border);
+  display: flex; flex-direction: column; gap: 0;
+}
+.obsidian-sync-body > .set-row{ border-top: 0; }
+.obsidian-sync-block{ padding: 20px 0; border-bottom: 1px solid var(--om-border); }
+.obsidian-sync-block:last-child{ border-bottom: 0; padding-bottom: 8px; }
+.obsidian-sync-block .set-row-label{ margin-bottom: 6px; }
+.obsidian-sync-block .set-row-sub{ margin-bottom: 12px; line-height: 1.6; }
+.obsidian-url-ctrl{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; max-width: min(100%, 420px); }
+.obsidian-url-ctrl .input-wrap{ flex: 1; min-width: 200px; }
+.obsidian-url-ctrl .input{
+  padding-left: 14px; height: 36px;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
+}
+.sync-vault-keys{ display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .sync-vault-row{
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 10px 12px; border: 1px solid var(--om-border); border-radius: 10px;
+  display: grid; grid-template-columns: minmax(120px, 1fr) minmax(140px, 1.4fr) auto;
+  align-items: center; gap: 10px 12px;
+  padding: 12px 14px; border: 1px solid var(--om-border); border-radius: 10px;
   background: var(--om-surface);
 }
 .sync-vault-row .nm{ font-size: 13px; font-weight: 650; color: var(--om-text-1); }
-.sync-vault-row .key{ flex: 1; min-width: 140px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--om-text-2); }
+.sync-vault-row .key{ min-width: 0; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--om-text-2); word-break: break-all; }
+.sync-vault-row .sv-actions{ display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+@media (max-width: 720px){
+  .sync-vault-row{ grid-template-columns: 1fr; }
+  .sync-vault-row .sv-actions{ justify-content: flex-start; }
+}
 .sync-log{
   max-height: 220px; overflow: auto;
   padding: 8px 10px; border: 1px solid var(--om-border); border-radius: 10px;

@@ -147,10 +147,8 @@
 .sidebar-collapsed .user-chip > .chev{ display: none; }
 .sidebar-collapsed .nav-item{ justify-content: center; padding: 10px 0; }
 
-/* 折叠按钮在知识库视图下的视觉变化 */
+/* 折叠按钮始终控制左侧导航栏，知识库视图不再旋转成「折叠目录」语义 */
 #collapseBtn .ic{ transition: transform .25s var(--om-ease); }
-body[data-view="notes"] #collapseBtn .ic{ transform: rotate(180deg); }
-.kb-layout.kb-collapsed #collapseBtn .ic{ transform: rotate(0deg); }
 .sidebar-collapsed .nav-item.active::before{ left: -10px; }
 .sidebar-collapsed .user-chip{ justify-content: center; }
 .sidebar-collapsed .sb-top{ justify-content: center; padding-left: 0; padding-right: 0; }
@@ -197,12 +195,6 @@ body[data-view="notes"] #collapseBtn .ic{ transform: rotate(180deg); }
 /* 知识库视图：撑满主区域剩余高度，让左侧树与右侧编辑器纵向对齐 */
 .view.active[data-view="notes"]{ /* flex:1 min-height:0 由 .view.active 继承 */ }
 .view.active[data-view="notes"] .kb-layout{ flex: 1; min-height: 0; height: 100%; }
-/* 知识库视图默认隐藏全局 kb-collapsed 状态：.kb-layout.kb-collapsed 用于折叠左侧 kb-tree */
-.kb-layout.kb-collapsed{ grid-template-columns: 0 1fr; gap: 0; }
-.kb-layout.kb-collapsed > .kb-tree{
-  width: 0; padding: 0; margin: 0; overflow: hidden;
-  border: 0; opacity: 0; pointer-events: none;
-}
 @keyframes viewIn{
   from{ opacity: 0; transform: translateY(8px); }
   to{ opacity: 1; transform: none; }
