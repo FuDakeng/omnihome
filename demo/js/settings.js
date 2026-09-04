@@ -392,7 +392,7 @@
   $$('.set-item[data-set="features"]').forEach(el =>
     el.addEventListener('click', () => loadFeatures()));
 
-  $('#backupNow').addEventListener('click', async () => {
+  $('#backupNow')?.addEventListener('click', async () => {
     $('#backupNow').disabled = true;
     try {
       const d = await API.post('/api/data/backup');
@@ -603,7 +603,7 @@
     } catch (err) { showToast(err.message, 'err'); }
   });
 
-  $('#exportBtn').addEventListener('click', () => API.dl('/api/data/export'));
+  $('#exportBtn')?.addEventListener('click', () => API.dl('/api/data/export'));
   $('#importBackupBtn')?.addEventListener('click', () => $('#importBackupFile')?.click());
   $('#importBackupFile')?.addEventListener('change', async () => {
     const f = $('#importBackupFile').files && $('#importBackupFile').files[0];

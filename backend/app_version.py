@@ -2,11 +2,18 @@
 版本号唯一来源：打包、镜像构建、/api/about 均读取这里的 VERSION。
 每次发版请同步更新 VERSION 与 CHANGELOG（新版本置顶）。
 """
-VERSION = "0.2.33"
+VERSION = "0.2.34"
 STAGE = "分享登录 · 删仓清空 · 备份导入"
 
 # 更新日志（最新版本置顶）
 CHANGELOG = [
+    {
+        "version": "0.2.34",
+        "date": "2026-09-04",
+        "items": [
+            "修复：去掉「保存备份设置」后静态资源仍用 ?v=0.2.32，缓存的旧 settings.js 对已删除的 #bkCfgSave 绑事件导致打开分享链接报 TypeError",
+        ],
+    },
     {
         "version": "0.2.33",
         "date": "2026-09-04",
