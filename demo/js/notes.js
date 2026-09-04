@@ -58,7 +58,12 @@ const Notes = (() => {
     return VAULT_DEFAULT;
   }
   function folderOfVault(f){
-    if (folderVault[f]) return folderVault[f];
+    const v = folderVault[f];
+    if (Array.isArray(v)) {
+      if (v.indexOf(currentVault) >= 0) return currentVault;
+      return v[0] || (isBuiltin(f) ? VAULT_SYSTEM : VAULT_DEFAULT);
+    }
+    if (v) return v;
     return isBuiltin(f) ? VAULT_SYSTEM : VAULT_DEFAULT;
   }
   function vaultMeta(id){ return vaults.find(v => v.id === id) || { id: id, name: id, kind: 'user' }; }
@@ -636,11 +641,12 @@ const Notes = (() => {
   }
   /* 子树笔记总数（含所有后代文件夹） */
   const noteCountIn = f => idx.filter(n =>
-    !n.pinned && (n.folder === f || (n.folder || '').startsWith(f + '/'))).length;
+    !n.pinned && noteVault(n) === currentVault
+    && (n.folder === f || (n.folder || '').startsWith(f + '/'))).length;
 
   function renderFolder(f, depth){
     const notes = idx.filter(n => !n.pinned && n.folder === f && noteVault(n) === currentVault);
-    const subs = childFolders(f);
+    const subs = childFolders(f).filter(s => folderOfVault(s) === currentVault);
     /* v0.2.25：默认折叠——expanded 集合记录已展开的文件夹（localStorage 持久化），不在集合内即折叠 */
     const open = expanded.has(f);
     const locked = f === PLAN_FOLDER || f === QUICK_FOLDER;   // 内置/专属：不可拖拽挪位

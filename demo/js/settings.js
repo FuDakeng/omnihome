@@ -414,6 +414,7 @@
 
   /* ---------- Obsidian 插件同步（功能设置） ---------- */
   const _syncPlainByVault = {};
+  let _syncVaultList = [];
 
   function fmtLogTs(ts){
     const d = new Date((ts || 0) * 1000);
@@ -465,14 +466,16 @@
       const info = await API.get('/api/sync/apikey');
       keys = info.keys || [];
     } catch (e) {}
+    _syncVaultList = vaults;
     const keyOf = id => keys.find(k => k.vault === id);
     box.innerHTML = vaults.map(v => {
       const sys = v.kind === 'system';
       const memberRo = v.kind === 'team' && !v.isOwner && v.canEdit === false;
       const k = keyOf(v.id);
       const tag = v.kind === 'team' ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">团队</span>' : '';
+      const mask = (k && k.prefix) ? `<span class="chip no-dot" style="margin-left:6px;font-size:10px" title="令牌前缀">${App.esc(k.prefix)}…</span>` : '';
       return `<div class="sync-vault-row" data-sv="${App.esc(v.id)}">
-        <div class="nm">${App.esc(v.name)}${sys ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">不可同步</span>' : tag}${memberRo ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">只读</span>' : ''}</div>
+        <div class="nm">${App.esc(v.name)}${sys ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">不可同步</span>' : tag}${memberRo ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">只读</span>' : ''}${sys || memberRo ? '' : mask}</div>
         ${sys || memberRo ? '' : `<div class="sv-actions">
           ${k ? `<button class="btn btn-outline btn-sm" data-sv-bundle="${App.esc(v.id)}">一键复制连接信息</button>
           <button class="btn btn-primary btn-sm" data-sv-gen="${App.esc(v.id)}">重置</button>
@@ -526,7 +529,10 @@
       const plain = _syncPlainByVault[vid];
       if (!plain){ showToast('请先重置令牌后再复制连接信息', 'err'); return; }
       const url = ($('#syncBaseUrl')?.value || location.origin).replace(/\/$/, '');
-      const blob = 'OMNIHOME_SYNC\nurl: ' + url + '\nkey: ' + plain + '\n';
+      const vmeta = _syncVaultList.find(x => x.id === vid);
+      const vname = (vmeta && vmeta.name) || '';
+      const blob = 'OMNIHOME_SYNC\nurl: ' + url + '\nkey: ' + plain
+        + '\nvault: ' + vid + (vname ? '\nvaultName: ' + vname : '') + '\n';
       try { await navigator.clipboard.writeText(blob); showToast('已复制服务端地址与 API Key，可在插件设置里一键粘贴'); }
       catch (err) { showToast('复制失败', 'err'); }
     };
@@ -541,7 +547,11 @@
           : '旧令牌将立即失效。新令牌仅此次可复制到连接信息中，请立刻粘贴到 Obsidian 插件。',
       })) return;
       try {
-        const d = await API.post('/api/sync/apikey', { vault: vid });
+        const d = await API.post('/api/sync/apikey?vault=' + encodeURIComponent(vid), { vault: vid });
+        if (d.vault && d.vault !== vid){
+          showToast('签发仓库与当前行不一致，请刷新后重试', 'err');
+          return;
+        }
         _syncPlainByVault[vid] = d.apiKey || '';
         await renderVaultKeys(); await renderSyncLog();
         await copyBundle(vid);

@@ -27,7 +27,7 @@ const SELF_WRITE_MS = 4000;         // 自写抑制窗口（避免回环触发�
 
 /* 插件独立版本线（与服务端 app 版本解耦；须与 manifest.json 的 version 保持一致）。
    打进启动日志与设置页，用户反馈报错时可一眼确认所装插件版本。 */
-const PLUGIN_VERSION = '0.0.5';
+const PLUGIN_VERSION = '0.0.6';
 
 const ASSET_MAX = 5 * 1024 * 1024;   // 与服务端 ASSET_MAX 一致
 const ASSET_DIR = 'OmniHome-assets';  // 从站点拉取、本地无原路径的附件落点
@@ -302,7 +302,21 @@ class OmniHomeSyncPlugin extends Plugin {
       try {
         resp = await requestUrl(req);
       } catch (e) {
-        lastErr = new Error('无法连接服务端：' + ((e && e.message) || e));
+        const msg = String((e && e.message) || e || '');
+        const st = Number((e && (e.status || e.statusCode)) || 0)
+          || Number((msg.match(/status\s+(\d+)/i) || [])[1] || 0);
+        if (st >= 400) {
+          let detail = '';
+          const raw = (e && e.text) || '';
+          try {
+            const j = (e && e.json && typeof e.json === 'object') ? e.json
+              : (raw ? JSON.parse(raw) : null);
+            detail = (j && j.detail) || '';
+          } catch (ex) { /* 错误体可能非 JSON */ }
+          lastErr = new Error(detail || ('请求失败 ' + st));
+          throw lastErr;
+        }
+        lastErr = new Error('无法连接服务端：' + msg);
         if (attempt < maxTries) { await sleep(300 * attempt); continue; }
         throw lastErr;
       }

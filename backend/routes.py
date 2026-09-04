@@ -15,7 +15,7 @@ from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 import httpx
-from fastapi import APIRouter, Body, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
@@ -1256,13 +1256,11 @@ def _ensure_vaults(username: str):
             n["vault"] = vid
             changed_n = True
         f = n.get("folder") or ""
-        if f and f not in fv:
-            fv[f] = vid
-            # 父路径一并归属
+        if f:
             cur = ""
             for seg in f.split("/"):
                 cur = seg if not cur else cur + "/" + seg
-                fv.setdefault(cur, vid)
+                _folder_claim(fv, cur, vid)
     for f in folders:
         name = f.get("name") if isinstance(f, dict) else str(f or "")
         if not name:
@@ -1276,11 +1274,60 @@ def _ensure_vaults(username: str):
     return data
 
 
-def _folder_vault(data: dict, name: str) -> str:
+def _folder_vault(data: dict, name: str, prefer: str = "") -> str:
+    """文件夹所属仓库。同一路径可属于多个仓库（值为 id 列表）。"""
     fv = data.get("folderVault") or {}
-    if name in fv:
-        return fv[name]
+    cur = fv.get(name)
+    if isinstance(cur, list):
+        ids = [x for x in cur if x]
+        if prefer and prefer in ids:
+            return prefer
+        return ids[0] if ids else (
+            VAULT_SYSTEM if _is_builtin_folder(name) else VAULT_DEFAULT)
+    if cur:
+        return cur
     return VAULT_SYSTEM if _is_builtin_folder(name) else VAULT_DEFAULT
+
+
+def _folder_claimed(data: dict, name: str, vid: str) -> bool:
+    fv = data.get("folderVault") or {}
+    cur = fv.get(name)
+    if isinstance(cur, list):
+        return vid in cur
+    if cur:
+        return cur == vid
+    return (VAULT_SYSTEM if _is_builtin_folder(name) else VAULT_DEFAULT) == vid
+
+
+def _folder_claim(fv: dict, name: str, vid: str):
+    """把文件夹路径登记到指定仓库；已属其它仓库时并存，不抢占。"""
+    if not name or not vid:
+        return
+    cur = fv.get(name)
+    if cur is None:
+        fv[name] = vid
+        return
+    if isinstance(cur, list):
+        if vid not in cur:
+            cur.append(vid)
+        return
+    if cur == vid:
+        return
+    fv[name] = [cur, vid]
+
+
+def _folder_unclaim(fv: dict, name: str, vid: str):
+    cur = fv.get(name)
+    if isinstance(cur, list):
+        nxt = [x for x in cur if x != vid]
+        if not nxt:
+            fv.pop(name, None)
+        elif len(nxt) == 1:
+            fv[name] = nxt[0]
+        else:
+            fv[name] = nxt
+    elif cur == vid:
+        fv.pop(name, None)
 
 
 def _folders_in_vault(username: str, vid: str) -> list:
@@ -1289,7 +1336,7 @@ def _folders_in_vault(username: str, vid: str) -> list:
     names = []
     for f in folders:
         name = f.get("name") if isinstance(f, dict) else str(f or "")
-        if name and _folder_vault(data, name) == vid:
+        if name and _folder_claimed(data, name, vid):
             names.append(name)
     return names
 
@@ -1450,9 +1497,20 @@ def _merged_notes_payload(username: str):
             ofolders = storage.user_json(owner, "notes/folders.json", [])
             for f in ofolders:
                 name = f.get("name") if isinstance(f, dict) else str(f or "")
-                if name and _folder_vault(odata, name) == vid and name not in folder_names:
+                if name and _folder_claimed(odata, name, vid) and name not in folder_names:
                     folder_names.append(name)
-                    fv[name] = vid
+                    _folder_claim(fv, name, vid)
+    for n in active:
+        f = (n.get("folder") or "").strip("/")
+        if not f:
+            continue
+        vid_n = _infer_note_vault(n)
+        cur = ""
+        for seg in f.split("/"):
+            cur = seg if not cur else cur + "/" + seg
+            if cur not in folder_names:
+                folder_names.append(cur)
+            _folder_claim(fv, cur, vid_n)
     return {"notes": active, "folders": folder_names, "folderVault": fv,
             "vaults": vaults_out, "currentVault": _active_vault_id(username),
             "shares": _share_public_list(username), "trashCount": trash_count}
@@ -1543,7 +1601,7 @@ def _share_scope_folders(username: str, rec: dict) -> list:
         if root:
             if name == root or name.startswith(root + "/"):
                 names.add(name)
-        elif _folder_vault(data, name) == vault:
+        elif _folder_claimed(data, name, vault):
             names.add(name)
     for n in _share_scope_notes(username, rec):
         f = (n.get("folder") or "").strip("/")
@@ -1722,18 +1780,18 @@ def add_folder(body: FolderIn, authorization: Optional[str] = Header(None)):
         store = username
     folders = storage.user_json(store, "notes/folders.json", [])
     names = [f.get("name") if isinstance(f, dict) else str(f or "") for f in folders]
-    if name in names:
+    data = _load_vaults(store)
+    if name in names and _folder_claimed(data, name, vid):
         raise HTTPException(400, "文件夹已存在")
     # 多级路径：逐级补齐缺失的上级文件夹（A/B/C → A、A/B 依次存在）
     cur = ""
-    data = _load_vaults(store)
     fv = dict(data.get("folderVault") or {})
     for seg in name.split("/"):
         cur = seg if not cur else cur + "/" + seg
         if cur not in names:
             folders.append(cur)
             names.append(cur)
-        fv[cur] = vid
+        _folder_claim(fv, cur, vid)
     storage.save_user_json(store, "notes/folders.json", folders)
     data["folderVault"] = fv
     _save_vaults(store, data)
@@ -1775,7 +1833,7 @@ def replace_folders(body: FoldersIn, authorization: Optional[str] = Header(None)
         return {"ok": True, "folders": out}
     odata = _load_vaults(store)
     ofolders = storage.user_json(store, "notes/folders.json", [])
-    keep = [f for f in ofolders if _folder_vault(odata, f) != vid]
+    keep = [f for f in ofolders if not _folder_claimed(odata, f, vid)]
     seen = set(keep)
     team_in = []
     for name in out:
@@ -1793,7 +1851,7 @@ def replace_folders(body: FoldersIn, authorization: Optional[str] = Header(None)
     storage.save_user_json(store, "notes/folders.json", final)
     fv = dict(odata.get("folderVault") or {})
     for name in team_in:
-        fv[name] = vid
+        _folder_claim(fv, name, vid)
     odata["folderVault"] = fv
     _save_vaults(store, odata)
     return {"ok": True, "folders": final}
@@ -1806,21 +1864,20 @@ def delete_folder(name: str, authorization: Optional[str] = Header(None)):
     if name == PLAN_FOLDER:
         raise HTTPException(403, "「每日计划」为系统内置文件夹，不可删除")
     ctx = _require_vault_edit(username, _active_vault_id(username))
-    store = ctx["store"]
+    store, vid = ctx["store"], ctx["vid"]
     folders = storage.user_json(store, "notes/folders.json", [])
-    if name not in folders:
+    data = _load_vaults(store)
+    if name not in folders or not _folder_claimed(data, name, vid):
         raise HTTPException(404, "文件夹不存在")
     prefix = name + "/"
-    removed = {name} | {f for f in folders if f.startswith(prefix)}
-    folders = [f for f in folders if f not in removed]
-    storage.save_user_json(store, "notes/folders.json", folders)
+    removed = {name} | {f for f in folders if f.startswith(prefix) and _folder_claimed(data, f, vid)}
     idx = storage.notes_index(store)
     now = int(time.time())
     trashed = 0
     for item in idx:
         f = item.get("folder") or ""
-        # 本级与子文件夹内的笔记统一软删进回收站（保留原 folder 快照以便整体恢复）
-        if f == name or f.startswith(prefix):
+        # 只回收本仓库在该路径下的笔记，其它仓库同名文件夹不受影响
+        if (f == name or f.startswith(prefix)) and _infer_note_vault(item) == vid:
             if not item.get("pinned"):
                 item["deleted"] = now
                 item["deleted_title"] = item.get("title") or ""
@@ -1828,10 +1885,11 @@ def delete_folder(name: str, authorization: Optional[str] = Header(None)):
             else:
                 item["folder"] = ""   # 常驻笔记不进回收站，归位根目录
     storage.save_notes_index(store, idx)
-    data = _load_vaults(store)
     fv = dict(data.get("folderVault") or {})
     for r in removed:
-        fv.pop(r, None)
+        _folder_unclaim(fv, r, vid)
+    folders = [f for f in folders if f not in removed or fv.get(f) is not None]
+    storage.save_user_json(store, "notes/folders.json", folders)
     data["folderVault"] = fv
     _save_vaults(store, data)
     return {"ok": True, "trashed": trashed}
@@ -2112,8 +2170,13 @@ def delete_vault(vid: str, authorization: Optional[str] = Header(None)):
         storage.revoke_sync_key(username, vid)
     fv = dict(data.get("folderVault") or {})
     drop_folders = set()
-    for k, v in list(fv.items()):
-        if v == vid and not _is_builtin_folder(k):
+    for k in list(fv.keys()):
+        if _is_builtin_folder(k):
+            continue
+        if not _folder_claimed({"folderVault": fv}, k, vid):
+            continue
+        _folder_unclaim(fv, k, vid)
+        if fv.get(k) is None:
             drop_folders.add(k)
     folder_names = storage.user_json(username, "notes/folders.json", [])
     norm_folders = []
@@ -2121,8 +2184,9 @@ def delete_vault(vid: str, authorization: Optional[str] = Header(None)):
         name = f.get("name") if isinstance(f, dict) else str(f or "")
         if name:
             norm_folders.append(name)
-            if _folder_vault(data, name) == vid and not _is_builtin_folder(name):
-                drop_folders.add(name)
+            if name not in drop_folders and _folder_claimed(data, name, vid) and not _is_builtin_folder(name):
+                if fv.get(name) is None:
+                    drop_folders.add(name)
     idx = storage.notes_index(username)
     gone_ids, kept = set(), []
     for n in idx:
@@ -2138,7 +2202,7 @@ def delete_vault(vid: str, authorization: Optional[str] = Header(None)):
     storage.save_user_json(username, "notes/folders.json",
                            [f for f in norm_folders if f not in drop_folders])
     for k in list(fv.keys()):
-        if k in drop_folders or fv.get(k) == vid:
+        if k in drop_folders:
             fv.pop(k, None)
     data["folderVault"] = fv
     data["items"] = [x for x in data["items"] if x["id"] != vid]
@@ -2564,7 +2628,7 @@ def _ensure_folder(username: str, folder: str, vault_id: str = ""):
         if cur not in folders:
             folders.append(cur)
             changed = True
-        fv.setdefault(cur, vid)
+        _folder_claim(fv, cur, vid)
     if changed:
         storage.save_user_json(username, "notes/folders.json", folders)
     data["folderVault"] = fv
@@ -3207,16 +3271,20 @@ def _split_sync_path(norm: str):
 
 # ---------- API Key 管理端点（session 鉴权，仅本人；按笔记仓库一枚） ----------
 class SyncKeyIn(BaseModel):
-    vault: str = VAULT_DEFAULT
+    vault: str = ""
 
 
 @router.post("/api/sync/apikey")
 def sync_apikey_create(body: Optional[SyncKeyIn] = Body(default=None),
+                       vault: str = Query(""),
                        authorization: Optional[str] = Header(None)):
-    """生成 / 重置指定仓库的同步 API Key；明文仅此一次返回。系统内置仓库禁止。"""
+    """生成 / 重置指定仓库的同步 API Key；明文仅此一次返回。系统内置仓库禁止。
+    仓库 ID 同时接受 JSON body 与 ?vault= 查询参数（查询优先于空 body 默认值），
+    避免 body 丢失时误签发到默认仓库。"""
     username = require_user(authorization)
-    vid = (body.vault if body else VAULT_DEFAULT) or VAULT_DEFAULT
-    tctx = _team_ctx(username, vid)
+    raw_vid = ((body.vault if body else "") or vault or "").strip() or VAULT_DEFAULT
+    tctx = _team_ctx(username, raw_vid)
+    vid = tctx["vid"]
     if tctx["rec"].get("kind") == "system" or vid == VAULT_SYSTEM:
         raise HTTPException(400, "系统内置仓库不可创建同步令牌")
     if tctx["is_owner"]:
@@ -3236,7 +3304,9 @@ def sync_apikey_create(body: Optional[SyncKeyIn] = Body(default=None),
         raise HTTPException(400, str(e))
     storage.append_sync_log(store, {"vault": vid, "source": "web",
                                     "msg": "生成 / 重置同步令牌" + (("（成员 " + actor + "）") if actor != store else "")})
-    return {"ok": True, "apiKey": raw, "vault": vid}
+    vname = (tctx["rec"] or {}).get("name") or ""
+    return {"ok": True, "apiKey": raw, "vault": vid, "vaultName": vname,
+            "prefix": raw[:12]}
 
 
 @router.get("/api/sync/apikey")
@@ -3254,9 +3324,10 @@ def sync_apikey_revoke(vault: str = "",
                        authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
     vid = vault or None
-    storage.revoke_sync_key(username, vid)
+    # 只吊销当前登录用户自己持有的钥，不波及团队仓其他成员
+    storage.revoke_sync_key(username, vid, actor=username)
     storage.append_sync_log(username, {"vault": vault or "", "source": "web",
-                                       "msg": "吊销同步令牌" + (("（" + vault + "）") if vault else "（全部）")})
+                                    "msg": "吊销同步令牌" + (("（" + vault + "）") if vault else "（全部）")})
     return {"ok": True}
 
 
@@ -3269,7 +3340,7 @@ def sync_hello(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     vmeta = _vault_by_id(username, vault_id) or {}
     return {"ok": True, "name": "万事屋", "version": app_version.VERSION,
             "stage": app_version.STAGE, "vault": vault_id,
-            "vaultName": vmeta.get("name") or "", "pluginMin": "0.0.5"}
+            "vaultName": vmeta.get("name") or "", "pluginMin": "0.0.6"}
 
 
 @router.get("/api/sync/log")
@@ -3420,21 +3491,27 @@ class SyncFileIn(BaseModel):
     knownRemoteMtime: Optional[int] = None  # 客户端上次同步时记下的站点 mtime；未变则连续本地保存应落地
 
 
-def _sync_apply_note(username, nid, folder, title, body_md, site_mtime, norm):
+def _sync_apply_note(username, nid, folder, title, body_md, site_mtime, norm, vault_id=""):
     """落地一篇已存在笔记。正文/标题/文件夹均未变则不 bump updated，避免轮询误判远端变更。"""
+    if folder:
+        _ensure_folder(username, folder, vault_id)
     old_body = storage.note_read(username, nid, "")
     idx = storage.notes_index(username)
     hit = next((it for it in idx if it.get("id") == nid), None)
     old_title = (hit or {}).get("title") or ""
     old_folder = (hit or {}).get("folder") or ""
+    old_vault = (hit or {}).get("vault") or ""
     new_title = title or old_title or "未命名笔记"
-    if old_body == body_md and new_title == old_title and folder == old_folder:
+    vault_same = (not vault_id) or old_vault == vault_id
+    if old_body == body_md and new_title == old_title and folder == old_folder and vault_same:
         return {"path": norm, "mtime": site_mtime, "id": nid, "applied": True, "unchanged": True}
     storage.note_write(username, nid, body_md)
     now = int(time.time())
     if hit is not None:
         hit["title"] = new_title
         hit["folder"] = folder
+        if vault_id:
+            hit["vault"] = vault_id
         hit["updated"] = now
         storage.save_notes_index(username, idx)
     return {"path": norm, "mtime": now * 1000, "id": nid, "applied": True}
@@ -3476,7 +3553,7 @@ def sync_put_file(body: SyncFileIn,
             return {"path": norm, "mtime": site_mtime, "id": meta["id"],
                     "applied": False, "reason": "site-wins"}
         return _sync_apply_note(username, meta["id"], folder, title, body_md,
-                                site_mtime, norm)
+                                site_mtime, norm, vault_id)
 
     # 未命中 -> 新建（先逐级补齐文件夹，否则笔记在目录树中不可见）
     if folder:

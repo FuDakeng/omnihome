@@ -564,7 +564,76 @@ def run_suite(engine):
     r = client.get("/api/sync/hello", headers=HK(mkey))
     check(f"[{engine}] 成员钥 hello 指向创建人仓",
           r.status_code == 200 and r.json().get("vault") == tvid
-          and r.json().get("pluginMin") == "0.0.5", r.text[:80])
+          and r.json().get("pluginMin") == "0.0.6", r.text[:80])
+    check(f"[{engine}] 创建人与成员团队仓令牌不同",
+          okey != mkey and okey.startswith("ohs_") and mkey.startswith("ohs_"),
+          (okey[:12], mkey[:12]))
+    r = client.post("/api/sync/apikey?vault=default", headers=HA(tok), json={"vault": "default"})
+    dkey = (r.json() or {}).get("apiKey") or ""
+    check(f"[{engine}] 创建人默认仓令牌与团队仓不同",
+          r.status_code == 200 and dkey.startswith("ohs_") and dkey != okey
+          and (r.json() or {}).get("vault") == "default", r.text[:80])
+    r = client.get("/api/sync/hello", headers=HK(dkey))
+    check(f"[{engine}] 默认仓令牌 hello 指向 default",
+          r.status_code == 200 and r.json().get("vault") == "default", r.text[:80])
+    r = client.get("/api/sync/hello", headers=HK(okey))
+    check(f"[{engine}] 重置默认仓后团队仓钥仍有效",
+          r.status_code == 200 and r.json().get("vault") == tvid, r.text[:80])
+    r = client.post("/api/sync/apikey?vault=" + tvid, headers=HA(tok))
+    qkey = (r.json() or {}).get("apiKey") or ""
+    check(f"[{engine}] 仅 query vault 签发到团队仓",
+          r.status_code == 200 and (r.json() or {}).get("vault") == tvid
+          and qkey.startswith("ohs_") and qkey != dkey, r.text[:80])
+    r = client.get("/api/sync/hello", headers=HK(qkey))
+    check(f"[{engine}] query 签发的钥 hello 指向团队仓",
+          r.status_code == 200 and r.json().get("vault") == tvid, r.text[:80])
+    r = client.get("/api/sync/hello", headers=HK(dkey))
+    check(f"[{engine}] 重置团队仓不影响默认仓钥",
+          r.status_code == 200 and r.json().get("vault") == "default", r.text[:80])
+    okey = qkey
+    r = client.delete("/api/sync/apikey?vault=" + tvid, headers=HA(tok))
+    check(f"[{engine}] 创建人吊销自己的团队仓钥", r.status_code == 200, str(r.status_code))
+    r = client.get("/api/sync/hello", headers=HK(okey))
+    check(f"[{engine}] 创建人旧团队钥已失效", r.status_code == 401, str(r.status_code))
+    r = client.get("/api/sync/hello", headers=HK(mkey))
+    check(f"[{engine}] 吊销创建人钥不影响成员钥",
+          r.status_code == 200 and r.json().get("vault") == tvid, r.text[:80])
+    r = client.post("/api/sync/apikey?vault=" + tvid, headers=HA(tok), json={"vault": tvid})
+    okey = (r.json() or {}).get("apiKey") or ""
+    check(f"[{engine}] 创建人重新签发团队仓钥",
+          r.status_code == 200 and okey.startswith("ohs_"), okey[:12])
+    r = client.post("/api/notes/folders", headers=HA(tok), json={"name": "工作", "vault": "default"})
+    check(f"[{engine}] 创建人默认仓先占同名文件夹", r.status_code == 200, r.text[:80])
+    now_ms = int(time.time() * 1000)
+    r = client.post("/api/sync/file", headers=HK(mkey),
+                    json={"path": "工作/子夹/成员笔记.md",
+                          "content": "# 成员笔记\n\nhi", "clientMtime": now_ms})
+    check(f"[{engine}] 成员可推送嵌套文件夹笔记",
+          r.status_code == 200 and (r.json() or {}).get("applied") is True, r.text[:120])
+    r = client.get("/api/notes", headers=HA(tok2))
+    nd = r.json() or {}
+    folders2 = nd.get("folders") or []
+    fv2 = nd.get("folderVault") or {}
+    hit_n = next((n for n in (nd.get("notes") or []) if n.get("title") == "成员笔记"), None)
+    check(f"[{engine}] 成员笔记落团队仓且带文件夹",
+          bool(hit_n) and hit_n.get("vault") == tvid and hit_n.get("folder") == "工作/子夹",
+          str(hit_n)[:120])
+    check(f"[{engine}] 成员可见团队仓文件夹",
+          "工作" in folders2 and "工作/子夹" in folders2, str(folders2)[:120])
+
+    def _claimed(fv, name, vid):
+        cur = (fv or {}).get(name)
+        if isinstance(cur, list):
+            return vid in cur
+        return cur == vid
+    check(f"[{engine}] 同名文件夹被团队仓认领（不抢默认仓）",
+          _claimed(fv2, "工作", tvid) and _claimed(fv2, "工作/子夹", tvid), str(fv2.get("工作")))
+    r = client.get("/api/notes", headers=HA(tok))
+    ndo = r.json() or {}
+    check(f"[{engine}] 创建人也能看到团队仓嵌套文件夹",
+          "工作/子夹" in (ndo.get("folders") or [])
+          and _claimed(ndo.get("folderVault") or {}, "工作/子夹", tvid),
+          str((ndo.get("folderVault") or {}).get("工作/子夹")))
     for i in range(12):
         client.post("/api/notes", headers=HA(tok), json={"title": "td%d" % i, "vault": tvid})
     for i in range(10):
