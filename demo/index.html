@@ -1227,14 +1227,15 @@
                     <div style="display:flex;align-items:center;gap:8px">
                       <div class="input-wrap" style="width:84px"><input class="input num" type="number" id="bkKeep" min="1" max="100" value="10" style="padding-left:14px;height:34px"></div>
                       <span style="font-size:12px;color:var(--om-text-3)">份</span>
-                      <button class="btn btn-outline btn-sm" id="bkCfgSave"><svg class="ic"><use href="#i-check"/></svg>保存备份设置</button>
                     </div>
                   </div>
                   <div class="set-row">
-                    <div class="set-row-info"><div class="set-row-label">手动备份</div><div class="set-row-sub">备份包含笔记 / 书签 / 日程 / 偏好 / 保险库密文；列表内可下载或选择恢复</div></div>
-                    <div style="display:flex;gap:8px">
+                    <div class="set-row-info"><div class="set-row-label">手动备份</div><div class="set-row-sub">备份包含笔记 / 书签 / 日程 / 偏好 / 保险库密文；列表内可下载或选择恢复。导入会覆盖当前数据</div></div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
                       <button class="btn btn-primary btn-sm" id="backupNow"><svg class="ic"><use href="#i-download"/></svg>立即备份</button>
-                      <button class="btn btn-outline btn-sm" id="exportBtn"><svg class="ic"><use href="#i-refresh"/></svg>导出全部数据</button>
+                      <button class="btn btn-outline btn-sm" id="exportBtn"><svg class="ic"><use href="#i-download"/></svg>导出全部数据</button>
+                      <button class="btn btn-outline btn-sm" id="importBackupBtn"><svg class="ic"><use href="#i-upload"/></svg>导入备份</button>
+                      <input type="file" id="importBackupFile" accept=".zip,application/zip" hidden>
                     </div>
                   </div>
                   <div id="backupList" style="display:flex;flex-direction:column;gap:6px;margin-top:4px"></div>
@@ -1555,13 +1556,18 @@
   <div class="modal modal-trash">
     <div class="m-head">
       <h3 id="kbShareTitle">分享</h3>
-      <p>生成链接后任何人可在有效期内打开。默认开启查看权限，可额外允许编辑。</p>
+      <p>生成链接后，可选择是否需要登录才能打开。默认开启查看权限，可额外允许编辑。</p>
     </div>
     <div class="m-body">
       <div class="set-row">
         <div class="set-row-info"><div class="set-row-label">查看权限</div>
-          <div class="set-row-sub">持有链接即可阅读分享范围内的笔记</div></div>
+          <div class="set-row-sub">分享范围内的笔记可被阅读</div></div>
         <button class="switch on" id="kbShareViewPerm" disabled role="switch"></button>
+      </div>
+      <div class="set-row">
+        <div class="set-row-info"><div class="set-row-label">需要登录查看</div>
+          <div class="set-row-sub">开启后，本站已登录用户才能打开链接；关闭则持有链接即可</div></div>
+        <button class="switch" id="kbShareNeedLogin" role="switch"></button>
       </div>
       <div class="set-row">
         <div class="set-row-info"><div class="set-row-label">编辑权限</div>

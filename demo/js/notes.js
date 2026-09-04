@@ -739,13 +739,13 @@ const Notes = (() => {
     const v = vaultMeta(currentVault);
     if (v.kind !== 'user'){ showToast('该仓库不可删除', 'err'); return; }
     if (!await App.confirmModal({
-      title: '删除笔记仓库？', danger: true, okText: '删除',
-      sub: `「${v.name}」将被删除，其中的笔记会移入默认仓库，不会丢失。`,
+      title: '删除笔记仓库？', danger: true, okText: '永久删除',
+      sub: `「${v.name}」及其全部笔记、文件夹将永久删除，不可恢复。默认仓库与系统内置仓库不受影响。`,
     })) return;
     try {
       await API.del('/api/notes/vaults/' + encodeURIComponent(currentVault));
       currentVault = VAULT_DEFAULT;
-      showToast('仓库已删除，笔记已移入默认仓库');
+      showToast('仓库及其中的笔记、文件夹已删除');
       await load();
     } catch (e) { showToast(e.message, 'err'); }
   }
@@ -1493,6 +1493,7 @@ const Notes = (() => {
     shareTarget = target;
     $('#kbShareTitle').textContent = '分享「' + (target.name || '') + '」';
     $('#kbShareEdit').classList.remove('on');
+    $('#kbShareNeedLogin')?.classList.remove('on');
     $$('#kbShareExpire .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.days === '7'));
     $('#kbShareLinkRow').hidden = true;
     $('#kbShareLink').value = '';
@@ -1512,6 +1513,7 @@ const Notes = (() => {
         vault: currentVault,
         expireDays: days,
         canEdit: $('#kbShareEdit').classList.contains('on'),
+        requireLogin: $('#kbShareNeedLogin')?.classList.contains('on'),
       });
       const url = location.origin.replace(/\/$/, '') + '/?s=' + encodeURIComponent(d.token);
       $('#kbShareLink').value = url;
@@ -1548,6 +1550,36 @@ const Notes = (() => {
     } catch (_) {}
   }
 
+  function shareAuthHeaders(extra){
+    const h = Object.assign({}, extra || {});
+    const t = API.getToken();
+    if (t) h.Authorization = 'Bearer ' + t;
+    return h;
+  }
+  async function shareFetch(url, opts){
+    const r = await fetch(url, Object.assign({}, opts || {}, {
+      headers: shareAuthHeaders((opts && opts.headers) || {}),
+    }));
+    let data = null;
+    try { data = await r.json(); } catch (_) {}
+    if (r.status === 401){
+      const msg = (data && data.detail) || '需要登录后查看此分享';
+      const err = new Error(typeof msg === 'string' ? msg : '需要登录后查看此分享');
+      err.needLogin = true;
+      throw err;
+    }
+    if (!r.ok){
+      const msg = (data && data.detail) || '分享不存在或已过期';
+      throw new Error(typeof msg === 'string' ? msg : '分享不存在或已过期');
+    }
+    return data;
+  }
+  function tryOpenShareFromUrl(){
+    try {
+      const s = new URLSearchParams(location.search).get('s');
+      if (s) openShareOverlay(s);
+    } catch (_) {}
+  }
   async function openShareOverlay(token){
     const mask = $('#kbShareViewMask');
     if (!mask) return;
@@ -1559,22 +1591,24 @@ const Notes = (() => {
     list.innerHTML = '加载中…';
     body.innerHTML = '';
     try {
-      const d = await fetch('/api/share/' + encodeURIComponent(token)).then(r => {
-        if (!r.ok) throw new Error('分享不存在或已过期');
-        return r.json();
-      });
+      const d = await shareFetch('/api/share/' + encodeURIComponent(token));
       title.textContent = d.name || '分享';
-      sub.textContent = (d.canEdit ? '可编辑 · ' : '只读 · ') +
+      sub.textContent = (d.requireLogin ? '需登录 · ' : '') +
+        (d.canEdit ? '可编辑 · ' : '只读 · ') +
         (d.expireAt ? ('有效至 ' + new Date(d.expireAt * 1000).toLocaleString('zh-CN')) : '');
       const notes = d.notes || [];
       list.innerHTML = notes.map(n =>
         `<button class="note-item" data-share-nid="${App.esc(n.id)}"><svg class="ic ni-icon"><use href="#i-note"/></svg><span class="ni-title">${App.esc(n.title)}</span></button>`
       ).join('') || '<div class="kb-empty">没有可查看的笔记</div>';
       const loadOne = async nid => {
-        const n = await fetch('/api/share/' + encodeURIComponent(token) + '/notes/' + encodeURIComponent(nid)).then(r => r.json());
+        const n = await shareFetch('/api/share/' + encodeURIComponent(token) + '/notes/' + encodeURIComponent(nid));
         let html = mdRender(n.content || '') || '<p style="color:var(--om-text-3)">空笔记</p>';
         html = html.replace(/src="\/api\/notes\/assets\//g,
           'src="/api/share/' + encodeURIComponent(token) + '/assets/');
+        const access = API.getToken();
+        if (access)
+          html = html.replace(/(\/api\/share\/[^"]+\/assets\/[^"?]+)/g,
+            '$1?access=' + encodeURIComponent(access));
         body.innerHTML = '<h3 style="margin:0 0 12px">' + App.esc(n.title || '') + '</h3>' + html;
         highlightPreviewCode(body);
         if (n.canEdit){
@@ -1589,12 +1623,11 @@ const Notes = (() => {
           ta.value = n.content || '';
           editor.querySelector('#kbShareSave').addEventListener('click', async () => {
             try {
-              const resp = await fetch('/api/share/' + encodeURIComponent(token) + '/notes/' + encodeURIComponent(nid), {
+              await shareFetch('/api/share/' + encodeURIComponent(token) + '/notes/' + encodeURIComponent(nid), {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content: ta.value }),
               });
-              if (!resp.ok) throw new Error('保存失败');
               showToast('已保存');
               loadOne(nid);
             } catch (err) { showToast(err.message || '保存失败', 'err'); }
@@ -1610,6 +1643,7 @@ const Notes = (() => {
       title.textContent = '无法打开分享';
       sub.textContent = e.message || '';
       list.innerHTML = '';
+      if (e.needLogin) App.lock();
     }
   }
 
@@ -1617,12 +1651,9 @@ const Notes = (() => {
   function init(){
     /* 新建笔记：所有 + 号按钮都通过 kbMenu 弹出选择，不再常驻顶栏。
        原来 #noteNew / #folderNew 已从 HTML 移除，相应绑定也清掉。 */
-    App.onEnter(load);
+    App.onEnter(() => { load(); tryOpenShareFromUrl(); });
     setInterval(pollOpenNote, 4000);
-    try {
-      const s = new URLSearchParams(location.search).get('s');
-      if (s) openShareOverlay(s);
-    } catch (_) {}
+    tryOpenShareFromUrl();
     $('#kbShareCreate')?.addEventListener('click', createShareLink);
     $('#kbShareCopy')?.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText($('#kbShareLink').value); showToast('链接已复制'); }

@@ -1,0 +1,15 @@
+---
+description: 每次交付必须升版本并推送到 Gitea（有 Gitee 远程则一并推送）
+alwaysApply: true
+---
+
+# 万事屋交付推送
+
+完成功能交付时（用户要求发版/上传/推送，或本轮改动已完成待上线）：
+
+1. 递增 `backend/app_version.py` 的 `VERSION`，同步置顶 `CHANGELOG` 与 `STAGE`。
+2. 只提交本次相关源码。禁止 `git add .` 若工作区有无关文件（如 `obsidian-plugin` 副本目录、`*.pem`）。
+3. 提交说明：`vX.Y.Z: 简述`。
+4. `git push origin main` 到 Gitea：`https://git.jeanlaw.xyz/jeanlaw/omnihome.git`。
+5. 若已配置 remote `gitee`，再执行 `git push gitee main`。没有该远程时不要臆造地址，询问用户 Gitee 仓库 URL 后再加 remote（不要改 git 用户配置以外的必要 remote）。
+6. 外网只推源码，不推镜像。

@@ -1020,9 +1020,9 @@
   border: 1px solid var(--om-border);
   border-radius: 10px;
   overflow: hidden;
+  height: 100%;
   position: sticky;
   top: calc(var(--om-topbar-h) + var(--om-space-6));
-  align-self: start;
   max-height: calc(100vh - var(--om-topbar-h) - var(--om-space-6) * 2 - 8px);
   opacity: 0; transform: translateX(16px);
   transition: width .26s var(--om-ease), margin .26s var(--om-ease),
@@ -1589,7 +1589,7 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
   grid-template-columns: 240px minmax(0, 1fr) auto;
   gap: var(--om-space-4);
   min-height: 0;
-  align-items: start;
+  align-items: stretch;
 }
 /* 大纲隐藏时让编辑区占满（第三列 auto 塌缩为 0） */
 .kb-layout > .md-outline[hidden]{ display: none; }
@@ -1600,9 +1600,9 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
   border: 1px solid var(--om-border);
   border-radius: 10px;
   min-height: 0;
+  height: 100%;
   position: sticky;
   top: calc(var(--om-topbar-h) + var(--om-space-6));
-  align-self: start;
   max-height: calc(100vh - var(--om-topbar-h) - var(--om-space-6) * 2 - 8px);
 }
 .kb-tree-head{
@@ -1671,7 +1671,7 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
 }
 .sync-vault-keys{ display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .sync-vault-row{
-  display: grid; grid-template-columns: minmax(120px, 1fr) minmax(140px, 1.4fr) auto;
+  display: grid; grid-template-columns: minmax(120px, 1fr) auto;
   align-items: center; gap: 10px 12px;
   padding: 12px 14px; border: 1px solid var(--om-border); border-radius: 10px;
   background: var(--om-surface);
@@ -1744,7 +1744,7 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
 }
 .kb-tree-empty{ font-size: 12px; color: var(--om-text-3); padding: 14px; text-align: center; }
 /* 编辑区列 */
-.kb-editor{ display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 10px; position: relative; }
+.kb-editor{ display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; gap: 10px; position: relative; }
 .kb-editor-bar{
   display: flex; align-items: center; gap: 12px;
   padding: 8px 14px;
@@ -1785,6 +1785,7 @@ body[data-view="notes"] .kb-editor{ gap: 0; }
 /* 编辑区卡片样式微调 */
 .kb-editor .editor{
   flex: 1; min-height: 0; display: flex; flex-direction: column;
+  height: 100%;
   /* 冻结标题栏/工具栏：卡片高度受限，内容在 .ed-body 内滚动，顶栏始终可见 */
   max-height: calc(100vh - var(--om-topbar-h) - var(--om-space-6) * 2 - 8px);
 }

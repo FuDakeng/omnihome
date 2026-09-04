@@ -371,7 +371,8 @@
         b.classList.toggle('active', String(b.dataset.hours) === String(bc.intervalHours || 24)));
       if (!$('#bkIntervalSeg .seg-btn.active'))
         $('#bkIntervalSeg .seg-btn[data-hours="24"]').classList.add('active');
-      $('#bkKeep').value = bc.keep || 10;
+      if (document.activeElement !== $('#bkKeep'))
+        $('#bkKeep').value = bc.keep || 10;
       $('#backupList').innerHTML = s.backupList.length
         ? s.backupList.map(b => `
           <div class="qk-row"><span class="qk-name">${App.esc(b.name)}</span>
@@ -468,16 +469,12 @@
     box.innerHTML = vaults.map(v => {
       const sys = v.kind === 'system';
       const k = keyOf(v.id);
-      const plain = _syncPlainByVault[v.id];
-      const shown = plain || (k ? k.masked : '尚未生成');
       return `<div class="sync-vault-row" data-sv="${App.esc(v.id)}">
         <div class="nm">${App.esc(v.name)}${sys ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">不可同步</span>' : ''}</div>
-        <div class="key">${sys ? '—' : App.esc(shown)}</div>
         ${sys ? '' : `<div class="sv-actions">
-          <button class="btn btn-outline btn-sm" data-sv-copy="${App.esc(v.id)}">复制 Key</button>
-          ${plain ? `<button class="btn btn-outline btn-sm" data-sv-bundle="${App.esc(v.id)}">一键复制连接信息</button>` : ''}
-          <button class="btn btn-primary btn-sm" data-sv-gen="${App.esc(v.id)}">${k ? '重置' : '生成令牌'}</button>
-          ${k ? `<button class="btn btn-outline btn-sm" style="color:var(--om-danger)" data-sv-rev="${App.esc(v.id)}">吊销</button>` : ''}
+          <button class="btn btn-outline btn-sm" data-sv-bundle="${App.esc(v.id)}">一键复制连接信息</button>
+          <button class="btn btn-primary btn-sm" data-sv-gen="${App.esc(v.id)}">重置</button>
+          <button class="btn btn-outline btn-sm" style="color:var(--om-danger)" data-sv-rev="${App.esc(v.id)}" ${k ? '' : 'disabled'}>吊销</button>
         </div>`}
       </div>`;
     }).join('') || '<div style="font-size:12px;color:var(--om-text-3)">暂无笔记仓库</div>';
@@ -520,43 +517,36 @@
   });
   document.addEventListener('click', async e => {
     const gen = e.target.closest('[data-sv-gen]');
-    const copy = e.target.closest('[data-sv-copy]');
     const bundle = e.target.closest('[data-sv-bundle]');
     const rev = e.target.closest('[data-sv-rev]');
-    if (gen){
-      const vid = gen.dataset.svGen;
-      if (!await App.confirmModal({
-        title: gen.textContent.includes('重置') ? '重置同步令牌？' : '生成同步令牌？',
-        danger: true, okText: gen.textContent.includes('重置') ? '重置' : '生成',
-        sub: gen.textContent.includes('重置')
-          ? '旧令牌将立即失效，Obsidian 插件需填入新令牌才能继续同步该仓库。'
-          : '明文仅显示一次，请立刻复制到 Obsidian 插件设置中。',
-      })) return;
-      try {
-        const d = await API.post('/api/sync/apikey', { vault: vid });
-        _syncPlainByVault[vid] = d.apiKey || '';
-        showToast('已生成，请立即复制（明文仅此一次可见）');
-        await renderVaultKeys(); await renderSyncLog();
-      } catch (err) { showToast(err.message, 'err'); }
-    }
-    if (copy){
-      const vid = copy.dataset.svCopy;
+    const copyBundle = async vid => {
       const plain = _syncPlainByVault[vid];
-      if (!plain){ showToast('明文仅生成时可见，请先生成令牌', 'err'); return; }
-      try { await navigator.clipboard.writeText(plain); showToast('令牌已复制'); }
-      catch (err) { showToast('复制失败', 'err'); }
-    }
-    if (bundle){
-      const vid = bundle.dataset.svBundle;
-      const plain = _syncPlainByVault[vid];
-      if (!plain){ showToast('请先生成令牌后再复制连接信息', 'err'); return; }
+      if (!plain){ showToast('请先重置令牌后再复制连接信息', 'err'); return; }
       const url = ($('#syncBaseUrl')?.value || location.origin).replace(/\/$/, '');
       const blob = 'OMNIHOME_SYNC\nurl: ' + url + '\nkey: ' + plain + '\n';
       try { await navigator.clipboard.writeText(blob); showToast('已复制服务端地址与 API Key，可在插件设置里一键粘贴'); }
       catch (err) { showToast('复制失败', 'err'); }
+    };
+    if (gen){
+      const vid = gen.dataset.svGen;
+      if (!await App.confirmModal({
+        title: '重置同步令牌？',
+        danger: true, okText: '重置',
+        sub: '旧令牌将立即失效。新令牌仅此次可复制到连接信息中，请立刻粘贴到 Obsidian 插件。',
+      })) return;
+      try {
+        const d = await API.post('/api/sync/apikey', { vault: vid });
+        _syncPlainByVault[vid] = d.apiKey || '';
+        await renderVaultKeys(); await renderSyncLog();
+        await copyBundle(vid);
+      } catch (err) { showToast(err.message, 'err'); }
+    }
+    if (bundle){
+      await copyBundle(bundle.dataset.svBundle);
     }
     if (rev){
       const vid = rev.dataset.svRev;
+      if (rev.disabled){ showToast('尚未生成令牌', 'err'); return; }
       if (!await App.confirmModal({
         title: '吊销同步令牌？', danger: true, okText: '吊销',
         sub: '该仓库的 Obsidian 同步将立即断开，不影响笔记内容。',
@@ -570,8 +560,8 @@
     }
   });
 
-  /* 备份设置：自动备份开关 / 周期 / 保留份数 */
-  $('#bkCfgSave').addEventListener('click', async () => {
+  /* 备份设置：开关 / 周期 / 保留份数变更后自动保存 */
+  async function saveBackupCfg(quiet){
     const hours = parseInt($('#bkIntervalSeg .seg-btn.active')?.dataset.hours || '24', 10);
     try {
       await API.put('/api/data/backup-config', {
@@ -579,9 +569,20 @@
         intervalHours: hours,
         keep: parseInt($('#bkKeep').value, 10) || 10,
       });
-      showToast('备份设置已保存');
-      loadData();
+      if (!quiet) showToast('备份设置已保存');
     } catch (e) { showToast(e.message, 'err'); }
+  }
+  let _bkKeepTimer = 0;
+  $('#bkAuto')?.addEventListener('click', () => saveBackupCfg(true));
+  $('#bkIntervalSeg')?.addEventListener('click', e => {
+    if (!e.target.closest('.seg-btn')) return;
+    saveBackupCfg(true);
+  });
+  $('#bkKeep')?.addEventListener('change', () => saveBackupCfg(true));
+  $('#bkKeep')?.addEventListener('blur', () => saveBackupCfg(true));
+  $('#bkKeep')?.addEventListener('input', () => {
+    clearTimeout(_bkKeepTimer);
+    _bkKeepTimer = setTimeout(() => saveBackupCfg(true), 600);
   });
 
   document.addEventListener('click', async e => {
@@ -603,6 +604,25 @@
   });
 
   $('#exportBtn').addEventListener('click', () => API.dl('/api/data/export'));
+  $('#importBackupBtn')?.addEventListener('click', () => $('#importBackupFile')?.click());
+  $('#importBackupFile')?.addEventListener('change', async () => {
+    const f = $('#importBackupFile').files && $('#importBackupFile').files[0];
+    $('#importBackupFile').value = '';
+    if (!f) return;
+    const ok = await App.confirmModal({
+      title: '导入备份并覆盖当前数据？',
+      sub: `「${f.name}」将覆盖当前笔记 / 书签 / 日程 / 保险库密文，建议先「立即备份」保存现状。`,
+      okText: '导入并覆盖', danger: true,
+    });
+    if (!ok) return;
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+      const d = await API.upload('/api/data/import', fd);
+      showToast(`已导入并恢复 ${d.restored} 项数据，页面即将刷新`);
+      setTimeout(() => location.reload(), 1200);
+    } catch (err) { showToast(err.message, 'err'); }
+  });
 
   /* ---------- 存储引擎（仅管理员：切换时迁移全部用户数据） ---------- */
   const DB_DRIVER = { mysql: 'mysql+pymysql', postgresql: 'postgresql+psycopg2' };

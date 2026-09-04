@@ -377,8 +377,19 @@ def run_suite(engine):
     r = client.get("/api/sync/hello", headers=HK(ukey))
     check(f"[{engine}] 自建令牌 hello 指向该仓",
           r.status_code == 200 and r.json().get("vault") == uv, r.text[:80])
+    r = client.post("/api/notes", headers=HA(tok), json={"title": "仓内笔记", "vault": uv})
+    gone_id = (r.json() or {}).get("id")
+    check(f"[{engine}] 自建仓内建笔记", r.status_code == 200 and bool(gone_id), r.text[:80])
+    r = client.post("/api/notes/folders", headers=HA(tok), json={"name": "仓内夹", "vault": uv})
+    check(f"[{engine}] 自建仓内建文件夹", r.status_code == 200, r.text[:80])
     r = client.delete(f"/api/notes/vaults/{uv}", headers=HA(tok))
     check(f"[{engine}] 删除自建仓库", r.status_code == 200, str(r.status_code))
+    r = client.get("/api/notes", headers=HA(tok))
+    nd = r.json() or {}
+    note_ids = [n.get("id") for n in (nd.get("notes") or [])]
+    folders = nd.get("folders") or []
+    check(f"[{engine}] 删仓后笔记不迁入默认仓", gone_id not in note_ids, str(note_ids[:8]))
+    check(f"[{engine}] 删仓后文件夹一并删除", "仓内夹" not in folders, str(folders)[:80])
     r = client.delete("/api/notes/vaults/default", headers=HA(tok))
     check(f"[{engine}] 默认仓库不可删", r.status_code == 403, str(r.status_code))
     r = client.delete("/api/notes/vaults/system", headers=HA(tok))
@@ -422,6 +433,17 @@ def run_suite(engine):
     r = client.get("/api/notes", headers=HA(tok))
     check(f"[{engine}] 列表含 shares", isinstance((r.json() or {}).get("shares"), list)
           and len(r.json().get("shares") or []) >= 1, r.text[:80])
+    r = client.post("/api/notes/shares", headers=HA(tok),
+                    json={"kind": "note", "noteId": nid, "expireDays": 7,
+                          "requireLogin": True})
+    ltoken = (r.json() or {}).get("token") or ""
+    check(f"[{engine}] 创建需登录分享", r.status_code == 200 and ltoken.startswith("s_"),
+          ltoken[:12])
+    r = client.get(f"/api/share/{ltoken}")
+    check(f"[{engine}] 需登录分享未登录 401", r.status_code == 401, str(r.status_code))
+    r = client.get(f"/api/share/{ltoken}", headers=HA(tok))
+    check(f"[{engine}] 需登录分享已登录可读",
+          r.status_code == 200 and r.json().get("requireLogin") is True, r.text[:80])
 
 
 try:

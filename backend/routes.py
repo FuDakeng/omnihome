@@ -1363,6 +1363,7 @@ def _share_public_list(username: str) -> list:
         out.append({"id": x.get("id"), "kind": x.get("kind"),
                     "noteId": x.get("noteId") or "", "folder": x.get("folder") or "",
                     "vault": x.get("vault") or "", "canEdit": bool(x.get("canEdit")),
+                    "requireLogin": bool(x.get("requireLogin")),
                     "expireAt": int(x.get("expireAt") or 0),
                     "name": x.get("name") or ""})
     return out
@@ -1687,6 +1688,7 @@ def update_vault(vid: str, body: VaultIn, authorization: Optional[str] = Header(
 
 @router.delete("/api/notes/vaults/{vid}")
 def delete_vault(vid: str, authorization: Optional[str] = Header(None)):
+    """删除用户自建仓库：其中笔记永久删除（不进回收站），所属文件夹一并移除。"""
     username = require_user(authorization)
     if vid in (VAULT_DEFAULT, VAULT_SYSTEM):
         raise HTTPException(403, "默认仓库与系统内置仓库不可删除")
@@ -1694,19 +1696,52 @@ def delete_vault(vid: str, authorization: Optional[str] = Header(None)):
     hit = next((x for x in data["items"] if x["id"] == vid), None)
     if not hit:
         raise HTTPException(404, "笔记仓库不存在")
-    idx = storage.notes_index(username)
-    for n in idx:
-        if n.get("vault") == vid:
-            n["vault"] = VAULT_DEFAULT
-    storage.save_notes_index(username, idx)
     fv = dict(data.get("folderVault") or {})
+    drop_folders = set()
     for k, v in list(fv.items()):
-        if v == vid:
-            fv[k] = VAULT_DEFAULT
+        if v == vid and not _is_builtin_folder(k):
+            drop_folders.add(k)
+    folder_names = storage.user_json(username, "notes/folders.json", [])
+    norm_folders = []
+    for f in folder_names:
+        name = f.get("name") if isinstance(f, dict) else str(f or "")
+        if name:
+            norm_folders.append(name)
+            if _folder_vault(data, name) == vid and not _is_builtin_folder(name):
+                drop_folders.add(name)
+    idx = storage.notes_index(username)
+    gone_ids, kept = set(), []
+    for n in idx:
+        if _infer_note_vault(n) == vid:
+            gone_ids.add(n.get("id"))
+            try:
+                storage.note_delete(username, n["id"])
+            except Exception:
+                pass
+            continue
+        kept.append(n)
+    storage.save_notes_index(username, kept)
+    storage.save_user_json(username, "notes/folders.json",
+                           [f for f in norm_folders if f not in drop_folders])
+    for k in list(fv.keys()):
+        if k in drop_folders or fv.get(k) == vid:
+            fv.pop(k, None)
     data["folderVault"] = fv
     data["items"] = [x for x in data["items"] if x["id"] != vid]
     _save_vaults(username, data)
     storage.revoke_sync_key(username, vid)
+    items = _share_gc(username)
+    alive = []
+    for x in items:
+        drop = ((x.get("vault") or "") == vid
+                or (x.get("noteId") or "") in gone_ids
+                or (x.get("kind") == "folder" and (x.get("folder") or "") in drop_folders))
+        if drop:
+            if x.get("hash"):
+                _share_index_del(x["hash"])
+            continue
+        alive.append(x)
+    _shares_save(username, alive)
     prefs = storage.get_prefs(username) or {}
     if prefs.get("activeVault") == vid:
         prefs["activeVault"] = VAULT_DEFAULT
@@ -2218,6 +2253,7 @@ class ShareIn(BaseModel):
     vault: str = ""
     expireDays: int = 7         # 0 = 十年
     canEdit: bool = False
+    requireLogin: bool = False  # True = 本站已登录用户才能打开链接
 
 
 @router.get("/api/notes/shares")
@@ -2255,6 +2291,7 @@ def create_share(body: ShareIn, authorization: Optional[str] = Header(None)):
     h = _share_hash(raw)
     rec = {"id": sid, "hash": h, "kind": kind, "noteId": note_id, "folder": folder,
            "vault": vault, "canEdit": bool(body.canEdit), "canView": True,
+           "requireLogin": bool(body.requireLogin),
            "expireAt": expire_at, "created": int(time.time()), "name": name,
            "prefix": raw[:8]}
     items = _share_gc(username)
@@ -2263,7 +2300,8 @@ def create_share(body: ShareIn, authorization: Optional[str] = Header(None)):
     _share_index_put(h, username, sid)
     origin = ""
     return {"ok": True, "id": sid, "token": raw, "expireAt": expire_at,
-            "canEdit": rec["canEdit"], "name": name}
+            "canEdit": rec["canEdit"], "requireLogin": rec["requireLogin"],
+            "name": name}
 
 
 @router.delete("/api/notes/shares/{sid}")
@@ -2286,21 +2324,34 @@ def _require_share(token: str):
     return found
 
 
+def _enforce_share_login(rec: dict, authorization: Optional[str],
+                         access: Optional[str] = None):
+    if not rec.get("requireLogin"):
+        return
+    try:
+        require_user(authorization, access)
+    except HTTPException:
+        raise HTTPException(401, "需要登录后查看此分享")
+
+
 @router.get("/api/share/{token}")
-def share_get(token: str):
+def share_get(token: str, authorization: Optional[str] = Header(None)):
     username, rec = _require_share(token)
+    _enforce_share_login(rec, authorization)
     notes = _share_scope_notes(username, rec)
     items = [{"id": n["id"], "title": n.get("title") or "未命名笔记",
               "folder": n.get("folder") or "", "updated": int(n.get("updated") or 0)}
              for n in notes]
     return {"ok": True, "kind": rec.get("kind"), "name": rec.get("name") or "",
             "canEdit": bool(rec.get("canEdit")), "canView": True,
+            "requireLogin": bool(rec.get("requireLogin")),
             "expireAt": int(rec.get("expireAt") or 0), "notes": items}
 
 
 @router.get("/api/share/{token}/notes/{nid}")
-def share_get_note(token: str, nid: str):
+def share_get_note(token: str, nid: str, authorization: Optional[str] = Header(None)):
     username, rec = _require_share(token)
+    _enforce_share_login(rec, authorization)
     notes = _share_scope_notes(username, rec)
     hit = next((n for n in notes if n["id"] == nid), None)
     if not hit:
@@ -2316,8 +2367,10 @@ class ShareNoteIn(BaseModel):
 
 
 @router.put("/api/share/{token}/notes/{nid}")
-def share_put_note(token: str, nid: str, body: ShareNoteIn):
+def share_put_note(token: str, nid: str, body: ShareNoteIn,
+                   authorization: Optional[str] = Header(None)):
     username, rec = _require_share(token)
+    _enforce_share_login(rec, authorization)
     if not rec.get("canEdit"):
         raise HTTPException(403, "此分享仅可查看")
     notes = _share_scope_notes(username, rec)
@@ -2340,8 +2393,10 @@ def share_put_note(token: str, nid: str, body: ShareNoteIn):
 
 
 @router.get("/api/share/{token}/assets/{name}")
-def share_get_asset(token: str, name: str):
+def share_get_asset(token: str, name: str, authorization: Optional[str] = Header(None),
+                    access: Optional[str] = None):
     username, rec = _require_share(token)
+    _enforce_share_login(rec, authorization, access)
     if not _ASSET_NAME.match(name):
         raise HTTPException(400, "非法附件名")
     raw = storage.asset_read(username, name)
@@ -3508,6 +3563,41 @@ def restore_backup(body: RestoreIn, authorization: Optional[str] = Header(None))
     except Exception as e:
         raise HTTPException(500, f"恢复失败：{e}")
     return {"ok": True, "restored": count}
+
+
+IMPORT_BACKUP_MAX = 80 * 1024 * 1024
+
+
+@router.post("/api/data/import")
+async def import_backup_file(file: UploadFile = File(...),
+                             authorization: Optional[str] = Header(None)):
+    """上传导出的 zip，校验后写入 backups 并覆盖当前用户数据。"""
+    import io as _io
+    import zipfile as _zf
+    username = require_user(authorization)
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "文件为空")
+    if len(raw) > IMPORT_BACKUP_MAX:
+        raise HTTPException(400, "备份文件过大（上限 80MB）")
+    try:
+        zf = _zf.ZipFile(_io.BytesIO(raw))
+        names = zf.namelist()
+    except Exception:
+        raise HTTPException(400, "不是有效的 zip 备份")
+    for n in names:
+        norm = n.replace("\\", "/").lstrip("/")
+        if n.startswith("/") or ".." in norm.split("/") or norm.startswith("backups/"):
+            raise HTTPException(400, f"非法路径：{n}")
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    dest = storage.backup_dir(username) / f"import-{ts}.zip"
+    dest.write_bytes(raw)
+    try:
+        count = storage.restore_backup(username, dest.name)
+    except Exception as e:
+        raise HTTPException(500, f"恢复失败：{e}")
+    storage.prune_backups(username, _backup_cfg(username).get("keep", 10))
+    return {"ok": True, "restored": count, "name": dest.name}
 
 
 @router.get("/api/data/export")
