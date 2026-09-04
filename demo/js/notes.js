@@ -1489,17 +1489,38 @@ const Notes = (() => {
 
   /* ---------- 分享 ---------- */
   let shareTarget = null;
+  function shareLinkUrl(token){
+    return location.origin.replace(/\/$/, '') + '/?s=' + encodeURIComponent(token);
+  }
+  function pickShareExpireDays(exist){
+    const exp = Number(exist && exist.expireAt) || 0;
+    if (!exp) return 7;
+    const left = (exp - Date.now() / 1000) / 86400;
+    if (left > 400) return 0;
+    let best = 7, dist = Infinity;
+    [1, 7, 30].forEach(d => {
+      const n = Math.abs(d - left);
+      if (n < dist){ dist = n; best = d; }
+    });
+    return best;
+  }
   async function openShareModal(target){
     shareTarget = target;
     $('#kbShareTitle').textContent = '分享「' + (target.name || '') + '」';
-    $('#kbShareEdit').classList.remove('on');
-    $('#kbShareNeedLogin')?.classList.remove('on');
-    $$('#kbShareExpire .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.days === '7'));
-    $('#kbShareLinkRow').hidden = true;
-    $('#kbShareLink').value = '';
     const exist = target.kind === 'note' ? shareOfNote(target.noteId) : shareOfFolder(target.folder);
+    $('#kbShareEdit').classList.toggle('on', !!(exist && exist.canEdit));
+    $('#kbShareNeedLogin')?.classList.toggle('on', !!(exist && exist.requireLogin));
+    const days = String(pickShareExpireDays(exist));
+    $$('#kbShareExpire .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.days === days));
     $('#kbShareRevoke').hidden = !exist;
     $('#kbShareRevoke').dataset.sid = exist ? exist.id : '';
+    if (exist && exist.token){
+      $('#kbShareLink').value = shareLinkUrl(exist.token);
+      $('#kbShareLinkRow').hidden = false;
+    } else {
+      $('#kbShareLink').value = '';
+      $('#kbShareLinkRow').hidden = true;
+    }
     App.openModal('kbShareMask');
   }
   async function createShareLink(){
@@ -1515,7 +1536,7 @@ const Notes = (() => {
         canEdit: $('#kbShareEdit').classList.contains('on'),
         requireLogin: $('#kbShareNeedLogin')?.classList.contains('on'),
       });
-      const url = location.origin.replace(/\/$/, '') + '/?s=' + encodeURIComponent(d.token);
+      const url = shareLinkUrl(d.token);
       $('#kbShareLink').value = url;
       $('#kbShareLinkRow').hidden = false;
       showToast('链接已生成，默认开启查看权限');
@@ -1639,12 +1660,20 @@ const Notes = (() => {
         if (b) loadOne(b.dataset.shareNid);
       };
       if (notes[0]) loadOne(notes[0].id);
+      if (!API.getToken()) App.lock(false);
     } catch (e) {
       title.textContent = '无法打开分享';
       sub.textContent = e.message || '';
       list.innerHTML = '';
-      if (e.needLogin) App.lock();
+      if (e.needLogin){
+        mask.classList.remove('open');
+        App.lock();
+      }
     }
+  }
+  function leaveShareOverlay(){
+    $('#kbShareViewMask')?.classList.remove('open');
+    if (!API.getToken()) App.lock();
   }
 
   /* ---------- 事件 ---------- */
@@ -1675,7 +1704,7 @@ const Notes = (() => {
       if (!b) return;
       $$('#kbShareExpire .seg-btn').forEach(x => x.classList.toggle('active', x === b));
     });
-    $('#kbShareViewClose')?.addEventListener('click', () => $('#kbShareViewMask')?.classList.remove('open'));
+    $('#kbShareViewClose')?.addEventListener('click', leaveShareOverlay);
 
     /* 顶部 "..." 溢出菜单：导入 / 导出（设计图把显眼按钮收纳收起） */
     $('#notesOverflowBtn')?.addEventListener('click', () => kbMenu($('#notesOverflowBtn'), [

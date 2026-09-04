@@ -1333,6 +1333,8 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
 /* 确认框永远置顶：否则在其他 modal（如回收站弹层）内触发确认时，
    同 z-index 下 DOM 靠后的弹层会盖住确认框（v0.2.26 修复「清空回收站」确认被遮） */
 #confirmMask{ z-index: 260; }
+/* 公开分享层须高于登录页（.auth-page z-index:150），否则访客只看到登录 */
+#kbShareViewMask{ z-index: 180; }
 .modal{
   width: min(420px, 92vw);
   border-radius: var(--om-radius-lg);

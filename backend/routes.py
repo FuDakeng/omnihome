@@ -1365,7 +1365,8 @@ def _share_public_list(username: str) -> list:
                     "vault": x.get("vault") or "", "canEdit": bool(x.get("canEdit")),
                     "requireLogin": bool(x.get("requireLogin")),
                     "expireAt": int(x.get("expireAt") or 0),
-                    "name": x.get("name") or ""})
+                    "name": x.get("name") or "",
+                    "token": x.get("token") or ""})
     return out
 
 
@@ -2293,7 +2294,7 @@ def create_share(body: ShareIn, authorization: Optional[str] = Header(None)):
            "vault": vault, "canEdit": bool(body.canEdit), "canView": True,
            "requireLogin": bool(body.requireLogin),
            "expireAt": expire_at, "created": int(time.time()), "name": name,
-           "prefix": raw[:8]}
+           "prefix": raw[:8], "token": raw}
     items = _share_gc(username)
     items.append(rec)
     _shares_save(username, items)

@@ -431,8 +431,11 @@ def run_suite(engine):
     check(f"[{engine}] 分享文件夹", r.status_code == 200 and (r.json() or {}).get("token", "").startswith("s_"),
           r.text[:80])
     r = client.get("/api/notes", headers=HA(tok))
+    note_shares = [x for x in ((r.json() or {}).get("shares") or []) if x.get("noteId") == nid]
     check(f"[{engine}] 列表含 shares", isinstance((r.json() or {}).get("shares"), list)
           and len(r.json().get("shares") or []) >= 1, r.text[:80])
+    check(f"[{engine}] 分享列表回显 token",
+          any((x.get("token") or "") == token for x in note_shares), str(note_shares)[:80])
     r = client.post("/api/notes/shares", headers=HA(tok),
                     json={"kind": "note", "noteId": nid, "expireDays": 7,
                           "requireLogin": True})

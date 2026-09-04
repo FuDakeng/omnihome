@@ -55,13 +55,19 @@ const App = (() => {
   }
 
   /* ---------- 登录门控（独立登录页：未登录时隐藏主界面，不再模糊展示） ---------- */
-  function lock(){
-    $('#authScreen').classList.add('open');
+  function lock(showAuth){
+    if (showAuth !== false) $('#authScreen').classList.add('open');
+    else $('#authScreen').classList.remove('open');
     $('.app').hidden = true;
   }
   function unlock(){
     $('#authScreen').classList.remove('open');
     $('.app').hidden = false;
+  }
+
+  function shareTokenFromUrl(){
+    try { return new URLSearchParams(location.search).get('s') || ''; }
+    catch (_) { return ''; }
   }
 
   function onUnauthorized(){
@@ -99,7 +105,9 @@ const App = (() => {
       const sub = $('#authSub');
       if (sub) sub.textContent = '无法连接万事屋服务，请检查服务是否已启动';
     }
-    lock();
+    /* 无需登录的分享链：先不盖登录页（登录页 z-index 高于分享层）。
+       需登录分享会在打开失败时再 lock()。 */
+    lock(!shareTokenFromUrl());
     finishBoot();
   }
 
@@ -214,6 +222,7 @@ const App = (() => {
     get prefs(){ return prefs; },
         applyPrefs, applyUser, renderAvatar,
     boot, enter, lock, unlock, onUnauthorized, logout,
+    shareTokenFromUrl,
     onEnter: fn => listeners.push(fn),
     openModal, closeModal, esc, fmtBytes,
     promptModal, confirmModal, showChangelog,
@@ -249,6 +258,7 @@ document.addEventListener('click', e => {
     /* 统一弹窗需要兑现 Promise */
     if (mask.id === 'promptMask') App._finishPrompt(null);
     if (mask.id === 'confirmMask') App._finishConfirm(false);
+    if (mask.id === 'kbShareViewMask' && !API.getToken()) App.lock();
   }
 });
 document.addEventListener('keydown', e => {
