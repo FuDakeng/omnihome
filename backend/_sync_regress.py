@@ -457,6 +457,28 @@ def run_suite(engine):
     r = client.get(f"/api/share/{ltoken}", headers=HA(tok))
     check(f"[{engine}] 需登录分享已登录可读",
           r.status_code == 200 and r.json().get("requireLogin") is True, r.text[:80])
+    r = client.get(f"/api/share/{token}/notes/{nid}/export")
+    check(f"[{engine}] 分享下载当前 md",
+          r.status_code == 200 and b"edited via share" in (r.content or b""),
+          str(r.status_code))
+    r = client.get(f"/api/share/{token}/export")
+    check(f"[{engine}] 分享下载范围 zip",
+          r.status_code == 200 and (r.content or b"").startswith(b"PK"),
+          str(r.status_code))
+    r = client.post("/api/notes/shares", headers=HA(tok),
+                    json={"kind": "note", "noteId": nid, "expireDays": 7})
+    check(f"[{engine}] 同笔记再生成一条分享", r.status_code == 200, r.text[:80])
+    r = client.delete(f"/api/notes/shares/{sid}", headers=HA(tok))
+    check(f"[{engine}] 取消分享", r.status_code == 200, str(r.status_code))
+    r = client.get("/api/notes", headers=HA(tok))
+    left = [x for x in ((r.json() or {}).get("shares") or []) if x.get("noteId") == nid]
+    check(f"[{engine}] 取消后同笔记全部分享已吊销", left == [], str(left)[:80])
+    r = client.get(f"/api/share/{token}")
+    check(f"[{engine}] 旧链接已失效", r.status_code == 404, str(r.status_code))
+    st = sessions.create_session("t")
+    sessions._sessions.clear()
+    sessions.load_sessions()
+    check(f"[{engine}] 会话落盘后可恢复", sessions.get_session_user(st) == "t", "reload")
 
 
 try:

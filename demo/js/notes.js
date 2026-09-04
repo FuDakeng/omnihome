@@ -1722,6 +1722,10 @@ const Notes = (() => {
     const list = $('#kbShareViewList');
     const title = $('#kbShareViewTitle');
     const sub = $('#kbShareViewSub');
+    const dlNote = $('#kbShareDlNote');
+    const dlAll = $('#kbShareDlAll');
+    if (dlNote) dlNote.hidden = true;
+    if (dlAll) dlAll.hidden = true;
     list.innerHTML = '加载中…';
     $('#kbSharePreview').innerHTML = '';
     try {
@@ -1731,12 +1735,22 @@ const Notes = (() => {
         (d.canEdit ? '可编辑 · ' : '只读 · ') +
         (d.expireAt ? ('有效至 ' + new Date(d.expireAt * 1000).toLocaleString('zh-CN')) : '');
       const notes = d.notes || [];
+      const shareQ = API.getToken() ? ('?access=' + encodeURIComponent(API.getToken())) : '';
+      if (dlAll){
+        dlAll.href = '/api/share/' + encodeURIComponent(token) + '/export' + shareQ;
+        dlAll.hidden = notes.length < 2;
+      }
       list.innerHTML = notes.map(n =>
         `<button class="note-item" data-share-nid="${App.esc(n.id)}"><svg class="ic ni-icon"><use href="#i-note"/></svg><span class="ni-title">${App.esc(n.title)}</span></button>`
       ).join('') || '<div class="kb-empty">没有可查看的笔记</div>';
       const loadOne = async nid => {
         const n = await shareFetch('/api/share/' + encodeURIComponent(token) + '/notes/' + encodeURIComponent(nid));
         shareView.nid = nid;
+        if (dlNote){
+          dlNote.href = '/api/share/' + encodeURIComponent(token) + '/notes/' +
+            encodeURIComponent(nid) + '/export' + shareQ;
+          dlNote.hidden = false;
+        }
         shareView.canEdit = !!n.canEdit;
         $$('#kbShareViewList .note-item').forEach(b =>
           b.classList.toggle('active', b.dataset.shareNid === nid));
@@ -1773,6 +1787,10 @@ const Notes = (() => {
     destroyShareLive();
     setShareOutline(false);
     $('#kbShareViewMask')?.classList.remove('open');
+    const dlNote = $('#kbShareDlNote');
+    const dlAll = $('#kbShareDlAll');
+    if (dlNote) dlNote.hidden = true;
+    if (dlAll) dlAll.hidden = true;
     if (!API.getToken()) App.lock();
   }
 

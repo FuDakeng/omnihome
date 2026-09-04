@@ -1342,7 +1342,7 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
 .kb-share-view-head{
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
 }
-.kb-share-view-actions{ display: flex; align-items: center; gap: 8px; flex: none; }
+.kb-share-view-actions{ display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: none; }
 .kb-share-view-layout{
   display: grid; grid-template-columns: 180px minmax(0, 1fr) auto;
   flex: 1; min-height: 0; border-top: 1px solid var(--om-border);
@@ -1367,6 +1367,11 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
   transform: scale(.96) translateY(8px);
   transition: transform var(--om-t-base);
   overflow: hidden;
+}
+.modal.kb-share-view{
+  width: min(1400px, 96vw);
+  max-height: 92vh;
+  height: 92vh;
 }
 .modal-mask.open .modal{ transform: none; }
 .m-head{ padding: var(--om-space-5) var(--om-space-5) var(--om-space-3); }

@@ -2305,6 +2305,16 @@ def create_share(body: ShareIn, authorization: Optional[str] = Header(None)):
             "name": name}
 
 
+def _share_same_scope(a: dict, b: dict) -> bool:
+    if (a.get("kind") or "") != (b.get("kind") or ""):
+        return False
+    if (a.get("vault") or "") != (b.get("vault") or ""):
+        return False
+    if a.get("kind") == "note":
+        return (a.get("noteId") or "") == (b.get("noteId") or "")
+    return (a.get("folder") or "") == (b.get("folder") or "")
+
+
 @router.delete("/api/notes/shares/{sid}")
 def revoke_share(sid: str, authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
@@ -2312,9 +2322,14 @@ def revoke_share(sid: str, authorization: Optional[str] = Header(None)):
     hit = next((x for x in items if x.get("id") == sid), None)
     if not hit:
         raise HTTPException(404, "分享不存在")
-    if hit.get("hash"):
-        _share_index_del(hit["hash"])
-    _shares_save(username, [x for x in items if x.get("id") != sid])
+    keep = []
+    for x in items:
+        if x.get("id") == sid or _share_same_scope(x, hit):
+            if x.get("hash"):
+                _share_index_del(x["hash"])
+            continue
+        keep.append(x)
+    _shares_save(username, keep)
     return {"ok": True}
 
 
@@ -2389,6 +2404,71 @@ def share_get_note(token: str, nid: str, authorization: Optional[str] = Header(N
     return {"id": nid, "title": hit.get("title") or "", "folder": hit.get("folder") or "",
             "content": storage.note_read(username, nid),
             "updated": int(hit.get("updated") or 0), "canEdit": editable}
+
+
+@router.get("/api/share/{token}/notes/{nid}/export")
+def share_export_note(token: str, nid: str, authorization: Optional[str] = Header(None),
+                      access: Optional[str] = None):
+    """公开分享：下载当前笔记为 .md（无需 Bearer；需登录的分享可带 access 会话）。"""
+    from urllib.parse import quote as _quote
+    username, rec = _require_share(token)
+    _enforce_share_login(rec, authorization, access)
+    notes = _share_scope_notes(username, rec)
+    hit = next((n for n in notes if n["id"] == nid), None)
+    if not hit:
+        raise HTTPException(404, "不在此分享范围内")
+    content = storage.note_read(username, nid) or ""
+    data = _note_to_md(hit, content)
+    fname = _safe_fs_name(hit.get("title") or nid) + ".md"
+    ascii_fname = fname.encode("ascii", errors="replace").decode("ascii") or "note.md"
+    utf8_fname = _quote(fname, safe="")
+    return Response(
+        content=data,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition":
+                 f"attachment; filename=\"{ascii_fname}\"; filename*=UTF-8''{utf8_fname}",
+                 "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.get("/api/share/{token}/export")
+def share_export_all(token: str, authorization: Optional[str] = Header(None),
+                     access: Optional[str] = None):
+    """公开分享：范围内全部笔记打包 zip。"""
+    from urllib.parse import quote as _quote
+    username, rec = _require_share(token)
+    _enforce_share_login(rec, authorization, access)
+    picked = _share_scope_notes(username, rec)
+    if not picked:
+        raise HTTPException(404, "没有可下载的笔记")
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as zf:
+        used = set()
+        for m in picked:
+            folder = (m.get("folder") or "").strip("/")
+            parts = [_safe_fs_name(p) for p in folder.split("/") if p] if folder else []
+            arc = ("/".join(parts + [_safe_fs_name(m.get("title") or m["id"]) + ".md"])) if parts \
+                else (_safe_fs_name(m.get("title") or m["id"]) + ".md")
+            base = arc
+            n = 2
+            while arc in used:
+                stem, ext = base.rsplit(".", 1) if "." in base else (base, "")
+                arc = (f"{stem}-{n}.{ext}" if ext else f"{base}-{n}")
+                n += 1
+            used.add(arc)
+            content = storage.note_read(username, m["id"]) or ""
+            zf.writestr(arc, _note_to_md(m, content))
+    buf.seek(0)
+    fname = _safe_fs_name(rec.get("name") or "share") + ".zip"
+    ascii_fname = fname.encode("ascii", errors="replace").decode("ascii") or "share.zip"
+    utf8_fname = _quote(fname, safe="")
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition":
+                 f"attachment; filename=\"{ascii_fname}\"; filename*=UTF-8''{utf8_fname}",
+                 "X-Content-Type-Options": "nosniff"},
+    )
 
 
 class ShareNoteIn(BaseModel):

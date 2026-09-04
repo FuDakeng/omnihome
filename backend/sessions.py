@@ -1,13 +1,18 @@
 """万事屋 · 会话与口令
 独立模块，避免 main ↔ routes 循环导入。
+会话落盘 data/sessions.json，随 data 卷持久化；访问时滑动续期。
 """
 import hashlib
 import hmac
+import json
 import secrets
+import threading
 import time
 from typing import Optional
 
 from fastapi import Header, HTTPException
+
+import storage
 
 
 # ---------- 口令哈希（PBKDF2-SHA256） ----------
@@ -27,32 +32,110 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
-# ---------- 会话（内存，重启后需重新登录） ----------
+# ---------- 会话（落盘，重启后仍有效） ----------
 _sessions = {}  # token -> {username, expires}
+_lock = threading.RLock()
+_last_save = 0.0
 SESSION_TTL = 7 * 24 * 3600
+_SAVE_MIN_INTERVAL = 60
+
+
+def _sess_path():
+    storage.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    return storage.DATA_DIR / "sessions.json"
+
+
+def _purge_expired(now: Optional[float] = None):
+    now = time.time() if now is None else now
+    dead = [k for k, v in _sessions.items()
+            if not isinstance(v, dict) or float(v.get("expires") or 0) < now]
+    for k in dead:
+        _sessions.pop(k, None)
+
+
+def save_sessions(force: bool = False):
+    global _last_save
+    now = time.time()
+    with _lock:
+        if not force and now - _last_save < _SAVE_MIN_INTERVAL:
+            return
+        _purge_expired(now)
+        path = _sess_path()
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(_sessions, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+        _last_save = now
+
+
+def load_sessions():
+    global _sessions
+    path = _sess_path()
+    with _lock:
+        if not path.exists():
+            _sessions = {}
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _sessions = {}
+            return
+        now = time.time()
+        if not isinstance(data, dict):
+            _sessions = {}
+            return
+        _sessions = {}
+        for k, v in data.items():
+            if not isinstance(v, dict):
+                continue
+            try:
+                exp = float(v.get("expires") or 0)
+            except (TypeError, ValueError):
+                continue
+            user = v.get("username")
+            if exp > now and isinstance(user, str) and user:
+                _sessions[k] = {"username": user, "expires": exp}
+
+
+load_sessions()
 
 
 def create_session(username: str) -> str:
     token = secrets.token_urlsafe(32)
-    _sessions[token] = {"username": username, "expires": time.time() + SESSION_TTL}
+    with _lock:
+        _sessions[token] = {"username": username, "expires": time.time() + SESSION_TTL}
+    save_sessions(force=True)
     return token
 
 
 def drop_session(token: Optional[str]):
     if token:
-        _sessions.pop(token, None)
+        with _lock:
+            _sessions.pop(token, None)
+        save_sessions(force=True)
 
 
 def get_session_user(token: Optional[str]) -> Optional[str]:
     if not token:
         return None
-    s = _sessions.get(token)
-    if not s:
+    now = time.time()
+    with _lock:
+        s = _sessions.get(token)
+        if not s:
+            return None
+        if float(s.get("expires") or 0) < now:
+            _sessions.pop(token, None)
+            expired = True
+            user = None
+        else:
+            expired = False
+            s["expires"] = now + SESSION_TTL
+            user = s.get("username")
+    if expired:
+        save_sessions(force=True)
         return None
-    if s["expires"] < time.time():
-        _sessions.pop(token, None)
-        return None
-    return s["username"]
+    if user:
+        save_sessions(force=False)
+    return user
 
 
 def require_user(authorization: Optional[str] = Header(None),
