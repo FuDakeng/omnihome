@@ -91,6 +91,7 @@ def seed(title, folder="", content="", updated=None, pinned=False, deleted=None)
     idx = storage.notes_index(USER)
     nid = uuid.uuid4().hex[:8]
     m = {"id": nid, "title": title, "tags": [], "folder": folder,
+         "vault": "system" if pinned or (folder or "").split("/")[0] in ("每日计划", "灵感速记") else "default",
          "pinned": pinned, "updated": updated if updated is not None else int(time.time())}
     if deleted:
         m["deleted"] = deleted
@@ -353,6 +354,38 @@ def run_suite(engine):
           client.get("/api/sync/list", headers=HK(newkey)).status_code == 401, "")
     r = client.get("/api/sync/apikey")   # 无 session
     check(f"[{engine}] 管理端点需 session(401)", r.status_code == 401, str(r.status_code))
+
+    # ---------- 11. 笔记仓库与握手 ----------
+    print("-- 11. 仓库 / hello --")
+    reset(engine)
+    tok, key = reset(engine)
+    r = client.get("/api/sync/hello", headers=HK(key))
+    check(f"[{engine}] hello 握手", r.status_code == 200 and r.json().get("ok") is True
+          and r.json().get("vault") == "default", str(r.status_code) + r.text[:80])
+    r = client.get("/api/notes", headers=HA(tok))
+    vids = {v["id"] for v in (r.json().get("vaults") or [])}
+    check(f"[{engine}] 默认含 default+system 仓库",
+          "default" in vids and "system" in vids, str(sorted(vids)))
+    r = client.post("/api/sync/apikey", headers=HA(tok), json={"vault": "system"})
+    check(f"[{engine}] 系统仓库禁止令牌", r.status_code == 400, str(r.status_code) + r.text[:80])
+    r = client.post("/api/notes/vaults", headers=HA(tok), json={"name": "工区"})
+    check(f"[{engine}] 自建仓库", r.status_code == 200 and bool(r.json().get("id")), r.text[:80])
+    uv = r.json().get("id")
+    r = client.post("/api/sync/apikey", headers=HA(tok), json={"vault": uv})
+    ukey = r.json().get("apiKey", "")
+    check(f"[{engine}] 自建仓库可发令牌", r.status_code == 200 and ukey.startswith("ohs_"), ukey[:12])
+    r = client.get("/api/sync/hello", headers=HK(ukey))
+    check(f"[{engine}] 自建令牌 hello 指向该仓",
+          r.status_code == 200 and r.json().get("vault") == uv, r.text[:80])
+    r = client.delete(f"/api/notes/vaults/{uv}", headers=HA(tok))
+    check(f"[{engine}] 删除自建仓库", r.status_code == 200, str(r.status_code))
+    r = client.delete("/api/notes/vaults/default", headers=HA(tok))
+    check(f"[{engine}] 默认仓库不可删", r.status_code == 403, str(r.status_code))
+    r = client.delete("/api/notes/vaults/system", headers=HA(tok))
+    check(f"[{engine}] 系统仓库不可删", r.status_code == 403, str(r.status_code))
+    r = client.put("/api/notes/vaults/select", headers=HA(tok), json={"vault": "system"})
+    check(f"[{engine}] 切换当前仓库", r.status_code == 200 and r.json().get("current") == "system",
+          r.text[:80])
 
 
 try:

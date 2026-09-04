@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 COPY backend ./backend
 COPY demo ./demo
+COPY obsidian-plugin ./obsidian-plugin
 # 浏览器扩展安装包（设置 → 功能设置 提供下载）；
 # 用 glob 写法：文件缺失时构建不报错，接口会如实提示未附带。
 # 注意：每次发版后需将最新 omnihome-extension.zip 放到构建目录根再构建镜像，

@@ -4,17 +4,17 @@
    OmniHome Sync · 万事屋 ↔ Obsidian 双向同步插件（纯 JS / CommonJS）
    无需构建：BRAT 侧载，或整目录复制到 <vault>/.obsidian/plugins/omnihome-sync/。
 
-   同步语义与门户浏览器版「本地文件夹同步」(localsync.js) 一致：
-     · 路径 = 文件夹/标题.md（服务端逻辑寻址，笔记仍存数据库，不落物理镜像）
+   路径 = 文件夹/标题.md（服务端逻辑寻址，笔记仍存数据库，不落物理镜像）。
+   每个 Obsidian 仓库对应万事屋的一个「笔记仓库」令牌（系统内置仓库不可同步）。
      · LWW：最后修改时间优先，2 秒同刻窗口内站点优先
      · 删除安全阀：单轮计划删除 > 10 个则暂停并弹确认
      · 30 秒聚合通知，不频繁打扰
-     · 仅同步普通笔记（不含常驻笔记 / 每日计划 / 灵感速记，服务端已过滤）
+     · 仅同步该令牌绑定仓库内的普通笔记（不含常驻 / 系统内置仓库）
    ============================================================ */
 
 const obsidian = require('obsidian');
 const {
-  Plugin, PluginSettingTab, Setting, Notice, Modal, TFile, requestUrl, normalizePath,
+  Plugin, PluginSettingTab, Setting, Notice, Modal, TFile, requestUrl, normalizePath, Menu, setIcon,
 } = obsidian;
 
 const DELETE_VALVE = 10;            // 单轮删除安全阀阈值
@@ -27,7 +27,7 @@ const SELF_WRITE_MS = 4000;         // 自写抑制窗口（避免回环触发�
 
 /* 插件独立版本线（与服务端 app 版本解耦；须与 manifest.json 的 version 保持一致）。
    打进启动日志与设置页，用户反馈报错时可一眼确认所装插件版本。 */
-const PLUGIN_VERSION = '0.0.2';
+const PLUGIN_VERSION = '0.0.3';
 
 const ASSET_MAX = 5 * 1024 * 1024;   // 与服务端 ASSET_MAX 一致
 const ASSET_DIR = 'OmniHome-assets';  // 从站点拉取、本地无原路径的附件落点
@@ -38,6 +38,7 @@ const DEFAULT_SETTINGS = {
   apiKey: '',
   enabled: false,
   pollSeconds: 8,
+  log: [],
   // baseline: path -> { lm: 本地上次同步 mtime(ms), rm: 远端上次同步 mtime(ms) }
   baseline: {},
   // assetMap: vaultPath -> { name, lm } ；反向键 '#name' -> vaultPath
@@ -170,6 +171,14 @@ function confirmDialog(app, opts) {
   return new Promise(function (resolve) { new ConfirmModal(app, opts, resolve).open(); });
 }
 
+class InfoModal extends Modal {
+  constructor(app, lines) { super(app); this.lines = lines || []; }
+  onOpen() {
+    this.titleEl.setText('OmniHome Sync 信息');
+    this.lines.forEach((t) => this.contentEl.createEl('p', { text: t }));
+  }
+}
+
 /* ============================================================
    插件主体
    ============================================================ */
@@ -183,14 +192,18 @@ class OmniHomeSyncPlugin extends Plugin {
     this._lastErrNotify = 0;
     this.lastError = '';
 
+    this.remote = {};
     this.statusBar = this.addStatusBarItem();
     this.setStatus(this.canSync() ? 'idle' : 'off');
+
+    this.ribbonEl = this.addRibbonIcon('refresh-cw', 'OmniHome Sync', (evt) => this.openRibbonMenu(evt));
+    this.updateRibbonIcon();
 
     // 启动即打印插件版本：用户反馈报错时可一眼确认所装版本（manifest 为准，常量兜底）
     console.log('[OmniHome Sync] 插件版本 v' + ((this.manifest && this.manifest.version) || PLUGIN_VERSION) +
       '（正文 base64 传输）已加载');
+    this.pushLog('info', '插件已加载 v' + ((this.manifest && this.manifest.version) || PLUGIN_VERSION));
 
-    this.addRibbonIcon('sync', 'OmniHome Sync：立即同步', () => this.manualSync());
     this.addCommand({ id: 'sync-now', name: '立即同步', callback: () => this.manualSync() });
     this.addCommand({ id: 'toggle-sync', name: '暂停 / 恢复同步', callback: () => this.toggleSync() });
 
@@ -217,7 +230,7 @@ class OmniHomeSyncPlugin extends Plugin {
     const data = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data || {});
     if (!this.settings.baseline || typeof this.settings.baseline !== 'object') this.settings.baseline = {};
-    if (!this.settings.assetMap || typeof this.settings.assetMap !== 'object') this.settings.assetMap = {};
+    if (!this.settings.log || !Array.isArray(this.settings.log)) this.settings.log = [];
   }
   async saveSettings() { await this.saveData(this.settings); }
   canSync() {
@@ -302,6 +315,7 @@ class OmniHomeSyncPlugin extends Plugin {
   remoteDelete(path) { return this.api('DELETE', '/api/sync/file', { query: { path: path } }); }
 
   async testConnection() {
+    this.remote = await this.api('GET', '/api/sync/hello');
     const list = await this.remoteList();
     return list.length;
   }
@@ -321,6 +335,55 @@ class OmniHomeSyncPlugin extends Plugin {
     if (state === 'error' && this.lastError) tip += '（' + this.lastError + '）';
     el.setAttr('aria-label', tip);
     el.className = 'omnihome-sync-status mod-' + state;
+    this.updateRibbonIcon();
+  }
+
+  updateRibbonIcon() {
+    if (!this.ribbonEl || !setIcon) return;
+    const st = this.status || 'off';
+    const ic = (st === 'error') ? 'wifi-off' : (st === 'off' || st === 'paused') ? 'pause-circle' : (st === 'syncing') ? 'refresh-cw' : 'check-circle-2';
+    try { setIcon(this.ribbonEl, ic); } catch (e) { /* 旧版无对应图标则忽略 */ }
+    this.ribbonEl.setAttribute('aria-label', 'OmniHome Sync：' + (st === 'error' ? '连接失败' : st === 'off' || st === 'paused' ? '未同步' : '已连接'));
+  }
+
+  openRibbonMenu(evt) {
+    const menu = new Menu();
+    const on = this.settings.enabled;
+    menu.addItem((i) => i.setTitle(on ? '暂停同步' : '恢复同步').setIcon('pause').onClick(() => this.toggleSync()));
+    menu.addItem((i) => i.setTitle('立即同步').setIcon('refresh-cw').onClick(() => this.manualSync()));
+    menu.addItem((i) => i.setTitle('打开万事屋').setIcon('external-link').onClick(() => {
+      const u = String(this.settings.serverUrl || '').replace(/\/+$/, '');
+      if (!u) { new Notice('尚未配置服务端地址', 5000); return; }
+      window.open(u, '_blank');
+    }));
+    menu.addItem((i) => i.setTitle('查看信息').setIcon('info').onClick(() => this.showInfoModal()));
+    menu.showAtMouseEvent(evt);
+  }
+
+  async showInfoModal() {
+    let hello = this.remote || {};
+    try {
+      if (this.canSync()) hello = await this.api('GET', '/api/sync/hello');
+    } catch (e) { hello = { error: (e && e.message) || String(e) }; }
+    const lines = [
+      '插件版本：v' + ((this.manifest && this.manifest.version) || PLUGIN_VERSION),
+      '万事屋版本：' + (hello.version ? ('v' + hello.version) : (hello.error || '未连接')),
+      '仓库：' + (hello.vaultName || hello.vault || '—'),
+      '服务端：' + (this.settings.serverUrl || '未配置'),
+      '同步：' + (this.settings.enabled ? '已启用' : '已暂停'),
+    ];
+    new InfoModal(this.app, lines).open();
+  }
+
+  pushLog(level, msg) {
+    if (!this.settings.log) this.settings.log = [];
+    const rec = { ts: Math.floor(Date.now() / 1000), level: level || 'info', msg: String(msg || '') };
+    this.settings.log.unshift(rec);
+    this.settings.log = this.settings.log.slice(0, 80);
+    this.saveSettings();
+    if (this.canSync()) {
+      this.api('POST', '/api/sync/log', { body: { level: rec.level, msg: rec.msg } }).catch(() => {});
+    }
   }
 
   /* ---------- 自写抑制（避免拉取/删除触发的事件回环） ---------- */
@@ -366,9 +429,20 @@ class OmniHomeSyncPlugin extends Plugin {
   /* ---------- 轮询 ---------- */
   startPolling() {
     this.stopPolling();
-    if (!this.canSync()) return;
+    if (!this.canSync()) { this.setStatus('off'); return; }
+    this.handshake();
     const sec = Math.max(3, Math.min(300, parseInt(this.settings.pollSeconds, 10) || 8));
     this._pollId = this.registerInterval(window.setInterval(() => this.reconcile('poll'), sec * 1000));
+  }
+  async handshake() {
+    try {
+      this.remote = await this.api('GET', '/api/sync/hello');
+      if (this.status !== 'syncing') this.setStatus('idle');
+    } catch (e) {
+      this.lastError = (e && e.message) || String(e);
+      this.setStatus('error');
+      this.notifyErrorOnce(this.lastError);
+    }
   }
   stopPolling() {
     if (this._pollId) { window.clearInterval(this._pollId); this._pollId = null; }
@@ -716,6 +790,7 @@ class OmniHomeSyncPlugin extends Plugin {
     if (t - this._lastErrNotify >= ERR_THROTTLE_MS) {
       this._lastErrNotify = t;
       new Notice('OmniHome Sync 错误：' + msg, 8000);
+      this.pushLog('error', msg);
     }
   }
 
@@ -770,7 +845,7 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('API Key')
-      .setDesc('在门户「设置 → 数据与存储 → Obsidian 同步」生成，明文仅显示一次。')
+      .setDesc('在门户「设置 → 功能设置 → Obsidian 插件同步」为对应笔记仓库生成，明文仅显示一次。')
       .addText((t) => {
         t.inputEl.type = 'password';
         t.setPlaceholder('ohs_\u2026').setValue(plugin.settings.apiKey)
@@ -805,7 +880,8 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
       .addButton((b) => b.setButtonText('测试连接').onClick(async () => {
         try {
           const n = await plugin.testConnection();
-          new Notice('OmniHome Sync：连接成功，服务端有 ' + n + ' 篇可同步笔记', 6000);
+          new Notice('OmniHome Sync：连接成功，万事屋 v' + ((plugin.remote && plugin.remote.version) || '?') +
+            '，可同步 ' + n + ' 篇', 6000);
         } catch (e) { new Notice('OmniHome Sync：连接失败 — ' + ((e && e.message) || e), 8000); }
       }));
 
@@ -825,16 +901,30 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
         });
         if (!ok) return;
         plugin.stopPolling();
-        plugin.settings = Object.assign({}, DEFAULT_SETTINGS, { baseline: {}, assetMap: {} });
+        plugin.settings = Object.assign({}, DEFAULT_SETTINGS, { baseline: {}, assetMap: {}, log: [] });
         await plugin.saveSettings();
         plugin.setStatus('off');
         this.display();
         new Notice('OmniHome Sync：已解绑');
       }));
 
+    const logHead = containerEl.createEl('h3', { text: '同步日志' });
+    logHead.style.marginTop = '18px';
+    const logBox = containerEl.createDiv({ cls: 'omnihome-sync-log' });
+    const logs = plugin.settings.log || [];
+    if (!logs.length) logBox.createEl('p', { text: '暂无记录', cls: 'omnihome-sync-help' });
+    else logs.slice(0, 40).forEach((x) => {
+      const line = logBox.createDiv({ cls: 'omnihome-sync-log-line' });
+      const ts = x && x.ts ? new Date(x.ts * 1000) : null;
+      const pad = (n) => String(n).padStart(2, '0');
+      const tstr = ts ? (pad(ts.getMonth() + 1) + '-' + pad(ts.getDate()) + ' ' + pad(ts.getHours()) + ':' + pad(ts.getMinutes()) + ':' + pad(ts.getSeconds())) : '';
+      line.createEl('span', { text: tstr, cls: 'ts' });
+      line.createEl('span', { text: (x && x.msg) || '', cls: (x && x.level) === 'error' ? 'err' : '' });
+    });
+
     containerEl.createEl('p', {
       cls: 'omnihome-sync-help',
-      text: '同步范围：普通笔记及其引用的附件（图片 / 文件，≤5MB）。不含常驻笔记、每日计划、灵感速记。冲突按最后修改时间优先（LWW，2 秒内站点优先；服务端无独立变更时不会回拉以免打断正在编辑的正文）。单轮删除超过 ' + DELETE_VALVE + ' 个会暂停并请你确认。',
+      text: '同步范围：当前令牌绑定的笔记仓库中的普通笔记及其引用的附件（≤5MB）。系统内置仓库（每日计划 / 灵感速记 / 常驻）不可同步。冲突按最后修改时间优先（LWW，2 秒内站点优先；服务端无独立变更时不会回拉以免打断正在编辑的正文）。单轮删除超过 ' + DELETE_VALVE + ' 个会暂停并请你确认。',
     });
   }
 }

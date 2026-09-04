@@ -2,7 +2,7 @@
 
 > 适用版本：0.2.27 起 · 后端框架：FastAPI · 路由文件：`backend/routes.py`
 
-万事屋门户为 Obsidian 双向同步插件提供一组以**相对路径寻址**的 RESTful API。站点笔记仍存于 storage 抽象层（NAS 上是 PostgreSQL 的 `bm_notes` 表，**不落物理 `.md` 文件**），`path` 是逻辑地址（`文件夹/标题.md`），经映射读写数据库笔记。映射规则与浏览器版「本地文件夹同步」(`demo/js/localsync.js`) **完全一致**，两套同步互不破坏。
+万事屋门户为 Obsidian 双向同步插件提供一组以**相对路径寻址**的 RESTful API。站点笔记仍存于 storage 抽象层（NAS 上是 PostgreSQL 的 `bm_notes` 表，**不落物理 `.md` 文件**），`path` 是逻辑地址（`文件夹/标题.md`）。每个 API Key 绑定一个**笔记仓库**，只同步该仓库内的普通笔记。
 
 FastAPI 自带 OpenAPI 交互文档：启动服务后访问 **`/docs`**（Swagger UI）或 **`/redoc`**，可在线试调下列所有端点。
 
@@ -19,10 +19,10 @@ API 分两类，鉴权方式不同：
 
 ### API Key 机制
 
-- 每用户**一枚**长期 API Key，形如 `ohs_` + 43 位随机串（`secrets.token_urlsafe(32)`）。
-- 服务端**只存 Key 的 sha256 哈希**（存于全局 `config.json` 的 `syncKeys` 映射：`{hash: {u: 用户名, prefix: 明文前12位, created: 时间戳}}`）。**明文只在生成时返回一次**，服务端不可逆推明文，泄露 `config.json` 也无法还原 Key。
-- **重置**会作废旧 Key（同名用户旧哈希被清除）；**吊销**同理。任一操作后，Obsidian 端旧 Key 立即失效（401），需重新生成并配置。
-- 生成入口：门户「设置 → 数据与存储 → Obsidian 同步 → 生成 API Key」。
+- 每用户每个**笔记仓库**一枚长期 API Key，形如 `ohs_` + 43 位随机串（`secrets.token_urlsafe(32)`）。系统内置仓库禁止发令牌。
+- 服务端**只存 Key 的 sha256 哈希**（`config.json` 的 `syncKeys`：`{hash: {u, vault, prefix, created}}`）。**明文只在生成时返回一次**。
+- **重置**会作废该仓库旧 Key；**吊销**同理。
+- 生成入口：门户「设置 → 功能设置 → Obsidian 插件同步」。另有 `GET /api/sync/hello`（插件握手）、`GET/POST /api/sync/log`（同步日志）。
 
 ---
 

@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>万事屋 · 个人门户</title>
-<link rel="stylesheet" href="css/theme.css?v=0.2.29">
-<link rel="stylesheet" href="css/layout.css?v=0.2.29">
-<link rel="stylesheet" href="css/components.css?v=0.2.29">
+<link rel="stylesheet" href="css/theme.css?v=0.2.31">
+<link rel="stylesheet" href="css/layout.css?v=0.2.31">
+<link rel="stylesheet" href="css/components.css?v=0.2.31">
 <script>
 /* 首屏绘制前确定明暗，避免主题闪烁；未登录时登录页也据此渲染。
    优先级：本机上次的选择 → 系统偏好 → 深色兜底（html 标签上的初始值）。 */
@@ -719,6 +719,11 @@
             <header class="kb-tree-head">
               <div class="kb-tree-titleline">
                 <h2 class="kb-tree-title">知识库</h2>
+                <button type="button" class="kb-vault-switch" id="kbVaultBtn" title="切换笔记仓库">
+                  <svg class="ic"><use href="#i-inbox"/></svg>
+                  <span id="kbVaultName">默认仓库</span>
+                  <svg class="ic kb-vault-chev"><use href="#i-chev-d"/></svg>
+                </button>
                 <div class="kb-tree-meta" id="notesCount">加载中…</div>
               </div>
               <button class="kb-tree-overflow" id="notesOverflowBtn" title="更多操作">
@@ -1063,6 +1068,38 @@
               </article>
               <article class="card">
                 <div class="card-head">
+                  <h3 class="card-title"><svg class="ic"><use href="#i-swap"/></svg>Obsidian 插件同步</h3>
+                  <span class="chip no-dot" id="obsidianSyncChip">未开启</span>
+                </div>
+                <div class="card-pad">
+                  <div class="set-row">
+                    <div class="set-row-info"><div class="set-row-label">启用 Obsidian 同步</div>
+                      <div class="set-row-sub">开启后可为每个笔记仓库生成同步令牌，用官方插件把仓库与 Obsidian 双向同步。系统内置仓库不可创建令牌。</div></div>
+                    <button class="switch" id="obsidianSyncEnabled" role="switch"></button>
+                  </div>
+                  <div class="set-row">
+                    <div class="set-row-info"><div class="set-row-label">Obsidian 插件</div>
+                      <div class="set-row-sub">下载后把 <code>omnihome-sync</code> 文件夹放到仓库的 <code>.obsidian/plugins/</code> 下并启用。也可使用 BRAT 侧载。</div></div>
+                    <button class="btn btn-sm btn-primary" id="pluginDownload"><svg class="ic"><use href="#i-download"/></svg>下载插件</button>
+                  </div>
+                  <div id="obsidianSyncBody" hidden>
+                    <div class="set-row" style="align-items:center">
+                      <div class="set-row-info"><div class="set-row-label">服务端地址</div>
+                        <div class="set-row-sub">填入插件「服务端地址」（含协议与端口，无末尾斜杠）</div></div>
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <div class="input-wrap" style="width:280px"><input class="input" id="syncBaseUrl" readonly style="padding-left:14px;height:34px;font-family:ui-monospace,Menlo,Consolas,monospace"></div>
+                        <button class="btn btn-outline btn-sm" id="syncBaseUrlCopy"><svg class="ic"><use href="#i-copy"/></svg>复制</button>
+                      </div>
+                    </div>
+                    <div class="set-row-label" style="margin:8px 0 6px">各仓库同步令牌</div>
+                    <div id="syncVaultKeys" class="sync-vault-keys"></div>
+                    <div class="set-row-label" style="margin:14px 0 6px">同步日志</div>
+                    <div class="sync-log" id="syncLogBox">暂无记录</div>
+                  </div>
+                </div>
+              </article>
+              <article class="card">
+                <div class="card-head">
                   <h3 class="card-title"><svg class="ic"><use href="#i-download"/></svg>浏览器扩展</h3>
                   <span class="chip no-dot num" id="extState">检测中…</span>
                 </div>
@@ -1155,42 +1192,6 @@
                       <div class="input-wrap" style="width:96px"><input class="input num" type="number" id="trashDays" min="0" max="3650" value="30" style="padding-left:14px;height:34px"></div>
                       <span style="font-size:12px;color:var(--om-text-3)">天</span>
                       <button class="btn btn-outline btn-sm" id="trashDaysSave"><svg class="ic"><use href="#i-check"/></svg>保存</button>
-                    </div>
-                  </div>
-                </div>
-              </article>
-
-              <article class="card">
-                <div class="card-head">
-                  <h3 class="card-title"><svg class="ic"><use href="#i-swap"/></svg>Obsidian 同步</h3>
-                  <span class="chip no-dot" id="syncKeyChip">未启用</span>
-                </div>
-                <div class="card-pad">
-                  <div class="set-row">
-                    <div class="set-row-info">
-                      <div class="set-row-label">API Key</div>
-                      <div class="set-row-sub">Obsidian 插件用它连接本站双向同步笔记（请求头 X-API-Key）。<b>明文仅在生成时显示一次</b>，请立即复制到插件设置中妥善保存；遗失可重置（旧 Key 立即失效）。数据始终存于本站，不经第三方云。</div>
-                    </div>
-                  </div>
-                  <div class="set-row" style="align-items:center">
-                    <div class="set-row-info"><div class="set-row-label">当前 Key</div></div>
-                    <div style="display:flex;align-items:center;gap:8px">
-                      <div class="input-wrap" style="width:300px"><input class="input" id="syncKeyShow" readonly placeholder="尚未生成" style="padding-left:14px;height:34px;font-family:ui-monospace,Menlo,Consolas,monospace"></div>
-                      <button class="btn btn-outline btn-sm" id="syncKeyCopy"><svg class="ic"><use href="#i-copy"/></svg>复制</button>
-                    </div>
-                  </div>
-                  <div class="set-row" style="align-items:center">
-                    <div class="set-row-info"><div class="set-row-label">服务端地址</div><div class="set-row-sub">插件「服务端地址」填此项（含协议与端口，无末尾斜杠）；公网/移动端访问请改用你的域名并启用 HTTPS</div></div>
-                    <div style="display:flex;align-items:center;gap:8px">
-                      <div class="input-wrap" style="width:300px"><input class="input" id="syncBaseUrl" readonly style="padding-left:14px;height:34px;font-family:ui-monospace,Menlo,Consolas,monospace"></div>
-                      <button class="btn btn-outline btn-sm" id="syncBaseUrlCopy"><svg class="ic"><use href="#i-copy"/></svg>复制</button>
-                    </div>
-                  </div>
-                  <div class="set-row">
-                    <div class="set-row-info"><div class="set-row-sub">同步范围：普通笔记（不含常驻笔记、每日计划、灵感速记）；冲突按最后修改时间优先（LWW）。插件安装与使用见 docs/Obsidian同步插件-用户使用指南。</div></div>
-                    <div style="display:flex;gap:8px">
-                      <button class="btn btn-primary btn-sm" id="syncKeyGen"><svg class="ic"><use href="#i-key"/></svg>生成 Key</button>
-                      <button class="btn btn-outline btn-sm" id="syncKeyRevoke" style="color:var(--om-danger)"><svg class="ic"><use href="#i-trash"/></svg>吊销</button>
                     </div>
                   </div>
                 </div>
@@ -1516,7 +1517,7 @@
   <div class="modal modal-trash">
     <div class="m-head">
       <h3>回收站</h3>
-      <p>被删除的笔记暂存于此，保留 <b id="kbTrashDaysTxt">30</b> 天后自动清除（可在 设置 · 数据与存储 调整）；常驻笔记删除后自动重建，不进回收站。</p>
+      <p>被删除的笔记按仓库与文件夹层级展示，保留 <b id="kbTrashDaysTxt">30</b> 天后自动清除（可在 设置 · 数据与存储 调整）。常驻笔记删除后自动重建，不进回收站。</p>
     </div>
     <div class="m-body" style="padding:0">
       <div id="kbTrashList" style="max-height:46vh;overflow:auto;padding:6px 14px"></div>
@@ -1795,17 +1796,6 @@
   </div>
 </div>
 
-<!-- 本地文件夹双向同步面板（localsync.js 渲染；不支持的浏览器显示降级说明） -->
-<div class="ls-mask" id="lsMask" hidden>
-  <div class="ls-panel">
-    <div class="ls-head">
-      <h3><svg class="ic"><use href="#i-swap"/></svg>本地文件夹同步</h3>
-      <button class="icon-btn" id="lsClose" title="关闭"><svg class="ic"><use href="#i-close"/></svg></button>
-    </div>
-    <div class="ls-body" id="lsBody"></div>
-  </div>
-</div>
-
 <!-- ==================== Toast ==================== -->
 <div class="toast" id="toast"><svg class="ic"><use href="#i-check"/></svg><span id="toastMsg">操作成功</span></div>
 
@@ -1830,11 +1820,10 @@
 <script src="js/vault.js?v=0.2.29"></script>
 <script src="js/livemd.js?v=0.2.29"></script>
 <script src="js/dashboard.js?v=0.2.29"></script>
-<script src="js/notes.js?v=0.2.29"></script>
-<script src="js/localsync.js?v=0.2.29"></script>
-<script src="js/plan.js?v=0.2.29"></script>
+<script src="js/notes.js?v=0.2.31"></script>
+<script src="js/plan.js?v=0.2.31"></script>
 <script src="js/toolbox.js?v=0.2.29"></script>
-<script src="js/settings.js?v=0.2.29"></script>
+<script src="js/settings.js?v=0.2.31"></script>
 <!-- 附件灯箱：点击附件图片时大图预览，点背景或按 Esc 关闭 -->
 <div class="asset-lightbox" id="assetLightbox" hidden>
   <div class="asset-lightbox-mask" data-asset-close></div>

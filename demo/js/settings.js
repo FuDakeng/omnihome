@@ -205,6 +205,7 @@
       const c = await API.get('/api/system/monitor-config');
       $('#monitorEnabled').classList.toggle('on', !!c.enabled);
     } catch (e) {}
+    await loadObsidianSync();
   }
   $('#monitorEnabled').addEventListener('click', async () => {
     /* demo.js 通用绑定已先切换视觉状态，此处读取新状态提交 */
@@ -384,9 +385,11 @@
 
   /* 统计延迟修复：打开设置 / 切到数据面板时实时拉取，无需刷新页面 */
   $$('[data-open-settings]').forEach(el =>
-    el.addEventListener('click', () => { loadData(); loadEngine(); loadSyncKey(); }));
+    el.addEventListener('click', () => { loadData(); loadEngine(); }));
   $$('.set-item[data-set="data"]').forEach(el =>
-    el.addEventListener('click', () => { loadData(); loadEngine(); loadSyncKey(); }));
+    el.addEventListener('click', () => { loadData(); loadEngine(); }));
+  $$('.set-item[data-set="features"]').forEach(el =>
+    el.addEventListener('click', () => loadFeatures()));
 
   $('#backupNow').addEventListener('click', async () => {
     $('#backupNow').disabled = true;
@@ -408,66 +411,150 @@
     } catch (e) { showToast(e.message, 'err'); }
   });
 
-  /* ---------- Obsidian 同步 API Key（v0.2.27） ---------- */
-  /* 明文仅生成时暂存一次供复制；刷新/重开设置后只能看到掩码（服务端只存哈希，无法还原）。 */
-  let _syncPlain = '';
+  /* ---------- Obsidian 插件同步（功能设置） ---------- */
+  const _syncPlainByVault = {};
 
-  async function loadSyncKey(){
-    const urlEl = $('#syncBaseUrl');
-    if (urlEl) urlEl.value = location.origin.replace(/\/$/, '');
-    try {
-      const info = await API.get('/api/sync/apikey');
-      const chip = $('#syncKeyChip'), show = $('#syncKeyShow');
-      const on = !!(info && info.enabled);
-      if (chip){
-        chip.textContent = on ? '已启用' : '未启用';
-        chip.classList.toggle('success', on);
-        chip.classList.toggle('no-dot', !on);
-      }
-      if (!show) return;
-      if (!on){ _syncPlain = ''; show.value = ''; show.placeholder = '尚未生成'; }
-      else if (!_syncPlain){ show.value = info.masked || '已启用'; }
-      /* _syncPlain 有值（刚生成）时保持明文显示，不覆盖 */
-    } catch (e) {}
+  function fmtLogTs(ts){
+    const d = new Date((ts || 0) * 1000);
+    if (isNaN(d.getTime())) return '';
+    const p = n => String(n).padStart(2, '0');
+    return `${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   }
 
-  $('#syncKeyGen')?.addEventListener('click', async () => {
-    const btn = $('#syncKeyGen');
-    const had = ($('#syncKeyChip') || {}).textContent === '已启用';
-    if (had && !await App.confirmModal({
-      title: '重置 API Key？', danger: true, okText: '重置',
-      sub: '旧 Key 将立即失效，已配置的 Obsidian 插件需填入新 Key 才能继续同步。'
-    })) return;
-    btn.disabled = true;
+  async function loadObsidianSync(){
+    const urlEl = $('#syncBaseUrl');
+    if (urlEl) urlEl.value = location.origin.replace(/\/$/, '');
+    let on = false;
     try {
-      const d = await API.post('/api/sync/apikey');
-      _syncPlain = (d && d.apiKey) || '';
-      await loadSyncKey();
-      $('#syncKeyShow').value = _syncPlain;   /* 明文优先展示，供立即复制 */
-      showToast('已生成，请立即复制保存（明文仅此一次可见）');
-    } catch (e) { showToast(e.message, 'err'); }
-    finally { btn.disabled = false; }
-  });
+      const prefs = await API.get('/api/settings');
+      on = !!(prefs && prefs.obsidianSync);
+    } catch (e) {}
+    $('#obsidianSyncEnabled')?.classList.toggle('on', on);
+    const chip = $('#obsidianSyncChip');
+    if (chip){
+      chip.textContent = on ? '已开启' : '未开启';
+      chip.classList.toggle('success', on);
+      chip.classList.toggle('no-dot', !on);
+    }
+    const body = $('#obsidianSyncBody');
+    if (body) body.hidden = !on;
+    try {
+      const pc = await API.get('/api/plugin/check');
+      $('#pluginDownload').dataset.available = pc.available ? '1' : '';
+      if (pc.available && pc.version){
+        const btn = $('#pluginDownload');
+        if (btn && !btn.dataset.ver){
+          btn.dataset.ver = '1';
+          btn.append(' v' + pc.version);
+        }
+      }
+    } catch (e) {}
+    if (on) await Promise.all([renderVaultKeys(), renderSyncLog()]);
+  }
 
-  $('#syncKeyCopy')?.addEventListener('click', async () => {
-    if (!_syncPlain){ showToast('明文仅生成时可见，请点「生成 Key」后复制', 'err'); return; }
-    try { await navigator.clipboard.writeText(_syncPlain); showToast('API Key 已复制'); }
-    catch (e) { showToast('复制失败，请手动选中复制', 'err'); }
-  });
+  async function renderVaultKeys(){
+    const box = $('#syncVaultKeys');
+    if (!box) return;
+    let vaults = [], keys = [];
+    try {
+      const vd = await API.get('/api/notes/vaults');
+      vaults = vd.vaults || [];
+    } catch (e) {}
+    try {
+      const info = await API.get('/api/sync/apikey');
+      keys = info.keys || [];
+    } catch (e) {}
+    const keyOf = id => keys.find(k => k.vault === id);
+    box.innerHTML = vaults.map(v => {
+      const sys = v.kind === 'system';
+      const k = keyOf(v.id);
+      const plain = _syncPlainByVault[v.id];
+      const shown = plain || (k ? k.masked : '尚未生成');
+      return `<div class="sync-vault-row" data-sv="${App.esc(v.id)}">
+        <div class="nm">${App.esc(v.name)}${sys ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">不可同步</span>' : ''}</div>
+        <div class="key">${sys ? '—' : App.esc(shown)}</div>
+        ${sys ? '' : `<button class="btn btn-outline btn-sm" data-sv-copy="${App.esc(v.id)}">复制</button>
+          <button class="btn btn-primary btn-sm" data-sv-gen="${App.esc(v.id)}">${k ? '重置' : '生成令牌'}</button>
+          ${k ? `<button class="btn btn-outline btn-sm" style="color:var(--om-danger)" data-sv-rev="${App.esc(v.id)}">吊销</button>` : ''}`}
+      </div>`;
+    }).join('') || '<div style="font-size:12px;color:var(--om-text-3)">暂无笔记仓库</div>';
+  }
 
+  async function renderSyncLog(){
+    const box = $('#syncLogBox');
+    if (!box) return;
+    try {
+      const d = await API.get('/api/sync/log?limit=60');
+      const logs = d.logs || [];
+      if (!logs.length){ box.textContent = '暂无记录'; return; }
+      box.innerHTML = logs.map(x =>
+        `<div class="lg"><span class="ts">${fmtLogTs(x.ts)}</span><span class="lv ${(x.level||'')==='error'?'err':(x.level||'')==='warn'?'warn':''}">${App.esc(x.vault || x.source || '')}</span><span>${App.esc(x.msg || '')}</span></div>`
+      ).join('');
+    } catch (e) { box.textContent = '日志加载失败'; }
+  }
+
+  $('#obsidianSyncEnabled')?.addEventListener('click', async () => {
+    const next = $('#obsidianSyncEnabled').classList.contains('on');
+    try {
+      await API.put('/api/settings', { obsidianSync: next });
+      showToast(next ? '已开启 Obsidian 同步' : '已关闭（已有令牌仍可用，只是隐藏管理入口）');
+      await loadObsidianSync();
+    } catch (e) {
+      $('#obsidianSyncEnabled').classList.toggle('on', !next);
+      showToast(e.message, 'err');
+    }
+  });
+  $('#pluginDownload')?.addEventListener('click', () => {
+    if ($('#pluginDownload').dataset.available !== '1'){
+      showToast('当前部署未包含插件目录', 'err');
+      return;
+    }
+    API.dl('/api/plugin.zip');
+  });
   $('#syncBaseUrlCopy')?.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText($('#syncBaseUrl').value); showToast('服务端地址已复制'); }
     catch (e) { showToast('复制失败，请手动选中复制', 'err'); }
   });
-
-  $('#syncKeyRevoke')?.addEventListener('click', async () => {
-    if (($('#syncKeyChip') || {}).textContent !== '已启用'){ showToast('当前没有启用的 Key'); return; }
-    if (!await App.confirmModal({
-      title: '吊销 API Key？', danger: true, okText: '吊销',
-      sub: 'Obsidian 插件将立即无法同步，直至重新生成 Key；不影响本站笔记数据。'
-    })) return;
-    try { await API.del('/api/sync/apikey'); _syncPlain = ''; showToast('已吊销'); loadSyncKey(); }
-    catch (e) { showToast(e.message, 'err'); }
+  document.addEventListener('click', async e => {
+    const gen = e.target.closest('[data-sv-gen]');
+    const copy = e.target.closest('[data-sv-copy]');
+    const rev = e.target.closest('[data-sv-rev]');
+    if (gen){
+      const vid = gen.dataset.svGen;
+      if (!await App.confirmModal({
+        title: gen.textContent.includes('重置') ? '重置同步令牌？' : '生成同步令牌？',
+        danger: true, okText: gen.textContent.includes('重置') ? '重置' : '生成',
+        sub: gen.textContent.includes('重置')
+          ? '旧令牌将立即失效，Obsidian 插件需填入新令牌才能继续同步该仓库。'
+          : '明文仅显示一次，请立刻复制到 Obsidian 插件设置中。',
+      })) return;
+      try {
+        const d = await API.post('/api/sync/apikey', { vault: vid });
+        _syncPlainByVault[vid] = d.apiKey || '';
+        showToast('已生成，请立即复制（明文仅此一次可见）');
+        await renderVaultKeys(); await renderSyncLog();
+      } catch (err) { showToast(err.message, 'err'); }
+    }
+    if (copy){
+      const vid = copy.dataset.svCopy;
+      const plain = _syncPlainByVault[vid];
+      if (!plain){ showToast('明文仅生成时可见，请先生成令牌', 'err'); return; }
+      try { await navigator.clipboard.writeText(plain); showToast('令牌已复制'); }
+      catch (err) { showToast('复制失败', 'err'); }
+    }
+    if (rev){
+      const vid = rev.dataset.svRev;
+      if (!await App.confirmModal({
+        title: '吊销同步令牌？', danger: true, okText: '吊销',
+        sub: '该仓库的 Obsidian 同步将立即断开，不影响笔记内容。',
+      })) return;
+      try {
+        await API.del('/api/sync/apikey?vault=' + encodeURIComponent(vid));
+        delete _syncPlainByVault[vid];
+        showToast('已吊销');
+        await renderVaultKeys(); await renderSyncLog();
+      } catch (err) { showToast(err.message, 'err'); }
+    }
   });
 
   /* 备份设置：自动备份开关 / 周期 / 保留份数 */

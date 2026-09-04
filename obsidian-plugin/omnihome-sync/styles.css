@@ -74,3 +74,25 @@
   font-size: 0.86em;
   line-height: 1.7;
 }
+
+.omnihome-sync-log {
+  max-height: 220px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.omnihome-sync-log-line {
+  display: grid;
+  grid-template-columns: 118px 1fr;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px dashed var(--background-modifier-border);
+  color: var(--text-muted);
+}
+.omnihome-sync-log-line:last-child { border-bottom: 0; }
+.omnihome-sync-log-line .ts { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.omnihome-sync-log-line .err { color: var(--text-error); }

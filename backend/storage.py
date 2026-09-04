@@ -37,6 +37,8 @@ DEFAULT_PREFS = {
     "locale": {"lang": "zh-CN", "weekStart": "mon", "tempUnit": "c"},
     "weather": {"city": "", "lat": 30.2741, "lon": 120.1552},
     "trashDays": 30,        # v0.2.15 增：回收站文件保留天数，0 = 永久（需手工清空）
+    "obsidianSync": False,  # 功能设置：Obsidian 插件同步
+    "activeVault": "default",
 }
 
 
@@ -84,13 +86,17 @@ def valid_username(name: str) -> bool:
     return bool(SAFE_NAME.match(name or ""))
 
 
-# ---------- Obsidian 同步 API Key（每用户一枚，sha256 哈希存全局 config） ----------
+# ---------- Obsidian 同步 API Key（每用户每仓库一枚，sha256 哈希存全局 config） ----------
 # 为什么用哈希而非 secretbox 加密：API Key 只需「校验」不需「还原明文」，
 # 存单向哈希最安全——即便 config.json 泄露，攻击者也拿不到可用的原始 Key。
 # 明文仅在生成时返回一次（前端负责提示用户妥善保存）。
 # 存全局 config（始终文件存储、跨 file/sqlite/db 引擎一致），结构：
-#   config["syncKeys"] = { <sha256(raw)>: {"u": 用户名, "prefix": 明文前缀, "created": 时间戳} }
+#   config["syncKeys"] = { <sha256(raw)>: {"u": 用户名, "vault": 仓库id, "prefix": 明文前缀, "created": 时间戳} }
+# 历史 Key 无 vault 字段时视为绑定「默认仓库」。
 SYNC_KEY_PREFIX = "ohs_"          # OmniHome Sync，便于识别与掩码展示
+VAULT_DEFAULT = "default"
+VAULT_SYSTEM = "system"
+SYNC_LOG_MAX = 200
 
 
 def _sync_key_hash(raw: str) -> str:
@@ -102,14 +108,26 @@ def _sync_key_owner(v) -> str:
     return v.get("u") if isinstance(v, dict) else v
 
 
-def gen_sync_key(username: str) -> str:
-    """为指定用户生成（或重置）同步 API Key，返回明文（仅此一次可见）。
-    一用户一枚：生成新 Key 会自动作废旧 Key。"""
+def _sync_key_vault(v) -> str:
+    if isinstance(v, dict):
+        return v.get("vault") or VAULT_DEFAULT
+    return VAULT_DEFAULT
+
+
+def gen_sync_key(username: str, vault_id: str = VAULT_DEFAULT) -> str:
+    """为指定用户的指定仓库生成（或重置）同步 API Key，返回明文（仅此一次可见）。
+    同一仓库同时仅一枚：生成新 Key 会作废该仓库旧 Key。系统内置仓库禁止发令牌。"""
+    vid = vault_id or VAULT_DEFAULT
+    if vid == VAULT_SYSTEM:
+        raise ValueError("系统内置仓库不可创建同步令牌")
     raw = SYNC_KEY_PREFIX + secrets.token_urlsafe(32)
     cfg = get_config()
-    keys = {k: v for k, v in (cfg.get("syncKeys") or {}).items()
-            if _sync_key_owner(v) != username}
-    keys[_sync_key_hash(raw)] = {"u": username, "prefix": raw[:12],
+    keys = {}
+    for k, v in (cfg.get("syncKeys") or {}).items():
+        if _sync_key_owner(v) == username and _sync_key_vault(v) == vid:
+            continue
+        keys[k] = v
+    keys[_sync_key_hash(raw)] = {"u": username, "vault": vid, "prefix": raw[:12],
                                  "created": int(time.time())}
     cfg["syncKeys"] = keys
     save_config(cfg)
@@ -118,30 +136,84 @@ def gen_sync_key(username: str) -> str:
 
 def verify_sync_key(raw: str) -> Optional[str]:
     """校验明文 API Key，命中返回所属用户名，否则 None。"""
+    ctx = verify_sync_context(raw)
+    return ctx["u"] if ctx else None
+
+
+def verify_sync_context(raw: str) -> Optional[dict]:
+    """校验明文 API Key，命中返回 {u, vault}，否则 None。"""
     if not raw:
         return None
     v = (get_config().get("syncKeys") or {}).get(_sync_key_hash(raw))
-    return _sync_key_owner(v) if v else None
+    if not v:
+        return None
+    return {"u": _sync_key_owner(v), "vault": _sync_key_vault(v)}
 
 
-def revoke_sync_key(username: str):
-    """吊销指定用户的全部同步 API Key。"""
+def revoke_sync_key(username: str, vault_id: Optional[str] = None):
+    """吊销同步 API Key。vault_id 为空则吊销该用户全部；否则只吊销该仓库。"""
     cfg = get_config()
-    cfg["syncKeys"] = {k: v for k, v in (cfg.get("syncKeys") or {}).items()
-                       if _sync_key_owner(v) != username}
+    keep = {}
+    for k, v in (cfg.get("syncKeys") or {}).items():
+        if _sync_key_owner(v) != username:
+            keep[k] = v
+            continue
+        if vault_id and _sync_key_vault(v) != vault_id:
+            keep[k] = v
+    cfg["syncKeys"] = keep
     save_config(cfg)
 
 
-def sync_key_info(username: str) -> dict:
-    """返回掩码信息（不含明文）：是否已启用、前缀、掩码、创建时间。"""
+def sync_key_info(username: str, vault_id: str = VAULT_DEFAULT) -> dict:
+    """返回指定仓库的掩码信息（不含明文）。"""
+    vid = vault_id or VAULT_DEFAULT
     for v in (get_config().get("syncKeys") or {}).values():
-        if _sync_key_owner(v) == username:
+        if _sync_key_owner(v) == username and _sync_key_vault(v) == vid:
             prefix = v.get("prefix", "") if isinstance(v, dict) else ""
             created = v.get("created", 0) if isinstance(v, dict) else 0
-            return {"enabled": True, "prefix": prefix,
+            return {"enabled": True, "vault": vid, "prefix": prefix,
                     "masked": (prefix + "…") if prefix else "已启用",
                     "created": created}
-    return {"enabled": False, "prefix": "", "masked": "", "created": 0}
+    return {"enabled": False, "vault": vid, "prefix": "", "masked": "", "created": 0}
+
+
+def list_sync_keys(username: str) -> list:
+    """列出该用户各仓库已启用的同步令牌（掩码，不含明文）。"""
+    out = []
+    for v in (get_config().get("syncKeys") or {}).values():
+        if _sync_key_owner(v) != username:
+            continue
+        prefix = v.get("prefix", "") if isinstance(v, dict) else ""
+        created = v.get("created", 0) if isinstance(v, dict) else 0
+        out.append({"vault": _sync_key_vault(v), "enabled": True,
+                    "prefix": prefix, "masked": (prefix + "…") if prefix else "已启用",
+                    "created": created})
+    return out
+
+
+def append_sync_log(username: str, entry: dict):
+    """追加一条同步日志（最新在前，最多 SYNC_LOG_MAX 条）。"""
+    logs = user_json(username, "notes/sync-log.json", [])
+    if not isinstance(logs, list):
+        logs = []
+    rec = {
+        "ts": int(entry.get("ts") or time.time()),
+        "vault": entry.get("vault") or "",
+        "source": entry.get("source") or "server",
+        "level": entry.get("level") or "info",
+        "msg": str(entry.get("msg") or "")[:500],
+    }
+    logs.insert(0, rec)
+    save_user_json(username, "notes/sync-log.json", logs[:SYNC_LOG_MAX])
+
+
+def read_sync_log(username: str, vault_id: Optional[str] = None, limit: int = 80) -> list:
+    logs = user_json(username, "notes/sync-log.json", [])
+    if not isinstance(logs, list):
+        return []
+    if vault_id:
+        logs = [x for x in logs if (x or {}).get("vault") == vault_id]
+    return logs[:max(1, min(int(limit or 80), SYNC_LOG_MAX))]
 
 
 # ---------- 存储引擎配置 ----------
@@ -218,6 +290,7 @@ _TABLES = {
         "cols": [("username", "VARCHAR(64)"), ("id", "VARCHAR(64)"),
                  ("title", "VARCHAR(255)"), ("tags", "TEXT"),
                  ("pinned", "INTEGER"), ("folder", "VARCHAR(255)"),
+                 ("vault", "VARCHAR(64)"),
                  ("pos", "BIGINT"), ("content", "TEXT"), ("updated", "BIGINT"),
                  ("deleted", "BIGINT"), ("deleted_title", "VARCHAR(255)")],
         "pk": ["username", "id"],
@@ -392,12 +465,13 @@ def _ensure_tables(conn):
     from sqlalchemy import text
     for name, spec in _TABLES.items():
         conn.execute(text(_table_ddl(name, spec, mysql)))
-    # 已存在的旧表补齐缺失列（幂等）：hash 指纹列、bm_notes 软删两列（回收站 v0.2.23）
+    # 已存在的旧表补齐缺失列（幂等）：hash 指纹列、bm_notes 软删两列、vault 仓库列
     extra_cols = {"hash": "VARCHAR(32) NOT NULL DEFAULT ''"}
     notes_spec = dict(_TABLES["bm_notes"])
     for cname, ctype in notes_spec["cols"]:
-        if cname in ("deleted", "deleted_title"):
-            extra_cols[cname] = ctype
+        if cname in ("deleted", "deleted_title", "vault"):
+            extra_cols[cname] = ctype + (
+                " NOT NULL DEFAULT 'default'" if cname == "vault" else "")
     for name, spec in _TABLES.items():
         for c, t in spec["cols"]:
             if c in extra_cols and not _has_column(conn, name, c):
@@ -745,7 +819,7 @@ def _sql_write_folders(conn, username: str, content: str):
     # 落库前必须合并，否则整批 INSERT 失败 → list_notes 稳定 500。
     seen, names = set(), []
     for n in arr:
-        name = str(n)
+        name = (n.get("name") if isinstance(n, dict) else str(n or "")).strip()
         if name and name not in seen:
             seen.add(name)
             names.append(name)
@@ -862,7 +936,7 @@ def _sql_read_notes_index(conn, username: str) -> str:
     from sqlalchemy import text
     rows = conn.execute(text(
         'SELECT "id", "title", "tags", "pinned", "folder", "updated", '
-        '"deleted", "deleted_title" '
+        '"deleted", "deleted_title", "vault" '
         'FROM "bm_notes" WHERE "username" = :u ORDER BY "pos", "id"'),
         {"u": username}).fetchall()
     out = []
@@ -879,6 +953,8 @@ def _sql_read_notes_index(conn, username: str) -> str:
         except (AttributeError, TypeError, ValueError): item["deleted"] = 0
         try: item["deleted_title"] = r.deleted_title or ""
         except AttributeError: item["deleted_title"] = ""
+        try: item["vault"] = (r.vault or VAULT_DEFAULT)
+        except AttributeError: item["vault"] = VAULT_DEFAULT
         out.append(item)
     return json.dumps(out, ensure_ascii=False, indent=2)
 
@@ -904,18 +980,20 @@ def _sql_write_notes_index(conn, username: str, content: str):
                        "pos": i,
                        "t": int(item.get("updated") or time.time()),
                        "deleted": int(item.get("deleted") or 0),
-                       "deleted_title": (item.get("deleted_title") or "")[:255]})
+                       "deleted_title": (item.get("deleted_title") or "")[:255],
+                       "vault": (item.get("vault") or VAULT_DEFAULT)[:64]})
     if params:
         sql = ('INSERT INTO "bm_notes" '
                '("username", "id", "title", "tags", "pinned", '
-               '"folder", "pos", "updated", "content", "deleted", "deleted_title") '
-               "VALUES (:u, :id, :title, :tags, :pinned, :folder, :pos, :t, '', "
+               '"folder", "vault", "pos", "updated", "content", "deleted", "deleted_title") '
+               "VALUES (:u, :id, :title, :tags, :pinned, :folder, :vault, :pos, :t, '', "
                ":deleted, :deleted_title)")
         if _is_mysql(conn):
             sql += (" ON DUPLICATE KEY UPDATE \"title\" = VALUES(\"title\"), "
                     "\"tags\" = VALUES(\"tags\"), "
                     "\"pinned\" = VALUES(\"pinned\"), "
                     "\"folder\" = VALUES(\"folder\"), "
+                    "\"vault\" = VALUES(\"vault\"), "
                     "\"pos\" = VALUES(\"pos\"), "
                     "\"updated\" = VALUES(\"updated\"), "
                     "\"deleted\" = VALUES(\"deleted\"), "
@@ -924,7 +1002,8 @@ def _sql_write_notes_index(conn, username: str, content: str):
             sql += (' ON CONFLICT ("username", "id") DO UPDATE SET '
                     '"title" = excluded."title", "tags" = excluded."tags", '
                     '"pinned" = excluded."pinned", '
-                    '"folder" = excluded."folder", "pos" = excluded."pos", '
+                    '"folder" = excluded."folder", "vault" = excluded."vault", '
+                    '"pos" = excluded."pos", '
                     '"updated" = excluded."updated", '
                     '"deleted" = excluded."deleted", '
                     '"deleted_title" = excluded."deleted_title"')
@@ -962,8 +1041,8 @@ def _sql_write_note_body(conn, username: str, key: str, content: str):
     # 阶段即触发 NOT NULL 约束失败（旧库因 ALTER ADD COLUMN 可空而未暴露）。
     sql = ('INSERT INTO "bm_notes" '
            '("username", "id", "content", "updated", "title", '
-           '"tags", "pinned", "folder", "pos", "deleted", "deleted_title") '
-           "VALUES (:username, :id, :c, :t, '', '', 0, '', 0, 0, '')")
+           '"tags", "pinned", "folder", "vault", "pos", "deleted", "deleted_title") '
+           "VALUES (:username, :id, :c, :t, '', '', 0, '', 'default', 0, 0, '')")
     if _is_mysql(conn):
         sql += (" ON DUPLICATE KEY UPDATE \"content\" = VALUES(\"content\"), "
                 "\"updated\" = VALUES(\"updated\")")

@@ -7,6 +7,9 @@
 const Notes = (() => {
   let idx = [];            // [{id,title,tags,folder,pinned,updated}]
   let folders = [];        // [文件夹名]
+  let vaults = [];         // [{id,name,kind}]
+  let currentVault = 'default';
+  let folderVault = {};    // folderPath -> vaultId
   let currentId = null;
   let currentMode = 'split';
   let currentFolder = '';  // 新建笔记的默认文件夹（最近点选的）
@@ -36,12 +39,25 @@ const Notes = (() => {
         QUICK_FOLDER = '灵感速记';
   const PIN_KEY = 'omni.kb.pinned.hidden';
   const ASSET_KEY = 'omni.kb.assets.hidden';
-  const SYNC_KEY = 'omni.kb.sync.hidden';   // 「同步笔记」分区折叠状态
+  const VAULT_KEY = 'omni.kb.vault';
   let trash = [];                        // 当前加载的回收站条目（弹层打开时拉取）
   let trashDays = null;                  // 回收站保留天数（后端下发；null=未知）
   const isPlan = f => f === PLAN_FOLDER || f.startsWith(PLAN_FOLDER + '/');
   const isQuick = f => f === QUICK_FOLDER || f.startsWith(QUICK_FOLDER + '/');
   const isBuiltin = f => isPlan(f) || isQuick(f);
+  const VAULT_DEFAULT = 'default', VAULT_SYSTEM = 'system';
+  function noteVault(n){
+    if (n && n.pinned) return VAULT_SYSTEM;
+    if (isBuiltin((n && n.folder) || '')) return VAULT_SYSTEM;
+    if (n && n.vault) return n.vault;
+    return VAULT_DEFAULT;
+  }
+  function folderOfVault(f){
+    if (folderVault[f]) return folderVault[f];
+    return isBuiltin(f) ? VAULT_SYSTEM : VAULT_DEFAULT;
+  }
+  function vaultMeta(id){ return vaults.find(v => v.id === id) || { id: id, name: id, kind: 'user' }; }
+  function vaultLabel(id){ return vaultMeta(id).name || id; }
   const fmtSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
     : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
 
@@ -477,6 +493,14 @@ const Notes = (() => {
       const d = await API.get('/api/notes');
       idx = d.notes || [];
       folders = d.folders || [];
+      vaults = d.vaults || [];
+      folderVault = d.folderVault || {};
+      if (d.currentVault) currentVault = d.currentVault;
+      else {
+        try { currentVault = localStorage.getItem(VAULT_KEY) || VAULT_DEFAULT; } catch (_) {}
+      }
+      if (!vaults.some(v => v.id === currentVault)) currentVault = VAULT_DEFAULT;
+      try { localStorage.setItem(VAULT_KEY, currentVault); } catch (_) {}
       await loadAssets();
       idx.sort((a, b) => (b.updated || 0) - (a.updated || 0));
       /* trashCount 用后端返回值同步头部（无需展开回收站） */
@@ -492,14 +516,15 @@ const Notes = (() => {
       } catch (_) { openTabs = []; }
       persistTabs();
       renderTree();
+      renderVaultSwitch();
+      const inVault = idx.filter(n => noteVault(n) === currentVault);
       const lastTab = openTabs[openTabs.length - 1];
-      if (!currentId && lastTab) open(lastTab);
-      else if (!currentId && idx.length) open(idx[0].id);
-      /* 重新进入视图时重拉当前笔记正文，覆盖仪表盘速记等外部更新 */
+      if (!currentId && lastTab){
+        const n = idx.find(x => x.id === lastTab);
+        if (n) currentVault = noteVault(n);
+        open(lastTab);
+      } else if (!currentId && inVault.length) open(inVault[0].id);
       else if (currentId && idx.some(n => n.id === currentId)) open(currentId);
-      /* 本地同步钩子：load() 是所有站点侧变更（建/删/改名/导入/移动）的收敛点，
-         防抖触发双向对账；reconcile 内部回调 Notes.load 时由 lsLoading 标志抑制回环 */
-      if (window.LocalSync) LocalSync.onSiteChanged();
       /* 初始化回收站保留天数缓存（供删除提示显示真实天数；仅首次拉） */
       if (trashDays === null){
         API.get('/api/notes/trash').then(d => {
@@ -550,7 +575,7 @@ const Notes = (() => {
     !n.pinned && (n.folder === f || (n.folder || '').startsWith(f + '/'))).length;
 
   function renderFolder(f, depth){
-    const notes = idx.filter(n => !n.pinned && n.folder === f);
+    const notes = idx.filter(n => !n.pinned && n.folder === f && noteVault(n) === currentVault);
     const subs = childFolders(f);
     /* v0.2.25：默认折叠——expanded 集合记录已展开的文件夹（localStorage 持久化），不在集合内即折叠 */
     const open = expanded.has(f);
@@ -575,35 +600,32 @@ const Notes = (() => {
   }
 
   function renderTree(){
-    /* v0.2.15 增：被软删的笔记不进任何分区（拖入删除横条软删后不调 load 的场景兜底） */
     idx = idx.filter(n => !n.deleted);
-    const pinned = idx.filter(n => n.pinned);
-    /* 同步笔记所在的一级目录集合：这些文件夹整体归入「同步笔记」分区。
-   必须排除内置根（每日计划 / 灵感速记）——否则被同步过的内置文件夹会永远挂在
-   syncRoots 里、在线上笔记区不可见且删不掉（v0.2.23 BUG 修复） */
-    const isSynced = id => !!(window.LocalSync && LocalSync.isSyncedId(id));
-    const syncRoots = new Set();
-    for (const n of idx){
-      if (n.pinned || !isSynced(n.id) || !n.folder) continue;
-      const root = n.folder.split('/')[0];
-      if (root !== PLAN_FOLDER && root !== QUICK_FOLDER) syncRoots.add(root);
-    }
-    const roots = idx.filter(n => !n.pinned && !n.folder && !isSynced(n.id));
-    const pinHidden = localStorage.getItem(PIN_KEY) === '1';
+    const vis = idx.filter(n => noteVault(n) === currentVault);
+    const pinned = vis.filter(n => n.pinned);
+    const roots = vis.filter(n => !n.pinned && !n.folder);
+    const vaultFolders = folders.filter(f => folderOfVault(f) === currentVault);
+    const isSys = currentVault === VAULT_SYSTEM;
     let html = '';
 
-    /* 「线上笔记」分区（原「我的笔记」）：非同步的普通文件夹与未分组笔记归入此区 */
     html += `
       <div class="kb-sec-title" data-drop-root title="拖拽笔记到此处取消分组">
-        <svg class="ic"><use href="#i-inbox"/></svg>线上笔记
-        <button class="icon-btn-xs kb-root-add" data-kb-add="" title="新建笔记或文件夹"><svg class="ic"><use href="#i-plus"/></svg></button>
+        <svg class="ic"><use href="#i-inbox"/></svg>${App.esc(vaultLabel(currentVault))}
+        ${isSys ? '' : '<button class="icon-btn-xs kb-root-add" data-kb-add="" title="新建笔记或文件夹"><svg class="ic"><use href="#i-plus"/></svg></button>'}
       </div>`;
-    for (const f of childFolders('')) if (!isBuiltin(f) && !syncRoots.has(f)) html += renderFolder(f);
-    html += roots.length ? roots.map(n => noteItemHtml(n, 0)).join('')
-      : '<div class="kb-empty">暂无笔记，点上方「新建笔记」开始</div>';
 
-    /* 回收站不再做侧栏分区（v0.2.23 BUG 修复）：入口收进树头「回收站」按钮，弹浮层展示。
-   trashCount 同步到顶部按钮徽标 */
+    if (isSys){
+      html += pinned.map(n => noteItemHtml(n)).join('');
+      if (vaultFolders.includes(PLAN_FOLDER)) html += renderFolder(PLAN_FOLDER);
+      if (vaultFolders.includes(QUICK_FOLDER)) html += renderFolder(QUICK_FOLDER);
+      if (!pinned.length && !vaultFolders.length)
+        html += '<div class="kb-empty">系统内置仓库：生词本、每日计划、灵感速记</div>';
+    } else {
+      for (const f of childFolders('')) if (folderOfVault(f) === currentVault) html += renderFolder(f);
+      html += roots.length ? roots.map(n => noteItemHtml(n, 0)).join('')
+        : '<div class="kb-empty">暂无笔记，点上方「新建」开始</div>';
+    }
+
     const trashCount = +(localStorage.getItem('om_trash_count') || 0);
     const badge = $('#kbTrashBadge');
     if (badge){
@@ -611,66 +633,93 @@ const Notes = (() => {
       badge.hidden = !trashCount;
     }
 
-    /* 「同步笔记」分区：绑定本地文件夹后，同步相关的文件/文件夹全部归入此区 */
-    const syncCount = idx.filter(n => !n.pinned && isSynced(n.id)).length;
-    const syncHidden = localStorage.getItem(SYNC_KEY) === '1';
-    html += `
-      <div class="kb-sec-title kb-pin-head${syncHidden ? ' closed' : ''}" data-sync-toggle title="点击隐藏 / 展开同步笔记分区">
-        <svg class="ic kb-pin-chev"><use href="#i-chev-d"/></svg>
-        <svg class="ic"><use href="#i-swap"/></svg>同步笔记
-        <span class="kb-count num">${syncCount}</span>
-      </div>`;
-    if (!syncHidden){
-      if (syncCount){
-        for (const f of [...syncRoots].sort()) html += renderFolder(f);
-        html += idx.filter(n => !n.pinned && !n.folder && isSynced(n.id)).map(n => noteItemHtml(n, 0)).join('');
-      } else {
-        html += '<div class="kb-empty">尚未绑定：知识库 ⋯ 菜单 → 本地文件夹同步</div>';
+    if (!isSys){
+      const assetsHidden = localStorage.getItem(ASSET_KEY) === '1';
+      html += `
+        <div class="kb-sec-title kb-pin-head${assetsHidden ? ' closed' : ''}" data-assets-toggle title="点击隐藏 / 展开附件">
+          <svg class="ic kb-pin-chev"><use href="#i-chev-d"/></svg>
+          <svg class="ic"><use href="#i-image"/></svg>附件
+          <span class="kb-count num">${assets.length}</span>
+        </div>`;
+      if (!assetsHidden){
+        html += assets.length
+          ? assets.map(a => `
+        <div class="note-item kb-asset${selAssets.has(a.name) ? ' kb-selected' : ''}" data-asset-name="${App.esc(a.name)}" draggable="true" title="点击预览，拖入编辑区可引用；按住 ⌘/Ctrl 可多选批量拖入">
+          <span class="ni-thumb"><img data-asset-src="/api/notes/assets/${encodeURIComponent(a.name)}" alt="" loading="lazy" onerror="this.parentNode.textContent='📎'"></span>
+          <div class="ni-text">
+            <div class="ni-title">${App.esc(a.name)}</div>
+            <div class="ni-sub">${App.esc(a.type || '附件')}${a.size ? ' · ' + fmtSize(a.size) : ''}</div>
+          </div>
+          <button class="kb-asset-del" data-asset-del="${App.esc(a.name)}" title="删除附件（笔记中的引用会变裂图）"><svg class="ic"><use href="#i-trash"/></svg></button>
+        </div>`).join('')
+          : '<div class="kb-empty">在笔记中添加的图片会自动归档到这里</div>';
       }
-    }
-
-    /* 附件分区：.md 中上传的图片/附件自动归档于此，点击把引用插入当前笔记 */
-    const assetsHidden = localStorage.getItem(ASSET_KEY) === '1';
-    html += `
-      <div class="kb-sec-title kb-pin-head${assetsHidden ? ' closed' : ''}" data-assets-toggle title="点击隐藏 / 展开附件分区">
-        <svg class="ic kb-pin-chev"><use href="#i-chev-d"/></svg>
-        <svg class="ic"><use href="#i-image"/></svg>附件
-        <span class="kb-count num">${assets.length}</span>
-      </div>`;
-    if (!assetsHidden){
-      html += assets.length
-        ? assets.map(a => `
-      <div class="note-item kb-asset${selAssets.has(a.name) ? ' kb-selected' : ''}" data-asset-name="${App.esc(a.name)}" draggable="true" title="点击预览，拖入编辑区可引用；按住 ⌘/Ctrl 可多选批量拖入">
-        <span class="ni-thumb"><img data-asset-src="/api/notes/assets/${encodeURIComponent(a.name)}" alt="" loading="lazy" onerror="this.parentNode.textContent='📎'"></span>
-        <div class="ni-text">
-          <div class="ni-title">${App.esc(a.name)}</div>
-          <div class="ni-sub">${App.esc(a.type || '附件')}${a.size ? ' · ' + fmtSize(a.size) : ''}</div>
-        </div>
-        <button class="kb-asset-del" data-asset-del="${App.esc(a.name)}" title="删除附件（笔记中的引用会变裂图）"><svg class="ic"><use href="#i-trash"/></svg></button>
-      </div>`).join('')
-        : '<div class="kb-empty">在笔记中添加的图片会自动归档到这里</div>';
-    }
-
-    /* 系统内置置底：常驻笔记 + 每日计划/灵感速记文件夹，点击标题可整体隐藏 */
-    const builtinCount = pinned.length
-      + idx.filter(n => !n.pinned && isBuiltin(n.folder || '')).length;
-    html += `
-      <div class="kb-sec-title kb-pin-head${pinHidden ? ' closed' : ''}" data-pin-toggle title="点击隐藏 / 展开系统内置项">
-        <svg class="ic kb-pin-chev"><use href="#i-chev-d"/></svg>系统内置
-        <span class="kb-count num">${builtinCount}</span>
-      </div>`;
-    if (!pinHidden){
-      html += pinned.map(n => noteItemHtml(n, 0)).join('');
-      if (folders.includes(PLAN_FOLDER)) html += renderFolder(PLAN_FOLDER);
-      if (folders.includes(QUICK_FOLDER)) html += renderFolder(QUICK_FOLDER);
     }
 
     $('#noteTree').innerHTML = html;
     $('#notesCount').textContent =
-      `${idx.length} 篇笔记 · ${folders.length} 个文件夹 · 支持 Markdown · 自动保存`;
-    /* 目录树附件缩略图水合：裸 <img> 请求不带凭证会被 401 拦成裂图（拖图上传后“图片损坏”的根因） */
+      `${vis.length} 篇 · ${vaultFolders.length} 个文件夹`;
     hydrateImages($('#noteTree'));
     updateBatchBar();
+  }
+
+  function renderVaultSwitch(){
+    const btn = $('#kbVaultBtn');
+    if (!btn) return;
+    const v = vaultMeta(currentVault);
+    const nameEl = $('#kbVaultName');
+    if (nameEl) nameEl.textContent = v.name || '笔记仓库';
+    btn.dataset.kind = v.kind || 'user';
+  }
+
+  async function selectVault(id){
+    if (!id || id === currentVault) return;
+    currentVault = id;
+    try { localStorage.setItem(VAULT_KEY, id); } catch (_) {}
+    try { await API.put('/api/notes/vaults/select', { vault: id }); } catch (_) {}
+    currentId = null;
+    renderVaultSwitch();
+    renderTree();
+    const first = idx.find(n => !n.deleted && noteVault(n) === id);
+    if (first) open(first.id);
+  }
+
+  async function createVault(){
+    const name = await App.promptModal({ title: '新建笔记仓库', sub: '为不同项目或设备分开存放笔记', placeholder: '仓库名称' });
+    if (name == null) return;
+    try {
+      const r = await API.post('/api/notes/vaults', { name: name.trim() || '未命名仓库' });
+      showToast('仓库已创建');
+      await load();
+      if (r && r.id) await selectVault(r.id);
+    } catch (e) { showToast(e.message, 'err'); }
+  }
+
+  async function renameVault(){
+    const v = vaultMeta(currentVault);
+    if (v.kind === 'system'){ showToast('系统内置仓库不可重命名', 'err'); return; }
+    const name = await App.promptModal({ title: '重命名仓库', value: v.name || '' });
+    if (name == null) return;
+    try {
+      await API.put('/api/notes/vaults/' + encodeURIComponent(currentVault), { name: name.trim() });
+      showToast('已重命名');
+      await load();
+    } catch (e) { showToast(e.message, 'err'); }
+  }
+
+  async function deleteCurrentVault(){
+    const v = vaultMeta(currentVault);
+    if (v.kind !== 'user'){ showToast('该仓库不可删除', 'err'); return; }
+    if (!await App.confirmModal({
+      title: '删除笔记仓库？', danger: true, okText: '删除',
+      sub: `「${v.name}」将被删除，其中的笔记会移入默认仓库，不会丢失。`,
+    })) return;
+    try {
+      await API.del('/api/notes/vaults/' + encodeURIComponent(currentVault));
+      currentVault = VAULT_DEFAULT;
+      showToast('仓库已删除，笔记已移入默认仓库');
+      await load();
+    } catch (e) { showToast(e.message, 'err'); }
   }
 
   /* ---------- 回收站（v0.2.25：按原文件夹分组显示） ---------- */
@@ -678,40 +727,62 @@ const Notes = (() => {
     const body = $('#kbTrashList');
     if (!body) return;
     if (!trash.length){ body.innerHTML = '<div class="kb-trash-empty">回收站是空的</div>'; return; }
-    /* 按原文件夹分组（保持删除时间倒序），未分组的归「未分组」；文件夹已删除的标注「已删除」 */
-    const groups = new Map();   // folder -> [note]
-    const order = [];
+    const vlist = trashVaults.length ? trashVaults : vaults;
+    const vname = id => (vlist.find(v => v.id === id) || {}).name || vaultLabel(id);
+    /* 先按仓库，再按文件夹路径层级分组 */
+    const byVault = new Map();
     for (const n of trash){
-      const f = n.folder || '';
-      if (!groups.has(f)){ groups.set(f, []); order.push(f); }
-      groups.get(f).push(n);
+      const vid = noteVault(n);
+      if (!byVault.has(vid)) byVault.set(vid, []);
+      byVault.get(vid).push(n);
     }
+    const vaultOrder = [...byVault.keys()].sort((a, b) => {
+      const rank = id => id === VAULT_DEFAULT ? 0 : id === VAULT_SYSTEM ? 2 : 1;
+      return rank(a) - rank(b) || vname(a).localeCompare(vname(b), 'zh');
+    });
     const activeFolders = new Set(folders);
-    body.innerHTML = order.map(f => {
-      const items = groups.get(f);
-      const gone = f && !activeFolders.has(f);
-      const label = f
-        ? `${App.esc(f.split('/').pop())}${gone ? '<span class="chip no-dot" style="font-size:10px;padding:1px 6px;margin-left:6px" title="原文件夹已删除，恢复笔记时自动重建">文件夹已删除</span>' : ''}`
-        : '未分组';
+    body.innerHTML = vaultOrder.map(vid => {
+      const notes = byVault.get(vid);
+      const groups = new Map();
+      const order = [];
+      for (const n of notes){
+        const f = n.folder || '';
+        if (!groups.has(f)){ groups.set(f, []); order.push(f); }
+        groups.get(f).push(n);
+      }
+      const inner = order.map(f => {
+        const items = groups.get(f);
+        const segs = f ? f.split('/') : [];
+        const gone = f && !activeFolders.has(f);
+        const tree = segs.length
+          ? segs.map((s, i) => `<span class="kb-trash-seg">${App.esc(s)}</span>${i < segs.length - 1 ? '<span class="kb-trash-sep">/</span>' : ''}`).join('')
+          : '未分组';
+        return `
+        <div class="kb-trash-folder" style="padding-left:${Math.min(segs.length, 6) * 10}px">
+          <div class="kb-sec-title" style="padding:6px 0 2px"><svg class="ic"><use href="#i-folder"/></svg>${tree}${gone ? '<span class="chip no-dot" style="font-size:10px;padding:1px 6px;margin-left:6px">文件夹已删除</span>' : ''}<span class="kb-count num" style="margin-left:auto">${items.length}</span></div>
+          ${items.map(n => `
+          <div class="note-item kb-trash-row" data-trash-id="${App.esc(n.id)}">
+            <svg class="ic ni-icon" style="color:var(--om-text-3)"><use href="#i-trash"/></svg>
+            <span class="ni-title">${App.esc(n.deleted_title || n.title || '未命名笔记')}</span>
+            <span class="ni-date">${relTime(n.deleted)}</span>
+            <button class="icon-btn-xs kb-trash-restore" data-trash-restore="${App.esc(n.id)}" title="恢复到原文件夹"><svg class="ic"><use href="#i-reply"/></svg></button>
+            <button class="icon-btn-xs kb-trash-purge" data-trash-purge="${App.esc(n.id)}" title="永久删除"><svg class="ic"><use href="#i-trash"/></svg></button>
+          </div>`).join('')}
+        </div>`;
+      }).join('');
       return `
-      <div class="kb-trash-group">
-        <div class="kb-sec-title" style="padding:8px 0 2px"><svg class="ic"><use href="#i-folder"/></svg>${label}<span class="kb-count num" style="margin-left:auto">${items.length}</span></div>
-        ${items.map(n => `
-        <div class="note-item kb-trash-row" data-trash-id="${App.esc(n.id)}" title="${App.esc(n.deleted_title || n.title || '未命名笔记')} · ${relTime(n.deleted)}删除">
-          <svg class="ic ni-icon" style="color:var(--om-text-3)"><use href="#i-trash"/></svg>
-          <span class="ni-title">${App.esc(n.deleted_title || n.title || '未命名笔记')}</span>
-          <span class="ni-date">${relTime(n.deleted)}</span>
-          <button class="icon-btn-xs kb-trash-restore" data-trash-restore="${App.esc(n.id)}" title="恢复到原文件夹"><svg class="ic"><use href="#i-reply"/></svg></button>
-          <button class="icon-btn-xs kb-trash-purge" data-trash-purge="${App.esc(n.id)}" title="永久删除"><svg class="ic"><use href="#i-trash"/></svg></button>
-        </div>`).join('')}
+      <div class="kb-trash-vault">
+        <div class="kb-trash-vault-head"><svg class="ic"><use href="#i-inbox"/></svg>${App.esc(vname(vid))}<span class="chip no-dot" style="margin-left:8px;font-size:10px">${vid === VAULT_SYSTEM ? '系统内置' : vid === VAULT_DEFAULT ? '默认' : '自建'}</span><span class="kb-count num" style="margin-left:auto">${notes.length}</span></div>
+        ${inner}
       </div>`;
     }).join('');
   }
-  /* 拉回收站 + trashDays 显示 */
+  let trashVaults = [];
   async function loadTrash(){
     try {
       const d = await API.get('/api/notes/trash');
       trash = d.notes || [];
+      trashVaults = d.vaults || vaults;
       trashDays = (d.trashDays === 0 || d.trashDays) ? d.trashDays : 30;
       const dt = $('#kbTrashDaysTxt');
       if (dt) dt.textContent = trashDays === 0 ? '永久' : trashDays;
@@ -909,7 +980,7 @@ const Notes = (() => {
       .toLocaleString('zh-CN', { hour12: false });
     $('#kbInfoType').textContent = meta.pinned ? 'Markdown 笔记（常驻）'
       : meta.readonly ? 'Markdown 笔记（只读）' : 'Markdown 笔记';
-    $('#kbInfoFolder').textContent = meta.folder || '未分组（线上笔记）';
+    $('#kbInfoFolder').textContent = meta.folder || '未分组';
     $('#kbInfoChars').textContent = '…';
     $('#kbInfoSize').textContent = '…';
     App.openModal('kbInfoMask');
@@ -934,6 +1005,11 @@ const Notes = (() => {
     if (!openTabs.includes(id)){ openTabs.push(id); persistTabs(); }
     currentId = id;
     const meta = idx.find(n => n.id === id);
+    if (meta && noteVault(meta) !== currentVault){
+      currentVault = noteVault(meta);
+      try { localStorage.setItem(VAULT_KEY, currentVault); } catch (_) {}
+      renderVaultSwitch();
+    }
     setReadonly(!!(meta && meta.readonly));
     try {
       const d = await API.get('/api/notes/' + id);
@@ -976,11 +1052,14 @@ const Notes = (() => {
 
   async function create(folder){
     try {
-      /* 笔记只允许建在「线上笔记」分区：默认最近点选的文件夹，内置文件夹回落根 */
+      if (currentVault === VAULT_SYSTEM && folder === undefined){
+        showToast('系统内置仓库不可新建普通笔记，请先切换到默认仓库', 'err');
+        return;
+      }
       const dest = folder !== undefined ? folder
         : (isBuiltin(currentFolder) ? '' : currentFolder);
       const meta = await API.post('/api/notes',
-        { title: '未命名笔记', tags: [], folder: dest });
+        { title: '未命名笔记', tags: [], folder: dest, vault: currentVault });
       idx.unshift(meta);
       renderTree();
       await open(meta.id);
@@ -1004,8 +1083,6 @@ const Notes = (() => {
       $('#edFootTime').textContent = '已自动保存（刚刚）';
       renderTree();
       renderTabs();
-      /* 本地同步钩子：防抖写入本地物理文件（未绑定时空操作） */
-      if (window.LocalSync) LocalSync.onNoteSaved(meta || idx.find(n => n.id === currentId), $('#edSrc').value);
     } catch (e) { showToast('保存失败：' + e.message, 'err'); }
   }
 
@@ -1078,7 +1155,7 @@ const Notes = (() => {
     if (name.includes('/')){ showToast('文件夹名称不能包含 /', 'err'); return; }
     const full = parent ? parent + '/' + name.trim() : name.trim();
     try {
-      await API.post('/api/notes/folders', { name: full });
+      await API.post('/api/notes/folders', { name: full, vault: currentVault });
       if (parent){ expanded.add(parent); persistExpanded(); }   // 展开父级让新文件夹可见
       currentFolder = full;
       await load();
@@ -1173,14 +1250,7 @@ const Notes = (() => {
       const prevFolder = meta ? meta.folder : '';
       if (meta) meta.folder = folder;
       renderTree();
-            showToast(folder ? `已移入文件夹「${folder}」` : '已移回线上笔记');
-      /* 同步笔记移出本地同步区间：立即从 mapping 移除 + 触发对账（v0.2.15 BUG 修复：
-         否则 syncIds 还留 id，下一轮 renderTree 仍把它藏到「同步笔记」分区，线上看不到） */
-      if (window.LocalSync && prevFolder && folder !== prevFolder){
-        const rootFrom = prevFolder.split('/')[0];
-        const rootTo = (folder || '').split('/')[0];
-        if (rootFrom !== rootTo) LocalSync.detachById(id);
-      }
+      showToast(folder ? `已移入文件夹「${folder}」` : '已移出文件夹');
     } catch (e) { showToast(e.message, 'err'); }
   }
 
@@ -1194,9 +1264,7 @@ const Notes = (() => {
         if (meta) meta.folder = folder;
       }
             renderTree();
-      showToast(`${ids.length} 篇笔记${folder ? `已移入「${folder}」` : '已移回线上笔记'}`);
-      /* 同步范围整体脱离：统一 detach（v0.2.15 BUG 修复） */
-      if (window.LocalSync && folder !== undefined) LocalSync.detachMany(ids);
+      showToast(`${ids.length} 篇笔记${folder ? `已移入「${folder}」` : '已移出文件夹'}`);
     } catch (e) { showToast(e.message, 'err'); }
   }
 
@@ -1237,7 +1305,7 @@ const Notes = (() => {
       await load();
       showToast(moved.length > 1
         ? `已移动 ${moved.length} 个文件夹`
-        : `文件夹已移到${target ? `「${folderLabel(target)}」内` : '线上笔记'}`);
+        : `文件夹已移到${target ? `「${folderLabel(target)}」内` : '仓库根目录'}`);
     } catch (e) { showToast(e.message, 'err'); }
   }
 
@@ -1353,10 +1421,22 @@ const Notes = (() => {
     /* 顶部 "..." 溢出菜单：导入 / 导出（设计图把显眼按钮收纳收起） */
     $('#notesOverflowBtn')?.addEventListener('click', () => kbMenu($('#notesOverflowBtn'), [
       ['多选模式', 'i-check', () => setSelMode(!selMode)],
+      ['新建笔记仓库', 'i-folder', () => createVault()],
+      ['重命名当前仓库', 'i-pen', () => renameVault()],
+      ...(vaultMeta(currentVault).kind === 'user' ? [['删除当前仓库', 'i-trash', () => deleteCurrentVault()]] : []),
       ['导入 Markdown / zip', 'i-download', () => importMd()],
       ['导出全部笔记', 'i-upload', () => API.dl('/api/notes/all')],
-      ['本地文件夹同步', 'i-swap', () => window.LocalSync && LocalSync.openPanel()],
     ]));
+    $('#kbVaultBtn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      const items = vaults.map(v => [
+        (v.id === currentVault ? '✓ ' : '') + v.name + (v.kind === 'system' ? '（内置）' : v.kind === 'default' ? '（默认）' : ''),
+        'i-inbox',
+        () => selectVault(v.id),
+      ]);
+      items.push(['新建仓库…', 'i-plus', () => createVault()]);
+      kbMenu($('#kbVaultBtn'), items);
+    });
     /* 回收站入口：v0.2.26 整个底部条都是点击热区（按钮只是视觉），点击弹层 */
     $('#kbTreeFoot')?.addEventListener('click', () => openTrashModal());
     $('#kbTrashClose')?.addEventListener('click', () => App.closeModal('kbTrashMask'));
@@ -2191,7 +2271,7 @@ Notes.init();
              .sort((a, b) => (b.updated || 0) - (a.updated || 0))[0];
     if (!hit){
       hit = await API.post('/api/notes',
-        { title: '灵感速记', tags: ['灵感'], folder: QUICK_FOLDER });
+        { title: '灵感速记', tags: ['灵感'], folder: QUICK_FOLDER, vault: 'system' });
       Notes.load();   // 新建后同步知识库列表，确保笔记页可见
     }
     await loadNote(hit);
@@ -2206,7 +2286,7 @@ Notes.init();
       const title = `灵感速记 ${p(t.getMonth() + 1)}-${p(t.getDate())} ` +
         `${p(t.getHours())}:${p(t.getMinutes())}`;
       const meta = await API.post('/api/notes',
-        { title, tags: ['灵感'], folder: QUICK_FOLDER });
+        { title, tags: ['灵感'], folder: QUICK_FOLDER, vault: 'system' });
       Notes.load();
       await loadNote(meta);
       if (live) live.focus(); else src.focus();
@@ -2252,7 +2332,7 @@ Notes.init();
           const d = await API.get('/api/notes');
           await ensureFolder(d.folders);
           const meta = await API.post('/api/notes',
-            { title: quickTitle || '灵感速记', tags: ['灵感'], folder: QUICK_FOLDER });
+            { title: quickTitle || '灵感速记', tags: ['灵感'], folder: QUICK_FOLDER, vault: 'system' });
           quickId = meta.id;
           try { localStorage.setItem(LAST_KEY, quickId); } catch (e2) {}
           await API.put('/api/notes/' + quickId, { content: cur });
@@ -2260,7 +2340,6 @@ Notes.init();
         }
         $('#quickNoteTime').textContent = '已自动保存 ' +
           new Date().toTimeString().slice(0, 5);
-        window.LocalSync?.onSiteChanged();   // 速记不经 Notes.save，单独触发对账
       } catch (e) {
         $('#quickNoteTime').textContent = '保存失败';
         showToast('速记保存失败：' + e.message);

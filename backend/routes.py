@@ -50,6 +50,7 @@ class PrefsIn(BaseModel):
     locale: Optional[dict] = None
     weather: Optional[dict] = None
     trashDays: Optional[int] = None   # v0.2.15 增：回收站文件保留天数（0=永久保留，需手动清）
+    obsidianSync: Optional[bool] = None  # 功能设置：Obsidian 插件同步开关
 
 
 @router.put("/api/settings")
@@ -63,6 +64,8 @@ def put_settings(body: PrefsIn, authorization: Optional[str] = Header(None)):
     if body.trashDays is not None:
         days = max(0, min(3650, int(body.trashDays)))   # 上限 10 年，超过视作永久保留（0）
         prefs["trashDays"] = days
+    if body.obsidianSync is not None:
+        prefs["obsidianSync"] = bool(body.obsidianSync)
     storage.save_prefs(username, prefs)
     return prefs
 
@@ -1179,6 +1182,122 @@ def put_dashboard(body: DashboardIn, authorization: Optional[str] = Header(None)
 PINNED_TITLES = ("生词本",)
 PLAN_FOLDER = "每日计划"   # 系统内置文件夹：首次拉取自动创建，不可删除（今日计划按月归档其中）
 QUICK_FOLDER = "灵感速记"  # 仪表盘「灵感速记」专属文件夹：删除后拉取时自动重建（旧名「速记」自动迁移）
+VAULT_DEFAULT = storage.VAULT_DEFAULT
+VAULT_SYSTEM = storage.VAULT_SYSTEM
+
+
+def _is_builtin_folder(name: str) -> bool:
+    root = (name or "").split("/")[0]
+    return root in (PLAN_FOLDER, QUICK_FOLDER)
+
+
+def _infer_note_vault(n: dict) -> str:
+    """常驻与内置文件夹笔记永远属于系统内置仓库；其余尊重已写入的 vault。"""
+    if (n or {}).get("pinned") or _is_builtin_folder((n or {}).get("folder") or ""):
+        return VAULT_SYSTEM
+    vid = (n or {}).get("vault") or ""
+    return vid or VAULT_DEFAULT
+
+
+def _load_vaults(username: str) -> dict:
+    """读取并归一化仓库清单。保证默认仓 + 系统内置仓存在。"""
+    raw = storage.user_json(username, "notes/vaults.json", {})
+    if isinstance(raw, list):
+        raw = {"items": raw, "folderVault": {}}
+    if not isinstance(raw, dict):
+        raw = {}
+    items = [x for x in (raw.get("items") or []) if isinstance(x, dict) and x.get("id")]
+    by_id = {x["id"]: x for x in items}
+    now = int(time.time())
+    if VAULT_DEFAULT not in by_id:
+        items.insert(0, {"id": VAULT_DEFAULT, "name": "默认仓库", "kind": "default",
+                         "created": now})
+    else:
+        by_id[VAULT_DEFAULT]["kind"] = "default"
+    if VAULT_SYSTEM not in by_id:
+        items.append({"id": VAULT_SYSTEM, "name": "系统内置", "kind": "system",
+                      "created": now})
+    else:
+        by_id[VAULT_SYSTEM]["kind"] = "system"
+        if not (by_id[VAULT_SYSTEM].get("name") or "").strip():
+            by_id[VAULT_SYSTEM]["name"] = "系统内置"
+    # 保序去重
+    seen, out = set(), []
+    for it in items:
+        if it["id"] in seen:
+            continue
+        seen.add(it["id"])
+        out.append(it)
+    fv = raw.get("folderVault") if isinstance(raw.get("folderVault"), dict) else {}
+    return {"items": out, "folderVault": fv}
+
+
+def _save_vaults(username: str, data: dict):
+    storage.save_user_json(username, "notes/vaults.json", data)
+
+
+def _vault_by_id(username: str, vid: str):
+    data = _load_vaults(username)
+    return next((x for x in data["items"] if x["id"] == vid), None)
+
+
+def _ensure_vaults(username: str):
+    """幂等：创建两个系统仓库、给旧笔记/文件夹打上 vault 归属。"""
+    data = _load_vaults(username)
+    fv = dict(data.get("folderVault") or {})
+    folders = storage.user_json(username, "notes/folders.json", [])
+    idx = storage.notes_index(username)
+    changed_n = False
+    for n in idx:
+        vid = _infer_note_vault(n)
+        if n.get("vault") != vid:
+            n["vault"] = vid
+            changed_n = True
+        f = n.get("folder") or ""
+        if f and f not in fv:
+            fv[f] = vid
+            # 父路径一并归属
+            cur = ""
+            for seg in f.split("/"):
+                cur = seg if not cur else cur + "/" + seg
+                fv.setdefault(cur, vid)
+    for f in folders:
+        name = f.get("name") if isinstance(f, dict) else str(f or "")
+        if not name:
+            continue
+        if name not in fv:
+            fv[name] = VAULT_SYSTEM if _is_builtin_folder(name) else VAULT_DEFAULT
+    data["folderVault"] = fv
+    _save_vaults(username, data)
+    if changed_n:
+        storage.save_notes_index(username, idx)
+    return data
+
+
+def _folder_vault(data: dict, name: str) -> str:
+    fv = data.get("folderVault") or {}
+    if name in fv:
+        return fv[name]
+    return VAULT_SYSTEM if _is_builtin_folder(name) else VAULT_DEFAULT
+
+
+def _folders_in_vault(username: str, vid: str) -> list:
+    data = _load_vaults(username)
+    folders = storage.user_json(username, "notes/folders.json", [])
+    names = []
+    for f in folders:
+        name = f.get("name") if isinstance(f, dict) else str(f or "")
+        if name and _folder_vault(data, name) == vid:
+            names.append(name)
+    return names
+
+
+def _active_vault_id(username: str) -> str:
+    prefs = storage.get_prefs(username) or {}
+    vid = prefs.get("activeVault") or VAULT_DEFAULT
+    if not _vault_by_id(username, vid):
+        return VAULT_DEFAULT
+    return vid
 
 
 def _rename_quick(old: str, new: str):
@@ -1205,7 +1324,7 @@ def _ensure_pinned(username: str):
             continue
         note_id = uuid.uuid4().hex[:8]
         idx.insert(0, {"id": note_id, "title": title, "tags": [],
-                       "pinned": True, "folder": "",
+                       "pinned": True, "folder": "", "vault": VAULT_SYSTEM,
                        "updated": int(time.time())})
         seed = "# 生词本\n\n从「每日单词」收藏的词汇会自动追加到这里。\n"
         storage.note_write(username, note_id, seed)
@@ -1244,24 +1363,39 @@ def _ensure_pinned(username: str):
         changed_f = True
     if changed_f:
         storage.save_user_json(username, "notes/folders.json", folders)
+        data = _load_vaults(username)
+        fv = dict(data.get("folderVault") or {})
+        fv[PLAN_FOLDER] = VAULT_SYSTEM
+        fv[QUICK_FOLDER] = VAULT_SYSTEM
+        data["folderVault"] = fv
+        _save_vaults(username, data)
 
 
 class NoteMetaIn(BaseModel):
     title: str
     tags: list = []
     folder: str = ""
+    vault: str = ""
 
 
 @router.get("/api/notes")
 def list_notes(authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
     _ensure_pinned(username)
-    _gc_trash(username)            # v0.2.15 增：按设置天数自动清理过期回收站条目
+    _ensure_vaults(username)
+    _gc_trash(username)
     idx = storage.notes_index(username)
     active = [n for n in idx if not n.get("deleted")]
     trash_count = sum(1 for n in idx if n.get("deleted"))
+    vaults = _load_vaults(username)
+    folders = storage.user_json(username, "notes/folders.json", [])
+    folder_names = [f.get("name") if isinstance(f, dict) else str(f or "") for f in folders]
+    folder_names = [x for x in folder_names if x]
     return {"notes": active,
-            "folders": storage.user_json(username, "notes/folders.json", []),
+            "folders": folder_names,
+            "folderVault": vaults.get("folderVault") or {},
+            "vaults": vaults["items"],
+            "currentVault": _active_vault_id(username),
             "trashCount": trash_count}
 
 
@@ -1272,9 +1406,19 @@ def create_note(body: NoteMetaIn, authorization: Optional[str] = Header(None)):
     note_id = uuid.uuid4().hex[:8]
     # 常驻标题兜底：始终带 pinned 标记且不进文件夹，避免产生重复副本
     pinned = body.title in PINNED_TITLES
+    folder = "" if pinned else (body.folder or "")
+    if pinned or _is_builtin_folder(folder):
+        vid = VAULT_SYSTEM
+    else:
+        vid = body.vault or _active_vault_id(username)
+        if not _vault_by_id(username, vid):
+            vid = VAULT_DEFAULT
+        if vid == VAULT_SYSTEM:
+            raise HTTPException(400, "系统内置仓库只能在「每日计划」「灵感速记」中创建笔记")
     idx.insert(0, {"id": note_id, "title": body.title or "未命名笔记",
                    "tags": body.tags,
-                   "folder": "" if pinned else (body.folder or ""),
+                   "folder": folder,
+                   "vault": vid,
                    "pinned": pinned,
                    "updated": int(time.time())})
     storage.save_notes_index(username, idx)
@@ -1284,6 +1428,7 @@ def create_note(body: NoteMetaIn, authorization: Optional[str] = Header(None)):
 
 class FolderIn(BaseModel):
     name: str
+    vault: str = ""
 
 
 @router.post("/api/notes/folders")
@@ -1294,17 +1439,30 @@ def add_folder(body: FolderIn, authorization: Optional[str] = Header(None)):
         raise HTTPException(400, "文件夹名称不能为空")
     if any(not seg.strip() for seg in name.split("/")):
         raise HTTPException(400, "文件夹路径不合法")
+    vid = VAULT_SYSTEM if _is_builtin_folder(name) else (body.vault or _active_vault_id(username))
+    if not _is_builtin_folder(name):
+        if not _vault_by_id(username, vid):
+            raise HTTPException(404, "笔记仓库不存在")
+        if vid == VAULT_SYSTEM:
+            raise HTTPException(400, "系统内置仓库只能使用内置文件夹")
     folders = storage.user_json(username, "notes/folders.json", [])
-    if name in folders:
+    names = [f.get("name") if isinstance(f, dict) else str(f or "") for f in folders]
+    if name in names:
         raise HTTPException(400, "文件夹已存在")
     # 多级路径：逐级补齐缺失的上级文件夹（A/B/C → A、A/B 依次存在）
     cur = ""
+    data = _load_vaults(username)
+    fv = dict(data.get("folderVault") or {})
     for seg in name.split("/"):
         cur = seg if not cur else cur + "/" + seg
-        if cur not in folders:
+        if cur not in names:
             folders.append(cur)
+            names.append(cur)
+        fv[cur] = vid
     storage.save_user_json(username, "notes/folders.json", folders)
-    return {"ok": True, "name": name}
+    data["folderVault"] = fv
+    _save_vaults(username, data)
+    return {"ok": True, "name": name, "vault": vid}
 
 
 class FoldersIn(BaseModel):
@@ -1366,7 +1524,98 @@ def delete_folder(name: str, authorization: Optional[str] = Header(None)):
             else:
                 item["folder"] = ""   # 常驻笔记不进回收站，归位根目录
     storage.save_notes_index(username, idx)
+    data = _load_vaults(username)
+    fv = dict(data.get("folderVault") or {})
+    for r in removed:
+        fv.pop(r, None)
+    data["folderVault"] = fv
+    _save_vaults(username, data)
     return {"ok": True, "trashed": trashed}
+
+
+class VaultIn(BaseModel):
+    name: str = ""
+    vault: str = ""
+
+
+@router.get("/api/notes/vaults")
+def list_vaults(authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    data = _ensure_vaults(username)
+    return {"vaults": data["items"], "current": _active_vault_id(username),
+            "folderVault": data.get("folderVault") or {}}
+
+
+@router.post("/api/notes/vaults")
+def create_vault(body: VaultIn, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    name = (body.name or "").strip() or "未命名仓库"
+    if len(name) > 40:
+        raise HTTPException(400, "仓库名称过长")
+    data = _ensure_vaults(username)
+    vid = uuid.uuid4().hex[:8]
+    data["items"].append({"id": vid, "name": name, "kind": "user",
+                          "created": int(time.time())})
+    _save_vaults(username, data)
+    return {"ok": True, "id": vid, "name": name}
+
+
+@router.put("/api/notes/vaults/select")
+def set_current_vault(body: VaultIn, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    vid = (body.vault or "").strip()
+    if not _vault_by_id(username, vid):
+        raise HTTPException(404, "笔记仓库不存在")
+    prefs = storage.get_prefs(username) or {}
+    prefs["activeVault"] = vid
+    storage.save_prefs(username, prefs)
+    return {"ok": True, "current": vid}
+
+
+@router.put("/api/notes/vaults/{vid}")
+def update_vault(vid: str, body: VaultIn, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    data = _ensure_vaults(username)
+    hit = next((x for x in data["items"] if x["id"] == vid), None)
+    if not hit:
+        raise HTTPException(404, "笔记仓库不存在")
+    if hit.get("kind") == "system":
+        raise HTTPException(403, "系统内置仓库不可重命名")
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(400, "仓库名称不能为空")
+    hit["name"] = name[:40]
+    _save_vaults(username, data)
+    return {"ok": True, "id": vid, "name": hit["name"]}
+
+
+@router.delete("/api/notes/vaults/{vid}")
+def delete_vault(vid: str, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    if vid in (VAULT_DEFAULT, VAULT_SYSTEM):
+        raise HTTPException(403, "默认仓库与系统内置仓库不可删除")
+    data = _ensure_vaults(username)
+    hit = next((x for x in data["items"] if x["id"] == vid), None)
+    if not hit:
+        raise HTTPException(404, "笔记仓库不存在")
+    idx = storage.notes_index(username)
+    for n in idx:
+        if n.get("vault") == vid:
+            n["vault"] = VAULT_DEFAULT
+    storage.save_notes_index(username, idx)
+    fv = dict(data.get("folderVault") or {})
+    for k, v in list(fv.items()):
+        if v == vid:
+            fv[k] = VAULT_DEFAULT
+    data["folderVault"] = fv
+    data["items"] = [x for x in data["items"] if x["id"] != vid]
+    _save_vaults(username, data)
+    storage.revoke_sync_key(username, vid)
+    prefs = storage.get_prefs(username) or {}
+    if prefs.get("activeVault") == vid:
+        prefs["activeVault"] = VAULT_DEFAULT
+        storage.save_prefs(username, prefs)
+    return {"ok": True}
 
 
 # ---------- 笔记附件：图片上传（剪贴板粘贴 / 拖拽 / 选择文件共用） ----------
@@ -1754,20 +2003,27 @@ def _parse_md(raw: bytes, fallback_name: str) -> tuple:
     return title, body
 
 
-def _ensure_folder(username: str, folder: str):
+def _ensure_folder(username: str, folder: str, vault_id: str = ""):
     """不存在则创建（与 /api/notes/folders 同语义，逐级补齐父级）"""
     folder = (folder or "").strip("/")
     if not folder:
         return
+    vid = VAULT_SYSTEM if _is_builtin_folder(folder) else (vault_id or _active_vault_id(username))
     folders = storage.user_json(username, "notes/folders.json", [])
-    if folder in folders:
-        return
+    data = _load_vaults(username)
+    fv = dict(data.get("folderVault") or {})
     cur = ""
+    changed = False
     for seg in folder.split("/"):
         cur = seg if not cur else cur + "/" + seg
         if cur not in folders:
             folders.append(cur)
-    storage.save_user_json(username, "notes/folders.json", folders)
+            changed = True
+        fv.setdefault(cur, vid)
+    if changed:
+        storage.save_user_json(username, "notes/folders.json", folders)
+    data["folderVault"] = fv
+    _save_vaults(username, data)
 
 
 def _create_imported_note(username: str, title: str, content: str, folder: str) -> dict:
@@ -1780,8 +2036,9 @@ def _create_imported_note(username: str, title: str, content: str, folder: str) 
         final = f"{title} ({n})"
         n += 1
     note_id = uuid.uuid4().hex[:8]
+    vid = VAULT_SYSTEM if _is_builtin_folder(folder) else _active_vault_id(username)
     idx.insert(0, {"id": note_id, "title": final, "tags": [],
-                   "folder": folder, "pinned": False,
+                   "folder": folder, "vault": vid, "pinned": False,
                    "updated": int(time.time())})
     storage.save_notes_index(username, idx)
     storage.note_write(username, note_id, content or "")
@@ -1821,7 +2078,7 @@ def list_trash(authorization: Optional[str] = Header(None)):
     idx = storage.notes_index(username)
     items = [n for n in idx if n.get("deleted")]
     items.sort(key=lambda x: x.get("deleted") or 0, reverse=True)
-    return {"notes": items,
+    return {"notes": items, "vaults": _load_vaults(username)["items"],
             "trashDays": int((storage.get_prefs(username) or {}).get("trashDays", 30) or 0)}
 
 
@@ -1903,6 +2160,7 @@ class NoteContentIn(BaseModel):
     title: Optional[str] = None
     tags: Optional[list] = None
     folder: Optional[str] = None
+    vault: Optional[str] = None
     readonly: Optional[bool] = None
 
 
@@ -1926,10 +2184,17 @@ def save_note(nid: str, body: NoteContentIn,
                 if body.title in PINNED_TITLES:
                     item["pinned"] = True
                     item["folder"] = ""
+                    item["vault"] = VAULT_SYSTEM
             if body.tags is not None:
                 item["tags"] = body.tags
             if body.folder is not None and not item.get("pinned"):
                 item["folder"] = body.folder
+            if body.vault is not None and not item.get("pinned"):
+                if body.vault == VAULT_SYSTEM:
+                    raise HTTPException(400, "不能把普通笔记移入系统内置仓库")
+                if not _vault_by_id(username, body.vault):
+                    raise HTTPException(404, "笔记仓库不存在")
+                item["vault"] = body.vault
             if body.readonly is not None:
                 item["readonly"] = bool(body.readonly)
     idx.sort(key=lambda x: x["updated"], reverse=True)
@@ -1968,12 +2233,20 @@ def delete_note(nid: str, authorization: Optional[str] = Header(None)):
 
 def require_sync_user(x_api_key: Optional[str]) -> str:
     """校验 X-API-Key，解析出用户名；失败抛 401。"""
+    ctx = require_sync_ctx(x_api_key)
+    return ctx["u"]
+
+
+def require_sync_ctx(x_api_key: Optional[str]) -> dict:
+    """校验 X-API-Key，返回 {u, vault}。"""
     if not x_api_key:
         raise HTTPException(401, "缺少 X-API-Key 请求头")
-    username = storage.verify_sync_key(x_api_key)
-    if not username:
+    ctx = storage.verify_sync_context(x_api_key)
+    if not ctx or not ctx.get("u"):
         raise HTTPException(401, "API Key 无效或已吊销")
-    return username
+    if ctx.get("vault") == VAULT_SYSTEM:
+        raise HTTPException(403, "系统内置仓库不可同步")
+    return ctx
 
 
 # ---------- path <-> note 映射（移植 localsync.js 规则，保证两端一致） ----------
@@ -1993,22 +2266,25 @@ def _note_to_path(meta: dict) -> str:
     return "/".join(segs)
 
 
-def _in_sync_scope(n: dict) -> bool:
-    """同步范围：排除常驻(pinned)、回收站(deleted)、内置文件夹下笔记（与 localsync.js 一致）。"""
-    if not n:
+def _in_sync_scope(n: dict, vault_id: str = "") -> bool:
+    """同步范围：当前令牌绑定的仓库内、未删除、非常驻的笔记。"""
+    if not n or n.get("pinned") or n.get("deleted"):
         return False
-    if n.get("pinned") or n.get("deleted"):
+    vid = vault_id or _infer_note_vault(n)
+    if _infer_note_vault(n) != vid:
         return False
-    return (n.get("folder") or "").split("/")[0] not in _SYNC_BUILTIN_ROOTS
+    if vid == VAULT_SYSTEM:
+        return False
+    return True
 
 
-def _sync_path_index(username: str):
+def _sync_path_index(username: str, vault_id: str = ""):
     """构建 {path: meta} 与 {id: path} 双向索引。
     path 分配按 (folder, title, id) 确定性排序：notes_index 会因 save_note 的
     updated 重排而变序，若不固定顺序，同名冲突笔记的 -2 后缀会在多次 /list 间抖动。"""
     idx = storage.notes_index(username)
     scoped = [n for n in idx
-              if _in_sync_scope(n) and not _is_junk_path(n.get("title") or "")]
+              if _in_sync_scope(n, vault_id) and not _is_junk_path(n.get("title") or "")]
     scoped.sort(key=lambda n: (n.get("folder") or "", n.get("title") or "",
                                n.get("id") or ""))
     by_path, id_to_path = {}, {}
@@ -2024,9 +2300,9 @@ def _sync_path_index(username: str):
     return by_path, id_to_path
 
 
-def _resolve_sync_path(username: str, path: str):
+def _resolve_sync_path(username: str, path: str, vault_id: str = ""):
     """path -> 唯一笔记 meta（供 file/rename/delete 定位）；未命中返回 None。"""
-    by_path, _ = _sync_path_index(username)
+    by_path, _ = _sync_path_index(username, vault_id)
     return by_path.get(path)
 
 
@@ -2056,26 +2332,86 @@ def _split_sync_path(norm: str):
     return "", norm
 
 
-# ---------- API Key 管理端点（session 鉴权，仅本人） ----------
+# ---------- API Key 管理端点（session 鉴权，仅本人；按笔记仓库一枚） ----------
+class SyncKeyIn(BaseModel):
+    vault: str = VAULT_DEFAULT
+
+
 @router.post("/api/sync/apikey")
-def sync_apikey_create(authorization: Optional[str] = Header(None)):
-    """生成 / 重置当前用户的同步 API Key；明文仅此一次返回，前端提示妥善保存。"""
+def sync_apikey_create(body: Optional[SyncKeyIn] = Body(default=None),
+                       authorization: Optional[str] = Header(None)):
+    """生成 / 重置指定仓库的同步 API Key；明文仅此一次返回。系统内置仓库禁止。"""
     username = require_user(authorization)
-    return {"ok": True, "apiKey": storage.gen_sync_key(username)}
+    vid = (body.vault if body else VAULT_DEFAULT) or VAULT_DEFAULT
+    try:
+        raw = storage.gen_sync_key(username, vid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    storage.append_sync_log(username, {"vault": vid, "source": "web",
+                                       "msg": "生成 / 重置同步令牌"})
+    return {"ok": True, "apiKey": raw, "vault": vid}
 
 
 @router.get("/api/sync/apikey")
-def sync_apikey_info(authorization: Optional[str] = Header(None)):
-    """返回 API Key 掩码信息（不含明文）：是否启用、前缀、创建时间。"""
+def sync_apikey_info(vault: str = VAULT_DEFAULT,
+                     authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
-    return storage.sync_key_info(username)
+    info = storage.sync_key_info(username, vault or VAULT_DEFAULT)
+    info["keys"] = storage.list_sync_keys(username)
+    info["obsidianSync"] = bool((storage.get_prefs(username) or {}).get("obsidianSync"))
+    return info
 
 
 @router.delete("/api/sync/apikey")
-def sync_apikey_revoke(authorization: Optional[str] = Header(None)):
-    """吊销当前用户的同步 API Key（Obsidian 端将无法再同步，直至重新生成）。"""
+def sync_apikey_revoke(vault: str = "",
+                       authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
-    storage.revoke_sync_key(username)
+    vid = vault or None
+    storage.revoke_sync_key(username, vid)
+    storage.append_sync_log(username, {"vault": vault or "", "source": "web",
+                                       "msg": "吊销同步令牌" + (("（" + vault + "）") if vault else "（全部）")})
+    return {"ok": True}
+
+
+@router.get("/api/sync/hello")
+def sync_hello(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """插件握手：返回万事屋版本、绑定仓库名，并记录一次连接日志。"""
+    import app_version
+    ctx = require_sync_ctx(x_api_key)
+    username, vault_id = ctx["u"], ctx["vault"]
+    vmeta = _vault_by_id(username, vault_id) or {}
+    return {"ok": True, "name": "万事屋", "version": app_version.VERSION,
+            "stage": app_version.STAGE, "vault": vault_id,
+            "vaultName": vmeta.get("name") or "", "pluginMin": "0.0.3"}
+
+
+@router.get("/api/sync/log")
+def sync_log_get(vault: str = "", limit: int = 80,
+                 authorization: Optional[str] = Header(None),
+                 x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    if x_api_key:
+        ctx = require_sync_ctx(x_api_key)
+        username, vid = ctx["u"], (vault or ctx["vault"])
+    else:
+        username = require_user(authorization)
+        vid = vault or ""
+    return {"logs": storage.read_sync_log(username, vid or None, limit)}
+
+
+class SyncLogIn(BaseModel):
+    msg: str
+    level: str = "info"
+    vault: str = ""
+
+
+@router.post("/api/sync/log")
+def sync_log_post(body: SyncLogIn,
+                  x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    ctx = require_sync_ctx(x_api_key)
+    storage.append_sync_log(ctx["u"], {
+        "vault": body.vault or ctx["vault"], "source": "obsidian",
+        "level": body.level or "info", "msg": body.msg,
+    })
     return {"ok": True}
 
 
@@ -2086,19 +2422,22 @@ def sync_list(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     mtime = note.updated * 1000（毫秒），供客户端 LWW 对账。
     刻意不返回 size：本接口被客户端每 5-10s 轮询，读全部正文会压垮数据库；
     size 属信息性字段，可由 GET /api/sync/file 的 content 长度得出。"""
-    username = require_sync_user(x_api_key)
-    by_path, _ = _sync_path_index(username)
+    ctx = require_sync_ctx(x_api_key)
+    username, vault_id = ctx["u"], ctx["vault"]
+    by_path, _ = _sync_path_index(username, vault_id)
     files = [{"path": p, "mtime": int(m.get("updated") or 0) * 1000}
              for p, m in by_path.items()]
-    return {"files": files}
+    vmeta = _vault_by_id(username, vault_id) or {}
+    return {"files": files, "vault": vault_id, "vaultName": vmeta.get("name") or ""}
 
 
 @router.get("/api/sync/file")
 def sync_get_file(path: str, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     """按相对路径读取单篇笔记的完整 Markdown（标题作 H1，与浏览器端 noteToMd 一致）。"""
-    username = require_sync_user(x_api_key)
+    ctx = require_sync_ctx(x_api_key)
+    username, vault_id = ctx["u"], ctx["vault"]
     norm = _validate_sync_path(path)
-    meta = _resolve_sync_path(username, norm)
+    meta = _resolve_sync_path(username, norm, vault_id)
     if not meta:
         raise HTTPException(404, "文件不存在")
     content = storage.note_read(username, meta["id"], "")
@@ -2145,7 +2484,8 @@ def sync_put_file(body: SyncFileIn,
     才覆盖站点；否则站点胜，拒绝覆盖（applied=False）并返回站点 mtime，客户端应改拉取。
     例外：若客户端带上 knownRemoteMtime 且站点 mtime 未超过该值，说明服务端自上次同步后
     并无独立变更（常见于 Obsidian 连续按键保存），连续本地推送直接落地，避免回拉旧正文。"""
-    username = require_sync_user(x_api_key)
+    ctx = require_sync_ctx(x_api_key)
+    username, vault_id = ctx["u"], ctx["vault"]
     norm = _validate_sync_path(body.path)
     folder, fname = _split_sync_path(norm)
     # 正文优先取 contentB64（base64 传输规避中间网关对 <script>/<svg> 等特征的篡改），
@@ -2158,7 +2498,7 @@ def sync_put_file(body: SyncFileIn,
     else:
         text = body.content
     title, body_md = _parse_md(text.encode("utf-8"), fname)
-    meta = _resolve_sync_path(username, norm)
+    meta = _resolve_sync_path(username, norm, vault_id)
     client_mtime = int(body.clientMtime or 0)
     known_rm = int(body.knownRemoteMtime or 0)
 
@@ -2173,13 +2513,14 @@ def sync_put_file(body: SyncFileIn,
 
     # 未命中 -> 新建（先逐级补齐文件夹，否则笔记在目录树中不可见）
     if folder:
-        _ensure_folder(username, folder)
+        _ensure_folder(username, folder, vault_id)
     nid = uuid.uuid4().hex[:8]
     now = int(time.time())
     stem = fname[:-3] if fname.lower().endswith(".md") else fname
     idx = storage.notes_index(username)
     idx.insert(0, {"id": nid, "title": title or stem or "未命名笔记",
-                   "tags": [], "folder": folder, "pinned": False, "updated": now})
+                   "tags": [], "folder": folder, "vault": vault_id,
+                   "pinned": False, "updated": now})
     storage.save_notes_index(username, idx)
     storage.note_write(username, nid, body_md)
     return {"path": norm, "mtime": now * 1000, "id": nid, "applied": True}
@@ -2194,15 +2535,16 @@ class SyncRenameIn(BaseModel):
 def sync_rename_file(body: SyncRenameIn,
                      x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     """重命名 / 移动一篇笔记：按 newPath 更新其 folder 与 title（正文不变）。"""
-    username = require_sync_user(x_api_key)
+    ctx = require_sync_ctx(x_api_key)
+    username, vault_id = ctx["u"], ctx["vault"]
     old = _validate_sync_path(body.oldPath)
     new = _validate_sync_path(body.newPath)
-    meta = _resolve_sync_path(username, old)
+    meta = _resolve_sync_path(username, old, vault_id)
     if not meta:
         raise HTTPException(404, "源文件不存在")
     new_folder, new_fname = _split_sync_path(new)
     if new_folder:
-        _ensure_folder(username, new_folder)
+        _ensure_folder(username, new_folder, vault_id)
     new_title = new_fname[:-3] if new_fname.lower().endswith(".md") else new_fname
     idx = storage.notes_index(username)
     now = int(time.time())
@@ -2220,9 +2562,10 @@ def sync_rename_file(body: SyncRenameIn,
 def sync_delete_file(path: str,
                      x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     """删除一篇笔记：软删进回收站（与 Web 端删除一致，可在门户恢复），不物理删正文。"""
-    username = require_sync_user(x_api_key)
+    ctx = require_sync_ctx(x_api_key)
+    username, vault_id = ctx["u"], ctx["vault"]
     norm = _validate_sync_path(path)
-    meta = _resolve_sync_path(username, norm)
+    meta = _resolve_sync_path(username, norm, vault_id)
     if not meta:
         raise HTTPException(404, "文件不存在")
     idx = storage.notes_index(username)
@@ -2860,6 +3203,46 @@ def download_extension(authorization: Optional[str] = Header(None),
         raise HTTPException(
             404, "未找到扩展安装包：请将 omnihome-extension.zip 放到部署包根目录")
     return FileResponse(str(EXTENSION_ZIP), filename="omnihome-extension.zip")
+
+
+PLUGIN_DIR = storage.ROOT / "obsidian-plugin" / "omnihome-sync"
+
+
+def _plugin_zip_bytes():
+    if not PLUGIN_DIR.is_dir():
+        return None, ""
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as z:
+        for p in sorted(PLUGIN_DIR.rglob("*")):
+            if p.is_file() and p.name != ".DS_Store":
+                z.write(p, "omnihome-sync/" + str(p.relative_to(PLUGIN_DIR)))
+    version = ""
+    try:
+        version = json.loads((PLUGIN_DIR / "manifest.json").read_text("utf-8")).get("version", "")
+    except Exception:
+        pass
+    return buf.getvalue(), version
+
+
+@router.get("/api/plugin/check")
+def plugin_check():
+    data, version = _plugin_zip_bytes()
+    if not data:
+        return {"available": False, "size": 0, "version": ""}
+    return {"available": True, "size": len(data), "version": version}
+
+
+@router.get("/api/plugin.zip")
+def download_plugin(authorization: Optional[str] = Header(None),
+                    token: Optional[str] = None):
+    require_user(authorization, token)
+    data, version = _plugin_zip_bytes()
+    if not data:
+        raise HTTPException(404, "未找到 Obsidian 插件目录")
+    from fastapi.responses import StreamingResponse
+    return Response(content=data, media_type="application/zip",
+                    headers={"Content-Disposition":
+                             'attachment; filename="omnihome-sync.zip"'})
 
 
 class RestoreIn(BaseModel):
