@@ -474,9 +474,10 @@
       return `<div class="sync-vault-row" data-sv="${App.esc(v.id)}">
         <div class="nm">${App.esc(v.name)}${sys ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">不可同步</span>' : tag}${memberRo ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">只读</span>' : ''}</div>
         ${sys || memberRo ? '' : `<div class="sv-actions">
-          <button class="btn btn-outline btn-sm" data-sv-bundle="${App.esc(v.id)}">一键复制连接信息</button>
+          ${k ? `<button class="btn btn-outline btn-sm" data-sv-bundle="${App.esc(v.id)}">一键复制连接信息</button>
           <button class="btn btn-primary btn-sm" data-sv-gen="${App.esc(v.id)}">重置</button>
-          <button class="btn btn-outline btn-sm" style="color:var(--om-danger)" data-sv-rev="${App.esc(v.id)}" ${k ? '' : 'disabled'}>吊销</button>
+          <button class="btn btn-outline btn-sm" style="color:var(--om-danger)" data-sv-rev="${App.esc(v.id)}">吊销</button>`
+            : `<button class="btn btn-primary btn-sm" data-sv-gen="${App.esc(v.id)}" data-sv-new="1">生成令牌</button>`}
         </div>`}
       </div>`;
     }).join('') || '<div style="font-size:12px;color:var(--om-text-3)">暂无笔记仓库</div>';
@@ -531,10 +532,13 @@
     };
     if (gen){
       const vid = gen.dataset.svGen;
+      const isNew = gen.dataset.svNew === '1';
       if (!await App.confirmModal({
-        title: '重置同步令牌？',
-        danger: true, okText: '重置',
-        sub: '旧令牌将立即失效。新令牌仅此次可复制到连接信息中，请立刻粘贴到 Obsidian 插件。',
+        title: isNew ? '生成同步令牌？' : '重置同步令牌？',
+        danger: !isNew, okText: isNew ? '生成' : '重置',
+        sub: isNew
+          ? '新令牌仅此次可复制到连接信息中，请立刻粘贴到 Obsidian 插件。'
+          : '旧令牌将立即失效。新令牌仅此次可复制到连接信息中，请立刻粘贴到 Obsidian 插件。',
       })) return;
       try {
         const d = await API.post('/api/sync/apikey', { vault: vid });

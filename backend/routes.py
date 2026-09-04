@@ -1943,6 +1943,9 @@ def convert_vault_to_team(vid: str, authorization: Optional[str] = Header(None))
     hit["members"] = []
     teams.index_put(raw, username, vid)
     _save_vaults(username, data)
+    prefs = storage.get_prefs(username) or {}
+    prefs["activeVault"] = vid
+    storage.save_prefs(username, prefs)
     return {"ok": True, "id": vid, "token": raw, "kind": "team", "name": hit.get("name")}
 
 

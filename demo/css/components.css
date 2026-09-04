@@ -1677,6 +1677,7 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
 }
 .kb-vault-switch:hover{ border-color: var(--om-primary); color: var(--om-primary); background: var(--om-primary-ghost); }
 .kb-vault-switch .ic{ width: 13px; height: 13px; flex: none; color: var(--om-primary); }
+.kb-vault-switch[data-kind="team"] .ic:not(.kb-vault-chev){ color: #7c9cff; }
 .kb-vault-chev{ width: 11px !important; height: 11px !important; color: var(--om-text-3) !important; }
 #kbVaultName{ min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-trash-vault{ margin: 8px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--om-border); }
@@ -2686,5 +2687,5 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
   padding: 8px 0; border-bottom: 1px solid var(--om-border);
 }
 .team-member .nm{ flex: 1; min-width: 0; font-size: 13px; font-weight: 600; }
-.team-invite{ display: flex; gap: 8px; align-items: center; }
-.team-invite input{ flex: 1; min-width: 0; }
+.team-invite{ display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.team-invite .input{ flex: 1; min-width: 0; padding-left: 12px; height: 34px; font-size: 12.5px; }

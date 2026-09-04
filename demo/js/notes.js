@@ -63,6 +63,9 @@ const Notes = (() => {
   }
   function vaultMeta(id){ return vaults.find(v => v.id === id) || { id: id, name: id, kind: 'user' }; }
   function vaultLabel(id){ return vaultMeta(id).name || id; }
+  function vaultIcon(v){
+    return (v && v.kind === 'team') ? 'i-users' : 'i-inbox';
+  }
   function vaultKindTag(v){
     if (v.kind === 'system') return '（内置）';
     if (v.kind === 'default') return '（默认）';
@@ -566,10 +569,14 @@ const Notes = (() => {
       const lastTab = openTabs[openTabs.length - 1];
       if (!currentId && lastTab){
         const n = idx.find(x => x.id === lastTab);
-        if (n) currentVault = noteVault(n);
-        open(lastTab);
+        if (n && noteVault(n) === currentVault) open(lastTab);
+        else if (inVault.length) open(inVault[0].id);
       } else if (!currentId && inVault.length) open(inVault[0].id);
-      else if (currentId && idx.some(n => n.id === currentId)) open(currentId);
+      else if (currentId && idx.some(n => n.id === currentId)){
+        const n = idx.find(x => x.id === currentId);
+        if (n && noteVault(n) === currentVault) open(currentId);
+        else if (inVault.length) open(inVault[0].id);
+      }
       /* 初始化回收站保留天数缓存（供删除提示显示真实天数；仅首次拉） */
       if (trashDays === null){
         API.get('/api/notes/trash').then(d => {
@@ -668,7 +675,7 @@ const Notes = (() => {
 
     html += `
       <div class="kb-sec-title" data-drop-root title="拖拽笔记到此处取消分组">
-        <svg class="ic"><use href="#i-inbox"/></svg>${App.esc(vaultLabel(currentVault))}
+        <svg class="ic"><use href="#${vaultIcon(vaultMeta(currentVault))}"/></svg>${App.esc(vaultLabel(currentVault))}
         ${isSys || !vaultCanEdit() ? '' : '<button class="icon-btn-xs kb-root-add" data-kb-add="" title="新建笔记或文件夹"><svg class="ic"><use href="#i-plus"/></svg></button>'}
       </div>`;
 
@@ -731,6 +738,8 @@ const Notes = (() => {
       nameEl.textContent = (v.name || '笔记仓库') + (ro ? ' · 只读' : '');
     }
     btn.dataset.kind = v.kind || 'user';
+    const ic = btn.querySelector('svg.ic:not(.kb-vault-chev) use');
+    if (ic) ic.setAttribute('href', '#' + vaultIcon(v));
     if (v.kind === 'team' && !v.isOwner && v.canEdit === false)
       btn.title = '团队仓库（只读）';
     else if (v.kind === 'team')
@@ -868,9 +877,11 @@ const Notes = (() => {
         f.split('/').forEach(seg => { cur = cur ? cur + '/' + seg : seg; folderSet.add(cur); });
       }
       const allFolders = [...folderSet].sort();
+      const meta = trashVaults.find(x => x.id === vid) || vaults.find(x => x.id === vid) || {};
+      const chip = vid === VAULT_SYSTEM ? '系统内置' : vid === VAULT_DEFAULT ? '默认' : (meta.kind === 'team' ? '团队' : '自建');
       return `
       <div class="kb-trash-vault">
-        <div class="kb-trash-vault-head"><svg class="ic"><use href="#i-inbox"/></svg>${App.esc(vname(vid))}<span class="chip no-dot" style="margin-left:8px;font-size:10px">${vid === VAULT_SYSTEM ? '系统内置' : vid === VAULT_DEFAULT ? '默认' : '自建'}</span><span class="kb-count num" style="margin-left:auto">${notes.length}</span></div>
+        <div class="kb-trash-vault-head"><svg class="ic"><use href="#${vaultIcon(meta)}"/></svg>${App.esc(vname(vid))}<span class="chip no-dot" style="margin-left:8px;font-size:10px">${chip}</span><span class="kb-count num" style="margin-left:auto">${notes.length}</span></div>
         ${renderTrashFolder('', notes, allFolders)}
       </div>`;
     }).join('');
@@ -1915,8 +1926,39 @@ const Notes = (() => {
   function teamInviteUrl(token){
     return location.origin.replace(/\/$/, '') + '/?join=' + encodeURIComponent(token);
   }
-  async function openTeamModal(){
-    const v = vaultMeta(currentVault);
+  function parseJoinToken(raw){
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    try {
+      const u = new URL(s, location.origin);
+      const j = u.searchParams.get('join');
+      if (j) return j.trim();
+    } catch (_) {}
+    const m = s.match(/[?&]join=([^&#]+)/);
+    if (m) {
+      try { return decodeURIComponent(m[1]).trim(); } catch (_) { return m[1].trim(); }
+    }
+    return s;
+  }
+  async function joinTeamPrompt(){
+    const raw = await App.promptModal({
+      title: '加入团队笔记仓库',
+      sub: '粘贴邀请码，或完整邀请链接（含 ?join=）',
+      placeholder: 't_… 或邀请链接',
+    });
+    if (raw == null) return;
+    const token = parseJoinToken(raw);
+    if (!token){ showToast('请输入邀请码', 'err'); return; }
+    try {
+      const r = await API.post('/api/notes/vaults/join', { token });
+      showToast(r.self ? '这是你创建的团队仓库' : ('已加入「' + (r.name || '团队仓库') + '」'));
+      await load();
+      if (r.id) await selectVault(r.id);
+    } catch (e) { showToast(e.message, 'err'); }
+  }
+  async function openTeamModal(vid){
+    vid = vid || currentVault;
+    const v = vaultMeta(vid);
     if (v.kind === 'system' || v.kind === 'default'){
       showToast('默认仓库与系统内置仓库不能转为团队仓库', 'err'); return;
     }
@@ -1928,30 +1970,40 @@ const Notes = (() => {
     try {
       if (v.kind === 'user'){
         title.textContent = '转为团队仓库';
-        sub.textContent = '转换后可通过邀请链接邀请其他万事屋用户加入。仅你可将它转回普通仓库。';
-        body.innerHTML = `<p style="font-size:13px;color:var(--om-text-2);line-height:1.6">当前仓库「${App.esc(v.name)}」将变为团队笔记仓库。成员默认只读，你可以再为他们打开编辑权限。</p>
+        sub.textContent = '转换后会生成邀请码，可通过链接邀请其他万事屋用户加入。仅你可将它转回普通仓库。';
+        body.innerHTML = `<p style="font-size:13px;color:var(--om-text-2);line-height:1.6">当前仓库「${App.esc(v.name)}」将变为团队笔记仓库，并立即生成邀请码。成员默认只读，你可以再为他们打开编辑权限。</p>
           <button class="btn btn-primary" type="button" id="kbTeamConvert">转换为团队仓库</button>`;
         $('#kbTeamConvert')?.addEventListener('click', async () => {
           try {
-            await API.post('/api/notes/vaults/' + encodeURIComponent(currentVault) + '/team');
-            showToast('已转为团队仓库');
+            await API.post('/api/notes/vaults/' + encodeURIComponent(vid) + '/team');
+            try { await API.put('/api/notes/vaults/select', { vault: vid }); } catch (_) {}
+            currentVault = vid;
+            try { localStorage.setItem(VAULT_KEY, vid); } catch (_) {}
+            showToast('已转为团队仓库，邀请码已生成');
             await load();
-            openTeamModal();
+            currentVault = vid;
+            try { localStorage.setItem(VAULT_KEY, vid); } catch (_) {}
+            renderVaultSwitch();
+            renderTree();
+            await openTeamModal(vid);
           } catch (e) { showToast(e.message, 'err'); }
         });
         return;
       }
-      const d = await API.get('/api/notes/vaults/' + encodeURIComponent(currentVault) + '/team');
+      const d = await API.get('/api/notes/vaults/' + encodeURIComponent(vid) + '/team');
       title.textContent = d.name || '团队仓库';
       sub.textContent = d.isOwner ? '你是创建人，可管理成员与邀请' : (d.canEdit ? '你是可编辑成员' : '你是只读成员');
       let html = '';
       if (d.isOwner){
         const url = teamInviteUrl(d.token || '');
-        html += `<div class="set-row-label">邀请链接</div>
+        html += `<div class="set-row-label">邀请码</div>
+          <div class="team-invite"><input class="input" id="kbTeamCode" readonly value="${App.esc(d.token || '')}">
+          <button class="btn btn-outline btn-sm" type="button" id="kbTeamCopyCode">复制邀请码</button></div>
+          <div class="set-row-label" style="margin-top:12px">邀请链接</div>
           <div class="team-invite"><input class="input" id="kbTeamLink" readonly value="${App.esc(url)}">
           <button class="btn btn-outline btn-sm" type="button" id="kbTeamCopy">复制</button>
           <button class="btn btn-ghost btn-sm" type="button" id="kbTeamResetInv">重置</button></div>
-          <div class="set-row-sub" style="margin:8px 0 12px">也可把邀请码发给对方：<code>${App.esc(d.token || '')}</code></div>
+          <div class="set-row-sub" style="margin:8px 0 12px">对方可在知识库 ⋯ 菜单选择「加入团队仓库」并填入邀请码。</div>
           <div class="set-row-label">成员</div>`;
         html += (d.members || []).length
           ? (d.members || []).map(m => `<div class="team-member" data-mu="${App.esc(m.u)}">
@@ -1959,7 +2011,7 @@ const Notes = (() => {
               <button class="btn btn-ghost btn-sm" type="button" data-team-edit="${App.esc(m.u)}">${m.canEdit ? '关闭编辑' : '开启编辑'}</button>
               <button class="btn btn-ghost btn-sm" type="button" data-team-kick="${App.esc(m.u)}" style="color:var(--om-danger)">移出</button>
             </div>`).join('')
-          : '<div class="kb-empty">还没有成员，把邀请链接发给同事即可</div>';
+          : '<div class="kb-empty">还没有成员，把邀请码或链接发给同事即可</div>';
         html += `<div style="margin-top:16px"><button class="btn btn-outline btn-sm" type="button" id="kbTeamRevert" style="color:var(--om-danger)">转回普通仓库</button></div>`;
       } else {
         html += `<p style="font-size:13px;color:var(--om-text-2)">创建人：${App.esc(d.owner || '')}</p>
@@ -1970,18 +2022,22 @@ const Notes = (() => {
         try { await navigator.clipboard.writeText($('#kbTeamLink').value); showToast('已复制邀请链接'); }
         catch (e) { showToast('复制失败', 'err'); }
       });
+      $('#kbTeamCopyCode')?.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText($('#kbTeamCode').value); showToast('已复制邀请码'); }
+        catch (e) { showToast('复制失败', 'err'); }
+      });
       $('#kbTeamResetInv')?.addEventListener('click', async () => {
         try {
-          await API.post('/api/notes/vaults/' + encodeURIComponent(currentVault) + '/invite');
+          await API.post('/api/notes/vaults/' + encodeURIComponent(vid) + '/invite');
           showToast('邀请已重置');
-          openTeamModal();
+          openTeamModal(vid);
         } catch (e) { showToast(e.message, 'err'); }
       });
       $('#kbTeamRevert')?.addEventListener('click', async () => {
         if (!await App.confirmModal({ title: '转回普通仓库？', danger: true, okText: '转回',
           sub: '所有成员将失去访问权限。' })) return;
         try {
-          await API.del('/api/notes/vaults/' + encodeURIComponent(currentVault) + '/team');
+          await API.del('/api/notes/vaults/' + encodeURIComponent(vid) + '/team');
           showToast('已转回普通仓库');
           App.closeModal('kbTeamMask');
           await load();
@@ -1989,7 +2045,7 @@ const Notes = (() => {
       });
       $('#kbTeamLeave')?.addEventListener('click', async () => {
         try {
-          await API.post('/api/notes/vaults/' + encodeURIComponent(currentVault) + '/leave');
+          await API.post('/api/notes/vaults/' + encodeURIComponent(vid) + '/leave');
           showToast('已退出');
           App.closeModal('kbTeamMask');
           currentVault = VAULT_DEFAULT;
@@ -1999,21 +2055,19 @@ const Notes = (() => {
       body.onclick = async e => {
         const ed = e.target.closest('[data-team-edit]');
         const kick = e.target.closest('[data-team-kick]');
-        const vid = currentVault;
         try {
           if (ed){
-            const row = ed.closest('.team-member');
             const on = ed.textContent.indexOf('开启') >= 0;
             await API.put('/api/notes/vaults/' + encodeURIComponent(vid) + '/members/' + encodeURIComponent(ed.dataset.teamEdit), { canEdit: on });
             showToast(on ? '已开启编辑权限' : '已关闭编辑权限');
-            openTeamModal();
+            openTeamModal(vid);
           }
           if (kick){
             if (!await App.confirmModal({ title: '移出成员？', danger: true, okText: '移出',
               sub: '对方将立即失去此仓库访问权限。' })) return;
             await API.del('/api/notes/vaults/' + encodeURIComponent(vid) + '/members/' + encodeURIComponent(kick.dataset.teamKick));
             showToast('已移出');
-            openTeamModal();
+            openTeamModal(vid);
           }
         } catch (err) { showToast(err.message, 'err'); }
       };
@@ -2116,8 +2170,8 @@ const Notes = (() => {
 
     /* 顶部 "..." 溢出菜单：导入 / 导出（设计图把显眼按钮收纳收起） */
     $('#notesOverflowBtn')?.addEventListener('click', () => kbMenu($('#notesOverflowBtn'), [
-      ['多选模式', 'i-check', () => setSelMode(!selMode)],
       ['新建笔记仓库', 'i-folder', () => createVault()],
+      ['加入团队仓库…', 'i-users', () => joinTeamPrompt()],
       ['重命名当前仓库', 'i-pen', () => renameVault()],
       ...(canDeleteVault(vaultMeta(currentVault)) ? [['删除当前仓库', 'i-trash', () => deleteCurrentVault(), 'danger']] : []),
       ...((vaultMeta(currentVault).kind === 'user' || vaultMeta(currentVault).kind === 'team')
@@ -2127,21 +2181,13 @@ const Notes = (() => {
     ]));
     $('#kbVaultBtn')?.addEventListener('click', e => {
       e.stopPropagation();
-      const cur = vaultMeta(currentVault);
-      const canDel = canDeleteVault(cur);
       const items = vaults.map(v => [
         (v.id === currentVault ? '✓ ' : '') + v.name + vaultKindTag(v),
-        'i-inbox',
+        vaultIcon(v),
         () => selectVault(v.id),
       ]);
       items.push('sep');
       items.push(['新建仓库…', 'i-plus', () => createVault()]);
-      if (cur.kind !== 'system')
-        items.push(['重命名「' + (cur.name || '') + '」', 'i-pen', () => renameVault()]);
-      if (cur.kind === 'user' || (cur.kind === 'team' && cur.isOwner))
-        items.push(['管理团队…', 'i-users', () => openTeamModal()]);
-      if (canDel)
-        items.push(['删除「' + (cur.name || '') + '」', 'i-trash', () => deleteCurrentVault(), 'danger']);
       kbMenu($('#kbVaultBtn'), items);
     });
     /* 回收站入口：v0.2.26 整个底部条都是点击热区（按钮只是视觉），点击弹层 */
