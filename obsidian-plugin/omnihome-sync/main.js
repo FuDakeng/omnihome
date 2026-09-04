@@ -27,7 +27,7 @@ const SELF_WRITE_MS = 4000;         // 自写抑制窗口（避免回环触发�
 
 /* 插件独立版本线（与服务端 app 版本解耦；须与 manifest.json 的 version 保持一致）。
    打进启动日志与设置页，用户反馈报错时可一眼确认所装插件版本。 */
-const PLUGIN_VERSION = '0.0.4';
+const PLUGIN_VERSION = '0.0.5';
 
 const ASSET_MAX = 5 * 1024 * 1024;   // 与服务端 ASSET_MAX 一致
 const ASSET_DIR = 'OmniHome-assets';  // 从站点拉取、本地无原路径的附件落点
@@ -280,6 +280,11 @@ class OmniHomeSyncPlugin extends Plugin {
       if (qs) url += (url.indexOf('?') >= 0 ? '&' : '?') + qs;
     }
     const headers = { 'X-API-Key': this.settings.apiKey, 'Accept': 'application/json' };
+    if (opts.headers) {
+      const extra = opts.headers;
+      Object.keys(extra).forEach((k) => { headers[k] = extra[k]; });
+    }
+    if (this.approvalId) headers['X-Sync-Approval'] = this.approvalId;
     const req = { url: url, method: method, headers: headers };
     if (opts.body !== undefined) {
       headers['Content-Type'] = 'application/json';
@@ -342,6 +347,33 @@ class OmniHomeSyncPlugin extends Plugin {
     return this.api('PUT', '/api/sync/file/rename', { body: { oldPath: oldPath, newPath: newPath } });
   }
   remoteDelete(path) { return this.api('DELETE', '/api/sync/file', { query: { path: path } }); }
+
+  async requestApproval(kind, paths) {
+    try {
+      const r = await this.api('POST', '/api/sync/approvals', {
+        body: { kind: kind, paths: paths || [] },
+      });
+      if (!r || !r.pending) return '';
+      new Notice('已提交创建人审批，通过后将自动继续（最多约 5 分钟）…', 8000);
+      this.pushLog('warn', '等待创建人审批：' + kind);
+      const aid = r.id;
+      for (let i = 0; i < 60; i++) {
+        await sleep(5000);
+        const g = await this.api('GET', '/api/sync/approvals/' + encodeURIComponent(aid));
+        if (g && g.status === 'approved') {
+          this.approvalId = aid;
+          this.pushLog('info', '创建人已批准 ' + kind);
+          return aid;
+        }
+        if (g && g.status === 'denied') throw new Error('创建人已拒绝此次同步操作');
+      }
+      throw new Error('等待审批超时，请稍后重试');
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      if (msg.indexOf('创建人无需') >= 0 || msg.indexOf('仅团队仓库') >= 0) return '';
+      throw e;
+    }
+  }
 
   async testConnection() {
     this.remote = await this.api('GET', '/api/sync/hello');
@@ -449,9 +481,13 @@ class OmniHomeSyncPlugin extends Plugin {
     });
     if (!ok) return;
     this.setStatus('syncing');
+    this.approvalId = '';
     const baseline = this.settings.baseline || {};
     let n = 0;
     try {
+      if (push) {
+        await this.requestApproval('overwrite', []);
+      }
       const localFiles = this.scanVault();
       const localByPath = {};
       for (let i = 0; i < localFiles.length; i++) localByPath[localFiles[i].path] = localFiles[i];
@@ -489,6 +525,8 @@ class OmniHomeSyncPlugin extends Plugin {
     } catch (e) {
       this.setStatus('error');
       new Notice('覆盖失败：' + ((e && e.message) || e), 8000);
+    } finally {
+      this.approvalId = '';
     }
   }
 
@@ -876,6 +914,14 @@ class OmniHomeSyncPlugin extends Plugin {
           if (changes) this.notifyChanges(changes);
           return;
         }
+        if (plannedRemoteDeletes.length > DELETE_VALVE) {
+          try { await this.requestApproval('bulk-delete', plannedRemoteDeletes); }
+          catch (e) {
+            this.pushLog('warn', String((e && e.message) || e));
+            new Notice(((e && e.message) || '审批未通过') + '，本轮远端删除已跳过', 8000);
+            plannedRemoteDeletes.length = 0;
+          }
+        }
       }
       for (let i = 0; i < plannedLocalDeletes.length; i++) { if (await this.trashLocal(plannedLocalDeletes[i], baseline)) changes++; }
       for (let i = 0; i < plannedRemoteDeletes.length; i++) { if (await this.deleteRemote(plannedRemoteDeletes[i], baseline)) changes++; }
@@ -892,6 +938,7 @@ class OmniHomeSyncPlugin extends Plugin {
       console.error('[OmniHome Sync] reconcile 失败：', e);
       this.notifyErrorOnce(this.lastError);
     } finally {
+      this.approvalId = '';
       this.syncing = false;
     }
   }

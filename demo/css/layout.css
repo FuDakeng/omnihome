@@ -175,7 +175,7 @@
 .crumb-title{ font-size: var(--om-fs-lg); font-weight: 700; white-space: nowrap; }
 .crumb-date{ font-size: var(--om-fs-xs); color: var(--om-text-3); white-space: nowrap; }
 
-.tb-right{ display: flex; align-items: center; gap: var(--om-space-2); margin-left: auto; }
+.tb-right{ display: flex; align-items: center; gap: var(--om-space-2); margin-left: auto; position: relative; }
 
 /* ---------- 内容区 ---------- */
 .content{

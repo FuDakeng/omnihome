@@ -468,10 +468,12 @@
     const keyOf = id => keys.find(k => k.vault === id);
     box.innerHTML = vaults.map(v => {
       const sys = v.kind === 'system';
+      const memberRo = v.kind === 'team' && !v.isOwner && v.canEdit === false;
       const k = keyOf(v.id);
+      const tag = v.kind === 'team' ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">团队</span>' : '';
       return `<div class="sync-vault-row" data-sv="${App.esc(v.id)}">
-        <div class="nm">${App.esc(v.name)}${sys ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">不可同步</span>' : ''}</div>
-        ${sys ? '' : `<div class="sv-actions">
+        <div class="nm">${App.esc(v.name)}${sys ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">不可同步</span>' : tag}${memberRo ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">只读</span>' : ''}</div>
+        ${sys || memberRo ? '' : `<div class="sv-actions">
           <button class="btn btn-outline btn-sm" data-sv-bundle="${App.esc(v.id)}">一键复制连接信息</button>
           <button class="btn btn-primary btn-sm" data-sv-gen="${App.esc(v.id)}">重置</button>
           <button class="btn btn-outline btn-sm" style="color:var(--om-danger)" data-sv-rev="${App.esc(v.id)}" ${k ? '' : 'disabled'}>吊销</button>

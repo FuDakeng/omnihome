@@ -1373,6 +1373,8 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
   overflow: auto; padding: 8px 6px; border-right: 1px solid var(--om-border);
 }
 #kbShareViewList .note-item.active{ background: var(--om-primary-ghost); color: var(--om-primary); }
+#kbShareViewList .kb-folder{ margin: 0; }
+#kbShareViewList .kb-folder-row{ padding: 5px 6px; }
 .kb-share-ed{ display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .kb-share-ed .ed-body{ flex: 1; min-height: 0; }
 .kb-share-outline{
@@ -2523,7 +2525,11 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
   transition: background .12s, color .12s;
 }
 .kb-menu button:hover{ background: var(--om-primary-ghost); color: var(--om-primary); }
+.kb-menu button.danger{ color: var(--om-danger); }
+.kb-menu button.danger:hover{ background: var(--om-danger-soft, #fcebeb); color: var(--om-danger); }
+.kb-menu .sep{ height: 1px; background: var(--om-border); margin: 4px 6px; }
 .kb-menu .ic{ width: 14px; height: 14px; color: var(--om-primary); flex: none; }
+.kb-menu button.danger .ic{ color: var(--om-danger); }
 
 /* 快速删除横条：拖拽时底部居中悬浮，拖入变红即删 */
 .kb-trash{
@@ -2647,3 +2653,38 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 .kb-trash-empty{ font-size: 12px; color: var(--om-text-3); text-align: center; padding: 22px 0; }
 .kb-trash-group{ padding-bottom: 4px; }
 .kb-trash-group + .kb-trash-group{ border-top: 1px dashed var(--om-border); }
+
+#bellBtn{ position: relative; }
+.inbox-dot{
+  position: absolute; top: 6px; right: 6px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--om-danger); box-shadow: 0 0 0 2px var(--om-surface);
+}
+.inbox-panel{
+  position: absolute; right: 48px; top: calc(100% + 8px); z-index: 120;
+  width: min(360px, 92vw);
+  background: var(--om-surface); border: 1px solid var(--om-border);
+  border-radius: 12px; box-shadow: var(--om-shadow-lg);
+  overflow: hidden;
+}
+.inbox-head{
+  padding: 10px 14px; font-size: 13px; font-weight: 700;
+  border-bottom: 1px solid var(--om-border);
+}
+.inbox-list{ max-height: 360px; overflow: auto; }
+.inbox-item{
+  display: block; width: 100%; text-align: left;
+  padding: 10px 14px; border: 0; background: transparent; cursor: default;
+  border-bottom: 1px solid var(--om-border);
+}
+.inbox-item.unread{ background: var(--om-primary-ghost); }
+.inbox-item .t{ font-size: 13px; font-weight: 650; color: var(--om-text-1); }
+.inbox-item .b{ font-size: 12px; color: var(--om-text-2); margin-top: 3px; line-height: 1.5; }
+.inbox-item .ops{ display: flex; gap: 8px; margin-top: 8px; }
+.team-member{
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 0; border-bottom: 1px solid var(--om-border);
+}
+.team-member .nm{ flex: 1; min-width: 0; font-size: 13px; font-weight: 600; }
+.team-invite{ display: flex; gap: 8px; align-items: center; }
+.team-invite input{ flex: 1; min-width: 0; }

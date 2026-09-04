@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 import storage
 import secretbox
+import teams
 from sessions import require_user, verify_password
 
 router = APIRouter()
@@ -1301,6 +1302,162 @@ def _active_vault_id(username: str) -> str:
     return vid
 
 
+def _vault_public(v: dict, username: str) -> dict:
+    owner = v.get("owner") or (username if v.get("kind") == "team" else "")
+    out = {"id": v.get("id"), "name": v.get("name") or "", "kind": v.get("kind") or "user",
+           "owner": owner if v.get("kind") == "team" else ""}
+    if v.get("kind") == "team":
+        if v.get("projection"):
+            out["isOwner"] = False
+            out["canEdit"] = bool(v.get("canEdit"))
+            out["memberCount"] = 0
+        else:
+            members = v.get("members") or []
+            out["isOwner"] = True
+            out["canEdit"] = True
+            out["memberCount"] = len(members)
+            out["owner"] = v.get("owner") or username
+    else:
+        out["isOwner"] = True
+        out["canEdit"] = True
+    return out
+
+
+def _team_ctx(username: str, vid: str = ""):
+    """解析仓库访问：store=笔记所在账号，can_edit/is_owner。"""
+    vid = (vid or "").strip() or _active_vault_id(username)
+    local = _vault_by_id(username, vid)
+    if not local:
+        raise HTTPException(404, "笔记仓库不存在")
+    if local.get("kind") == "team" and local.get("projection") and local.get("owner"):
+        owner = local.get("owner")
+        rec = _vault_by_id(owner, vid)
+        if not rec or rec.get("kind") != "team":
+            raise HTTPException(404, "团队仓库不存在或已解散")
+        mem = next((m for m in (rec.get("members") or []) if m.get("u") == username), None)
+        if not mem:
+            raise HTTPException(403, "你已不在此团队仓库")
+        return {"store": owner, "rec": rec, "can_edit": bool(mem.get("canEdit")),
+                "is_owner": False, "vid": vid, "local": local}
+    if local.get("kind") == "team":
+        if not local.get("owner"):
+            local["owner"] = username
+        return {"store": username, "rec": local, "can_edit": True,
+                "is_owner": True, "vid": vid, "local": local}
+    return {"store": username, "rec": local, "can_edit": True,
+            "is_owner": True, "vid": vid, "local": local}
+
+
+def _require_vault_edit(username: str, vid: str = ""):
+    ctx = _team_ctx(username, vid)
+    if not ctx["can_edit"]:
+        raise HTTPException(403, "此团队仓库为只读")
+    return ctx
+
+
+def _find_note(username: str, nid: str):
+    idx = storage.notes_index(username)
+    hit = next((n for n in idx if n.get("id") == nid), None)
+    if hit:
+        return username, hit, idx
+    for v in _load_vaults(username)["items"]:
+        if not v.get("projection") or not v.get("owner"):
+            continue
+        owner = v.get("owner")
+        oidx = storage.notes_index(owner)
+        ohit = next((n for n in oidx if n.get("id") == nid), None)
+        if ohit and _infer_note_vault(ohit) == v.get("id"):
+            return owner, ohit, oidx
+    return None, None, None
+
+
+def _add_member_projection(member: str, owner: str, rec: dict):
+    data = _ensure_vaults(member)
+    items = data["items"]
+    vid = rec.get("id")
+    mem = next((m for m in (rec.get("members") or []) if m.get("u") == member), None)
+    stub = {"id": vid, "name": rec.get("name") or "团队仓库", "kind": "team",
+            "owner": owner, "projection": True,
+            "canEdit": bool(mem and mem.get("canEdit"))}
+    found = next((x for x in items if x.get("id") == vid), None)
+    if found:
+        found.update(stub)
+    else:
+        items.append(stub)
+    _save_vaults(member, data)
+
+
+def _drop_member_projection(member: str, vid: str):
+    data = _load_vaults(member)
+    data["items"] = [x for x in data["items"] if x.get("id") != vid]
+    if _active_vault_id(member) == vid:
+        prefs = storage.get_prefs(member) or {}
+        prefs["activeVault"] = VAULT_DEFAULT
+        storage.save_prefs(member, prefs)
+    _save_vaults(member, data)
+
+
+def _refresh_team_projections(username: str):
+    data = _ensure_vaults(username)
+    keep = []
+    changed = False
+    for v in data["items"]:
+        if not v.get("projection"):
+            keep.append(v)
+            continue
+        owner, vid = v.get("owner"), v.get("id")
+        rec = _vault_by_id(owner, vid) if owner else None
+        if not rec or rec.get("kind") != "team":
+            changed = True
+            continue
+        mem = next((m for m in (rec.get("members") or []) if m.get("u") == username), None)
+        if not mem:
+            changed = True
+            continue
+        v["name"] = rec.get("name") or v.get("name")
+        v["canEdit"] = bool(mem.get("canEdit"))
+        keep.append(v)
+    if len(keep) != len(data["items"]):
+        changed = True
+    data["items"] = keep
+    if changed:
+        _save_vaults(username, data)
+    return data
+
+
+def _merged_notes_payload(username: str):
+    data = _refresh_team_projections(username)
+    idx = storage.notes_index(username)
+    active = [n for n in idx if not n.get("deleted")]
+    trash_count = sum(1 for n in idx if n.get("deleted"))
+    folders = storage.user_json(username, "notes/folders.json", [])
+    folder_names = [f.get("name") if isinstance(f, dict) else str(f or "") for f in folders]
+    folder_names = [x for x in folder_names if x]
+    fv = dict(data.get("folderVault") or {})
+    vaults_out = []
+    for v in data["items"]:
+        vaults_out.append(_vault_public(v, username))
+        if v.get("projection") and v.get("owner"):
+            owner = v["owner"]
+            vid = v["id"]
+            for n in storage.notes_index(owner):
+                if n.get("deleted"):
+                    continue
+                if _infer_note_vault(n) != vid:
+                    continue
+                active.append(n)
+            odata = _load_vaults(owner)
+            ofolders = storage.user_json(owner, "notes/folders.json", [])
+            for f in ofolders:
+                name = f.get("name") if isinstance(f, dict) else str(f or "")
+                if name and _folder_vault(odata, name) == vid and name not in folder_names:
+                    folder_names.append(name)
+                    fv[name] = vid
+    return {"notes": active, "folders": folder_names, "folderVault": fv,
+            "vaults": vaults_out, "currentVault": _active_vault_id(username),
+            "shares": _share_public_list(username), "trashCount": trash_count}
+
+
 def _rename_quick(old: str, new: str):
     """文件夹改名工具：旧路径 → 新路径（含子路径）。"""
     def _ren(f):
@@ -1368,6 +1525,38 @@ def _share_public_list(username: str) -> list:
                     "name": x.get("name") or "",
                     "token": x.get("token") or ""})
     return out
+
+
+def _share_scope_folders(username: str, rec: dict) -> list:
+    """分享范围内的文件夹路径（含空文件夹），供侧栏按层级展示。"""
+    if rec.get("kind") != "folder":
+        return []
+    root = (rec.get("folder") or "").strip("/")
+    vault = rec.get("vault") or ""
+    names = set()
+    data = _load_vaults(username)
+    folders = storage.user_json(username, "notes/folders.json", [])
+    for f in folders:
+        name = f.get("name") if isinstance(f, dict) else str(f or "")
+        if not name:
+            continue
+        if root:
+            if name == root or name.startswith(root + "/"):
+                names.add(name)
+        elif _folder_vault(data, name) == vault:
+            names.add(name)
+    for n in _share_scope_notes(username, rec):
+        f = (n.get("folder") or "").strip("/")
+        if not f:
+            continue
+        if root and not (f == root or f.startswith(root + "/")):
+            continue
+        cur = ""
+        for seg in f.split("/"):
+            cur = seg if not cur else cur + "/" + seg
+            if not root or cur == root or cur.startswith(root + "/"):
+                names.add(cur)
+    return sorted(names)
 
 
 def _resolve_share(raw: str):
@@ -1481,46 +1670,32 @@ def list_notes(authorization: Optional[str] = Header(None)):
     _ensure_pinned(username)
     _ensure_vaults(username)
     _gc_trash(username)
-    idx = storage.notes_index(username)
-    active = [n for n in idx if not n.get("deleted")]
-    trash_count = sum(1 for n in idx if n.get("deleted"))
-    vaults = _load_vaults(username)
-    folders = storage.user_json(username, "notes/folders.json", [])
-    folder_names = [f.get("name") if isinstance(f, dict) else str(f or "") for f in folders]
-    folder_names = [x for x in folder_names if x]
-    return {"notes": active,
-            "folders": folder_names,
-            "folderVault": vaults.get("folderVault") or {},
-            "vaults": vaults["items"],
-            "currentVault": _active_vault_id(username),
-            "shares": _share_public_list(username),
-            "trashCount": trash_count}
+    return _merged_notes_payload(username)
 
 
 @router.post("/api/notes")
 def create_note(body: NoteMetaIn, authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
-    idx = storage.notes_index(username)
     note_id = uuid.uuid4().hex[:8]
-    # 常驻标题兜底：始终带 pinned 标记且不进文件夹，避免产生重复副本
     pinned = body.title in PINNED_TITLES
     folder = "" if pinned else (body.folder or "")
     if pinned or _is_builtin_folder(folder):
-        vid = VAULT_SYSTEM
+        vid, store = VAULT_SYSTEM, username
     else:
         vid = body.vault or _active_vault_id(username)
-        if not _vault_by_id(username, vid):
-            vid = VAULT_DEFAULT
+        ctx = _require_vault_edit(username, vid)
+        store, vid = ctx["store"], ctx["vid"]
         if vid == VAULT_SYSTEM:
             raise HTTPException(400, "系统内置仓库只能在「每日计划」「灵感速记」中创建笔记")
+    idx = storage.notes_index(store)
     idx.insert(0, {"id": note_id, "title": body.title or "未命名笔记",
                    "tags": body.tags,
                    "folder": folder,
                    "vault": vid,
                    "pinned": pinned,
                    "updated": int(time.time())})
-    storage.save_notes_index(username, idx)
-    storage.note_write(username, note_id, "")
+    storage.save_notes_index(store, idx)
+    storage.note_write(store, note_id, "")
     return idx[0]
 
 
@@ -1539,17 +1714,19 @@ def add_folder(body: FolderIn, authorization: Optional[str] = Header(None)):
         raise HTTPException(400, "文件夹路径不合法")
     vid = VAULT_SYSTEM if _is_builtin_folder(name) else (body.vault or _active_vault_id(username))
     if not _is_builtin_folder(name):
-        if not _vault_by_id(username, vid):
-            raise HTTPException(404, "笔记仓库不存在")
+        ctx = _require_vault_edit(username, vid)
+        store, vid = ctx["store"], ctx["vid"]
         if vid == VAULT_SYSTEM:
             raise HTTPException(400, "系统内置仓库只能使用内置文件夹")
-    folders = storage.user_json(username, "notes/folders.json", [])
+    else:
+        store = username
+    folders = storage.user_json(store, "notes/folders.json", [])
     names = [f.get("name") if isinstance(f, dict) else str(f or "") for f in folders]
     if name in names:
         raise HTTPException(400, "文件夹已存在")
     # 多级路径：逐级补齐缺失的上级文件夹（A/B/C → A、A/B 依次存在）
     cur = ""
-    data = _load_vaults(username)
+    data = _load_vaults(store)
     fv = dict(data.get("folderVault") or {})
     for seg in name.split("/"):
         cur = seg if not cur else cur + "/" + seg
@@ -1557,9 +1734,9 @@ def add_folder(body: FolderIn, authorization: Optional[str] = Header(None)):
             folders.append(cur)
             names.append(cur)
         fv[cur] = vid
-    storage.save_user_json(username, "notes/folders.json", folders)
+    storage.save_user_json(store, "notes/folders.json", folders)
     data["folderVault"] = fv
-    _save_vaults(username, data)
+    _save_vaults(store, data)
     return {"ok": True, "name": name, "vault": vid}
 
 
@@ -1591,8 +1768,35 @@ def replace_folders(body: FoldersIn, authorization: Optional[str] = Header(None)
         out.insert(0, PLAN_FOLDER)
     if QUICK_FOLDER not in out:
         out.append(QUICK_FOLDER)
-    storage.save_user_json(username, "notes/folders.json", out)
-    return {"ok": True, "folders": out}
+    ctx = _require_vault_edit(username, _active_vault_id(username))
+    store, vid = ctx["store"], ctx["vid"]
+    if store == username:
+        storage.save_user_json(username, "notes/folders.json", out)
+        return {"ok": True, "folders": out}
+    odata = _load_vaults(store)
+    ofolders = storage.user_json(store, "notes/folders.json", [])
+    keep = [f for f in ofolders if _folder_vault(odata, f) != vid]
+    seen = set(keep)
+    team_in = []
+    for name in out:
+        if name in (PLAN_FOLDER, QUICK_FOLDER):
+            continue
+        if name in seen:
+            continue
+        team_in.append(name)
+        seen.add(name)
+    final = keep + team_in
+    if PLAN_FOLDER not in final:
+        final.insert(0, PLAN_FOLDER)
+    if QUICK_FOLDER not in final:
+        final.append(QUICK_FOLDER)
+    storage.save_user_json(store, "notes/folders.json", final)
+    fv = dict(odata.get("folderVault") or {})
+    for name in team_in:
+        fv[name] = vid
+    odata["folderVault"] = fv
+    _save_vaults(store, odata)
+    return {"ok": True, "folders": final}
 
 
 @router.delete("/api/notes/folders/{name:path}")
@@ -1601,14 +1805,16 @@ def delete_folder(name: str, authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
     if name == PLAN_FOLDER:
         raise HTTPException(403, "「每日计划」为系统内置文件夹，不可删除")
-    folders = storage.user_json(username, "notes/folders.json", [])
+    ctx = _require_vault_edit(username, _active_vault_id(username))
+    store = ctx["store"]
+    folders = storage.user_json(store, "notes/folders.json", [])
     if name not in folders:
         raise HTTPException(404, "文件夹不存在")
     prefix = name + "/"
     removed = {name} | {f for f in folders if f.startswith(prefix)}
     folders = [f for f in folders if f not in removed]
-    storage.save_user_json(username, "notes/folders.json", folders)
-    idx = storage.notes_index(username)
+    storage.save_user_json(store, "notes/folders.json", folders)
+    idx = storage.notes_index(store)
     now = int(time.time())
     trashed = 0
     for item in idx:
@@ -1621,13 +1827,13 @@ def delete_folder(name: str, authorization: Optional[str] = Header(None)):
                 trashed += 1
             else:
                 item["folder"] = ""   # 常驻笔记不进回收站，归位根目录
-    storage.save_notes_index(username, idx)
-    data = _load_vaults(username)
+    storage.save_notes_index(store, idx)
+    data = _load_vaults(store)
     fv = dict(data.get("folderVault") or {})
     for r in removed:
         fv.pop(r, None)
     data["folderVault"] = fv
-    _save_vaults(username, data)
+    _save_vaults(store, data)
     return {"ok": True, "trashed": trashed}
 
 
@@ -1639,9 +1845,9 @@ class VaultIn(BaseModel):
 @router.get("/api/notes/vaults")
 def list_vaults(authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
-    data = _ensure_vaults(username)
-    return {"vaults": data["items"], "current": _active_vault_id(username),
-            "folderVault": data.get("folderVault") or {}}
+    payload = _merged_notes_payload(username)
+    return {"vaults": payload["vaults"], "current": payload["currentVault"],
+            "folderVault": payload["folderVault"]}
 
 
 @router.post("/api/notes/vaults")
@@ -1662,12 +1868,203 @@ def create_vault(body: VaultIn, authorization: Optional[str] = Header(None)):
 def set_current_vault(body: VaultIn, authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
     vid = (body.vault or "").strip()
+    _refresh_team_projections(username)
     if not _vault_by_id(username, vid):
         raise HTTPException(404, "笔记仓库不存在")
     prefs = storage.get_prefs(username) or {}
     prefs["activeVault"] = vid
     storage.save_prefs(username, prefs)
     return {"ok": True, "current": vid}
+
+
+class TeamJoinIn(BaseModel):
+    token: str = ""
+
+
+class TeamMemberIn(BaseModel):
+    canEdit: Optional[bool] = None
+
+
+@router.post("/api/notes/vaults/join")
+def join_team_vault(body: TeamJoinIn, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    hit = teams.index_get(body.token)
+    if not hit:
+        raise HTTPException(404, "邀请码无效或已失效")
+    owner, vid = hit
+    rec = _vault_by_id(owner, vid)
+    if not rec or rec.get("kind") != "team":
+        raise HTTPException(404, "团队仓库不存在或已解散")
+    if owner == username:
+        return {"ok": True, "id": vid, "name": rec.get("name"), "self": True}
+    members = list(rec.get("members") or [])
+    if not any(m.get("u") == username for m in members):
+        members.append({"u": username, "canEdit": False, "joined": int(time.time())})
+        rec["members"] = members
+        data = _load_vaults(owner)
+        for x in data["items"]:
+            if x.get("id") == vid:
+                x["members"] = members
+        _save_vaults(owner, data)
+    rec = _vault_by_id(owner, vid)
+    _add_member_projection(username, owner, rec)
+    prefs = storage.get_prefs(username) or {}
+    prefs["activeVault"] = vid
+    storage.save_prefs(username, prefs)
+    return {"ok": True, "id": vid, "name": rec.get("name") or "",
+            "canEdit": bool(next((m for m in rec.get("members") or [] if m.get("u") == username), {}).get("canEdit"))}
+
+
+@router.post("/api/notes/vaults/{vid}/team")
+def convert_vault_to_team(vid: str, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    data = _ensure_vaults(username)
+    hit = next((x for x in data["items"] if x["id"] == vid), None)
+    if not hit:
+        raise HTTPException(404, "笔记仓库不存在")
+    if hit.get("projection"):
+        raise HTTPException(403, "不能转换他人的仓库")
+    if hit.get("kind") != "user":
+        if hit.get("kind") == "team":
+            raw = hit.get("invite") or ""
+            if not raw:
+                raw = teams.new_invite()
+                hit["invite"] = raw
+                hit["inviteHash"] = teams.invite_hash(raw)
+                teams.index_put(raw, username, vid)
+                _save_vaults(username, data)
+            return {"ok": True, "id": vid, "token": raw, "kind": "team"}
+        raise HTTPException(400, "仅自建仓库可转换为团队仓库")
+    raw = teams.new_invite()
+    hit["kind"] = "team"
+    hit["owner"] = username
+    hit["invite"] = raw
+    hit["inviteHash"] = teams.invite_hash(raw)
+    hit["members"] = []
+    teams.index_put(raw, username, vid)
+    _save_vaults(username, data)
+    return {"ok": True, "id": vid, "token": raw, "kind": "team", "name": hit.get("name")}
+
+
+@router.delete("/api/notes/vaults/{vid}/team")
+def convert_vault_from_team(vid: str, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    data = _ensure_vaults(username)
+    hit = next((x for x in data["items"] if x["id"] == vid), None)
+    if not hit:
+        raise HTTPException(404, "笔记仓库不存在")
+    if hit.get("kind") != "team" or hit.get("projection"):
+        raise HTTPException(403, "仅创建人可将团队仓库转回普通仓库")
+    for m in list(hit.get("members") or []):
+        u = m.get("u")
+        if u:
+            _drop_member_projection(u, vid)
+            storage.revoke_sync_key(username, vid, actor=u)
+    teams.index_del_raw(hit.get("invite") or "")
+    teams.index_del_vault(username, vid)
+    hit["kind"] = "user"
+    hit.pop("invite", None)
+    hit.pop("inviteHash", None)
+    hit.pop("members", None)
+    hit.pop("owner", None)
+    _save_vaults(username, data)
+    return {"ok": True, "id": vid, "kind": "user"}
+
+
+@router.get("/api/notes/vaults/{vid}/team")
+def team_vault_detail(vid: str, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    ctx = _team_ctx(username, vid)
+    rec = ctx["rec"]
+    members = [{"u": m.get("u"), "canEdit": bool(m.get("canEdit")),
+                "joined": int(m.get("joined") or 0)} for m in (rec.get("members") or [])]
+    out = {"ok": True, "id": vid, "name": rec.get("name") or "", "kind": rec.get("kind"),
+           "owner": rec.get("owner") or ctx["store"], "isOwner": ctx["is_owner"],
+           "canEdit": ctx["can_edit"], "members": members}
+    if ctx["is_owner"]:
+        out["token"] = rec.get("invite") or ""
+    return out
+
+
+@router.post("/api/notes/vaults/{vid}/invite")
+def reset_team_invite(vid: str, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    ctx = _team_ctx(username, vid)
+    if not ctx["is_owner"]:
+        raise HTTPException(403, "仅创建人可重置邀请")
+    rec = ctx["rec"]
+    teams.index_del_raw(rec.get("invite") or "")
+    raw = teams.new_invite()
+    rec["invite"] = raw
+    rec["inviteHash"] = teams.invite_hash(raw)
+    data = _load_vaults(ctx["store"])
+    for x in data["items"]:
+        if x.get("id") == vid:
+            x["invite"] = raw
+            x["inviteHash"] = rec["inviteHash"]
+    _save_vaults(ctx["store"], data)
+    teams.index_put(raw, ctx["store"], vid)
+    return {"ok": True, "token": raw}
+
+
+@router.post("/api/notes/vaults/{vid}/leave")
+def leave_team_vault(vid: str, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    ctx = _team_ctx(username, vid)
+    if ctx["is_owner"]:
+        raise HTTPException(400, "创建人请先将仓库转回普通仓库或删除仓库")
+    rec = ctx["rec"]
+    rec["members"] = [m for m in (rec.get("members") or []) if m.get("u") != username]
+    data = _load_vaults(ctx["store"])
+    for x in data["items"]:
+        if x.get("id") == vid:
+            x["members"] = rec["members"]
+    _save_vaults(ctx["store"], data)
+    _drop_member_projection(username, vid)
+    storage.revoke_sync_key(ctx["store"], vid, actor=username)
+    return {"ok": True}
+
+
+@router.put("/api/notes/vaults/{vid}/members/{user}")
+def update_team_member(vid: str, user: str, body: TeamMemberIn,
+                       authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    ctx = _team_ctx(username, vid)
+    if not ctx["is_owner"]:
+        raise HTTPException(403, "仅创建人可管理成员")
+    rec = ctx["rec"]
+    mem = next((m for m in (rec.get("members") or []) if m.get("u") == user), None)
+    if not mem:
+        raise HTTPException(404, "成员不存在")
+    if body.canEdit is not None:
+        mem["canEdit"] = bool(body.canEdit)
+        if not mem["canEdit"]:
+            storage.revoke_sync_key(ctx["store"], vid, actor=user)
+    data = _load_vaults(ctx["store"])
+    for x in data["items"]:
+        if x.get("id") == vid:
+            x["members"] = rec["members"]
+    _save_vaults(ctx["store"], data)
+    _add_member_projection(user, ctx["store"], rec)
+    return {"ok": True, "u": user, "canEdit": bool(mem.get("canEdit"))}
+
+
+@router.delete("/api/notes/vaults/{vid}/members/{user}")
+def remove_team_member(vid: str, user: str, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    ctx = _team_ctx(username, vid)
+    if not ctx["is_owner"]:
+        raise HTTPException(403, "仅创建人可移出成员")
+    rec = ctx["rec"]
+    rec["members"] = [m for m in (rec.get("members") or []) if m.get("u") != user]
+    data = _load_vaults(ctx["store"])
+    for x in data["items"]:
+        if x.get("id") == vid:
+            x["members"] = rec["members"]
+    _save_vaults(ctx["store"], data)
+    _drop_member_projection(user, vid)
+    storage.revoke_sync_key(ctx["store"], vid, actor=user)
+    return {"ok": True}
 
 
 @router.put("/api/notes/vaults/{vid}")
@@ -1677,6 +2074,8 @@ def update_vault(vid: str, body: VaultIn, authorization: Optional[str] = Header(
     hit = next((x for x in data["items"] if x["id"] == vid), None)
     if not hit:
         raise HTTPException(404, "笔记仓库不存在")
+    if hit.get("projection"):
+        raise HTTPException(403, "不能重命名他人的团队仓库")
     if hit.get("kind") == "system":
         raise HTTPException(403, "系统内置仓库不可重命名")
     name = (body.name or "").strip()
@@ -1697,6 +2096,17 @@ def delete_vault(vid: str, authorization: Optional[str] = Header(None)):
     hit = next((x for x in data["items"] if x["id"] == vid), None)
     if not hit:
         raise HTTPException(404, "笔记仓库不存在")
+    if hit.get("projection"):
+        raise HTTPException(403, "不能删除他人的团队仓库")
+    if hit.get("kind") == "team":
+        for m in list(hit.get("members") or []):
+            u = m.get("u")
+            if u:
+                _drop_member_projection(u, vid)
+                storage.revoke_sync_key(username, vid, actor=u)
+        teams.index_del_vault(username, vid)
+        teams.index_del_raw(hit.get("invite") or "")
+        storage.revoke_sync_key(username, vid)
     fv = dict(data.get("folderVault") or {})
     drop_folders = set()
     for k, v in list(fv.items()):
@@ -2386,10 +2796,12 @@ def share_get(token: str, authorization: Optional[str] = Header(None)):
     items = [{"id": n["id"], "title": n.get("title") or "未命名笔记",
               "folder": n.get("folder") or "", "updated": int(n.get("updated") or 0)}
              for n in notes]
+    folders = _share_scope_folders(username, rec)
     return {"ok": True, "kind": rec.get("kind"), "name": rec.get("name") or "",
             "canEdit": bool(rec.get("canEdit")), "canView": True,
             "requireLogin": bool(rec.get("requireLogin")),
-            "expireAt": int(rec.get("expireAt") or 0), "notes": items}
+            "expireAt": int(rec.get("expireAt") or 0), "notes": items,
+            "folders": folders, "folder": rec.get("folder") or ""}
 
 
 @router.get("/api/share/{token}/notes/{nid}")
@@ -2555,11 +2967,10 @@ def get_note(nid: str, authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
     if not storage.note_key(username, nid):
         raise HTTPException(400, "非法笔记 ID")
-    idx = storage.notes_index(username)
-    hit = next((i for i in idx if i["id"] == nid), None)
+    store, hit, _idx = _find_note(username, nid)
     if not hit:
         raise HTTPException(404, "笔记不存在")
-    return {"id": nid, "content": storage.note_read(username, nid),
+    return {"id": nid, "content": storage.note_read(store, nid),
             "title": hit.get("title") or "", "folder": hit.get("folder") or "",
             "updated": int(hit.get("updated") or 0),
             "readonly": bool(hit.get("readonly")),
@@ -2581,17 +2992,17 @@ def save_note(nid: str, body: NoteContentIn,
     username = require_user(authorization)
     if not storage.note_key(username, nid):
         raise HTTPException(400, "非法笔记 ID")
-    idx = storage.notes_index(username)
-    if not any(i["id"] == nid for i in idx):
+    store, hit, idx = _find_note(username, nid)
+    if not hit:
         raise HTTPException(404, "笔记不存在")
+    _require_vault_edit(username, _infer_note_vault(hit))
     if body.content is not None:
-        storage.note_write(username, nid, body.content)
+        storage.note_write(store, nid, body.content)
     for item in idx:
         if item["id"] == nid:
             item["updated"] = int(time.time())
             if body.title is not None:
                 item["title"] = body.title
-                # 改成常驻标题（或常驻笔记被保存）时强制归位，避免重复副本
                 if body.title in PINNED_TITLES:
                     item["pinned"] = True
                     item["folder"] = ""
@@ -2603,13 +3014,12 @@ def save_note(nid: str, body: NoteContentIn,
             if body.vault is not None and not item.get("pinned"):
                 if body.vault == VAULT_SYSTEM:
                     raise HTTPException(400, "不能把普通笔记移入系统内置仓库")
-                if not _vault_by_id(username, body.vault):
-                    raise HTTPException(404, "笔记仓库不存在")
-                item["vault"] = body.vault
+                ctx = _require_vault_edit(username, body.vault)
+                item["vault"] = ctx["vid"]
             if body.readonly is not None:
                 item["readonly"] = bool(body.readonly)
     idx.sort(key=lambda x: x["updated"], reverse=True)
-    storage.save_notes_index(username, idx)
+    storage.save_notes_index(store, idx)
     return {"ok": True}
 
 
@@ -2620,18 +3030,18 @@ def delete_note(nid: str, authorization: Optional[str] = Header(None)):
     username = require_user(authorization)
     if not storage.note_key(username, nid):
         raise HTTPException(400, "非法笔记 ID")
-    idx = storage.notes_index(username)
-    hit = next((i for i in idx if i["id"] == nid), None)
+    store, hit, idx = _find_note(username, nid)
     if not hit:
         raise HTTPException(404, "笔记不存在")
+    _require_vault_edit(username, _infer_note_vault(hit))
     if hit.get("pinned"):
-        storage.note_delete(username, nid)
+        storage.note_delete(store, nid)
         idx[:] = [i for i in idx if i["id"] != nid]
-        storage.save_notes_index(username, idx)
+        storage.save_notes_index(store, idx)
         return {"ok": True, "softDeleted": False}
     hit["deleted"] = int(time.time())
-    hit["deleted_title"] = hit.get("title") or ""   # 保留原始标题，便于回收站识别
-    storage.save_notes_index(username, idx)
+    hit["deleted_title"] = hit.get("title") or ""
+    storage.save_notes_index(store, idx)
     return {"ok": True, "softDeleted": True}
 
 
@@ -2649,7 +3059,7 @@ def require_sync_user(x_api_key: Optional[str]) -> str:
 
 
 def require_sync_ctx(x_api_key: Optional[str]) -> dict:
-    """校验 X-API-Key，返回 {u, vault}。"""
+    """校验 X-API-Key，返回 {u, vault, actor}。"""
     if not x_api_key:
         raise HTTPException(401, "缺少 X-API-Key 请求头")
     ctx = storage.verify_sync_context(x_api_key)
@@ -2657,7 +3067,56 @@ def require_sync_ctx(x_api_key: Optional[str]) -> dict:
         raise HTTPException(401, "API Key 无效或已吊销")
     if ctx.get("vault") == VAULT_SYSTEM:
         raise HTTPException(403, "系统内置仓库不可同步")
+    ctx.setdefault("actor", ctx["u"])
     return ctx
+
+
+def _sync_require_member_edit(ctx: dict):
+    actor = ctx.get("actor") or ctx["u"]
+    owner = ctx["u"]
+    if actor == owner:
+        return
+    rec = _vault_by_id(owner, ctx.get("vault") or "")
+    if not rec or rec.get("kind") != "team":
+        raise HTTPException(403, "无权同步此仓库")
+    mem = next((m for m in (rec.get("members") or []) if m.get("u") == actor), None)
+    if not mem or not mem.get("canEdit"):
+        raise HTTPException(403, "没有该团队仓库的编辑/同步权限")
+
+
+def _guard_sync_put(ctx: dict, client_mtime: int, approval_id: Optional[str]):
+    _sync_require_member_edit(ctx)
+    actor = ctx.get("actor") or ctx["u"]
+    owner = ctx["u"]
+    vid = ctx.get("vault") or ""
+    if actor == owner:
+        return
+    rec = _vault_by_id(owner, vid)
+    if not rec or rec.get("kind") != "team":
+        return
+    now_ms = int(time.time() * 1000)
+    if int(client_mtime or 0) > now_ms + 3600_000:
+        if not (approval_id and teams.approval_ticket_ok(
+                approval_id, actor, owner, vid, "overwrite")):
+            raise HTTPException(403, "覆盖服务端需创建人审批")
+
+
+def _guard_sync_delete(ctx: dict, path: str, approval_id: Optional[str]):
+    _sync_require_member_edit(ctx)
+    actor = ctx.get("actor") or ctx["u"]
+    owner = ctx["u"]
+    vid = ctx.get("vault") or ""
+    if actor == owner:
+        return
+    rec = _vault_by_id(owner, vid)
+    if not rec or rec.get("kind") != "team":
+        return
+    if approval_id and (teams.approval_ticket_ok(approval_id, actor, owner, vid, "bulk-delete", path)
+                        or teams.approval_ticket_ok(approval_id, actor, owner, vid, "overwrite")):
+        return
+    n = teams.note_member_delete(actor, vid)
+    if n > teams.DELETE_VALVE:
+        raise HTTPException(403, "单次删除服务端超过 10 篇需创建人审批")
 
 
 # ---------- path <-> note 映射（移植 localsync.js 规则，保证两端一致） ----------
@@ -2754,12 +3213,26 @@ def sync_apikey_create(body: Optional[SyncKeyIn] = Body(default=None),
     """生成 / 重置指定仓库的同步 API Key；明文仅此一次返回。系统内置仓库禁止。"""
     username = require_user(authorization)
     vid = (body.vault if body else VAULT_DEFAULT) or VAULT_DEFAULT
+    tctx = _team_ctx(username, vid)
+    if tctx["rec"].get("kind") == "system" or vid == VAULT_SYSTEM:
+        raise HTTPException(400, "系统内置仓库不可创建同步令牌")
+    if tctx["is_owner"]:
+        store, actor = username, username
+    else:
+        if not tctx["can_edit"]:
+            raise HTTPException(403, "只读成员不能同步此团队仓库")
+        owner_prefs = storage.get_prefs(tctx["store"]) or {}
+        if not owner_prefs.get("obsidianSync"):
+            raise HTTPException(403, "创建人尚未开启 Obsidian 同步")
+        if not storage.owner_has_sync_key(tctx["store"], vid):
+            raise HTTPException(403, "创建人尚未为此仓库启用同步")
+        store, actor = tctx["store"], username
     try:
-        raw = storage.gen_sync_key(username, vid)
+        raw = storage.gen_sync_key(store, vid, actor=actor)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    storage.append_sync_log(username, {"vault": vid, "source": "web",
-                                       "msg": "生成 / 重置同步令牌"})
+    storage.append_sync_log(store, {"vault": vid, "source": "web",
+                                    "msg": "生成 / 重置同步令牌" + (("（成员 " + actor + "）") if actor != store else "")})
     return {"ok": True, "apiKey": raw, "vault": vid}
 
 
@@ -2793,7 +3266,7 @@ def sync_hello(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     vmeta = _vault_by_id(username, vault_id) or {}
     return {"ok": True, "name": "万事屋", "version": app_version.VERSION,
             "stage": app_version.STAGE, "vault": vault_id,
-            "vaultName": vmeta.get("name") or "", "pluginMin": "0.0.4"}
+            "vaultName": vmeta.get("name") or "", "pluginMin": "0.0.5"}
 
 
 @router.get("/api/sync/log")
@@ -2824,6 +3297,83 @@ def sync_log_post(body: SyncLogIn,
         "level": body.level or "info", "msg": body.msg,
     })
     return {"ok": True}
+
+
+@router.get("/api/inbox")
+def inbox_list(authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    items = teams.inbox_list(username)
+    return {"items": items, "unread": sum(1 for x in items if not x.get("read"))}
+
+
+class InboxPatchIn(BaseModel):
+    read: Optional[bool] = None
+    action: Optional[str] = None
+
+
+@router.put("/api/inbox/{iid}")
+def inbox_patch(iid: str, body: InboxPatchIn, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    rec = teams.inbox_get(username, iid)
+    if not rec:
+        raise HTTPException(404, "通知不存在")
+    if body.read is not None:
+        rec = teams.inbox_patch(username, iid, read=bool(body.read))
+    if body.action in ("approve", "deny") and rec.get("type") == "sync-approval":
+        try:
+            teams.approval_decide(username, rec.get("ref") or "", body.action == "approve")
+        except PermissionError:
+            raise HTTPException(403, "无权审批")
+        rec = teams.inbox_patch(username, iid, read=True,
+                                action=body.action)
+    return {"ok": True, "item": rec}
+
+
+class SyncApprovalIn(BaseModel):
+    kind: str = ""
+    vault: str = ""
+    paths: list = []
+
+
+@router.post("/api/sync/approvals")
+def sync_approval_create(body: SyncApprovalIn,
+                         x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    ctx = require_sync_ctx(x_api_key)
+    _sync_require_member_edit(ctx)
+    actor = ctx.get("actor") or ctx["u"]
+    owner = ctx["u"]
+    vid = body.vault or ctx["vault"]
+    if actor == owner:
+        raise HTTPException(400, "创建人无需提交审批")
+    rec = _vault_by_id(owner, vid)
+    if not rec or rec.get("kind") != "team":
+        raise HTTPException(400, "仅团队仓库的高危同步需要审批")
+    kind = (body.kind or "").strip()
+    if kind not in ("bulk-delete", "overwrite"):
+        raise HTTPException(400, "审批类型无效")
+    rec = teams.approval_create(owner, actor, vid, kind, body.paths or [])
+    return {"ok": True, "pending": True, "id": rec["id"], "status": "pending"}
+
+
+@router.get("/api/sync/approvals/{aid}")
+def sync_approval_get(aid: str,
+                      x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+                      authorization: Optional[str] = Header(None)):
+    rec = teams.approval_get(aid)
+    if not rec:
+        raise HTTPException(404, "审批不存在")
+    if x_api_key:
+        ctx = require_sync_ctx(x_api_key)
+        actor = ctx.get("actor") or ctx["u"]
+        if actor not in (rec.get("actor"), rec.get("owner")):
+            raise HTTPException(403, "无权查看")
+    else:
+        username = require_user(authorization)
+        if username not in (rec.get("actor"), rec.get("owner")):
+            raise HTTPException(403, "无权查看")
+    return {"ok": True, "id": rec["id"], "status": rec.get("status"),
+            "kind": rec.get("kind"), "ticket": rec.get("ticket") or "",
+            "ticketExpires": int(rec.get("ticketExpires") or 0)}
 
 
 # ---------- 同步数据端点（X-API-Key 鉴权） ----------
@@ -2889,7 +3439,8 @@ def _sync_apply_note(username, nid, folder, title, body_md, site_mtime, norm):
 
 @router.post("/api/sync/file")
 def sync_put_file(body: SyncFileIn,
-                  x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+                  x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+                  x_sync_approval: Optional[str] = Header(None, alias="X-Sync-Approval")):
     """写入 / 更新一篇笔记。命中现有 path 则按 LWW 决定是否覆盖；未命中则新建。
     LWW（2 秒内站点优先）：仅当客户端文件明显更新（clientMtime > 站点 mtime + 2000）
     才覆盖站点；否则站点胜，拒绝覆盖（applied=False）并返回站点 mtime，客户端应改拉取。
@@ -2897,6 +3448,8 @@ def sync_put_file(body: SyncFileIn,
     并无独立变更（常见于 Obsidian 连续按键保存），连续本地推送直接落地，避免回拉旧正文。"""
     ctx = require_sync_ctx(x_api_key)
     username, vault_id = ctx["u"], ctx["vault"]
+    client_mtime = int(body.clientMtime or 0)
+    _guard_sync_put(ctx, client_mtime, x_sync_approval)
     norm = _validate_sync_path(body.path)
     folder, fname = _split_sync_path(norm)
     # 正文优先取 contentB64（base64 传输规避中间网关对 <script>/<svg> 等特征的篡改），
@@ -2947,6 +3500,7 @@ def sync_rename_file(body: SyncRenameIn,
                      x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     """重命名 / 移动一篇笔记：按 newPath 更新其 folder 与 title（正文不变）。"""
     ctx = require_sync_ctx(x_api_key)
+    _sync_require_member_edit(ctx)
     username, vault_id = ctx["u"], ctx["vault"]
     old = _validate_sync_path(body.oldPath)
     new = _validate_sync_path(body.newPath)
@@ -2971,11 +3525,13 @@ def sync_rename_file(body: SyncRenameIn,
 
 @router.delete("/api/sync/file")
 def sync_delete_file(path: str,
-                     x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+                     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+                     x_sync_approval: Optional[str] = Header(None, alias="X-Sync-Approval")):
     """删除一篇笔记：软删进回收站（与 Web 端删除一致，可在门户恢复），不物理删正文。"""
     ctx = require_sync_ctx(x_api_key)
     username, vault_id = ctx["u"], ctx["vault"]
     norm = _validate_sync_path(path)
+    _guard_sync_delete(ctx, norm, x_sync_approval)
     meta = _resolve_sync_path(username, norm, vault_id)
     if not meta:
         raise HTTPException(404, "文件不存在")

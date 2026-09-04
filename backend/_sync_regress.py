@@ -426,6 +426,8 @@ def run_suite(engine):
           r.text[:80])
     r = client.get(f"/api/share/{token}")
     check(f"[{engine}] 公开读取分享", r.status_code == 200 and r.json().get("canEdit") is True, r.text[:80])
+    check(f"[{engine}] 单篇分享不造文件夹树",
+          r.json().get("folders") in ([], None), str(r.json().get("folders")))
     r = client.get(f"/api/share/{token}/notes/{nid}")
     check(f"[{engine}] 公开读笔记", r.status_code == 200 and r.json().get("content") == "hello share",
           r.text[:80])
@@ -436,10 +438,22 @@ def run_suite(engine):
           r.text[:80])
     r = client.post("/api/notes/folders", headers=HA(tok), json={"name": "sharefold"})
     check(f"[{engine}] 建文件夹", r.status_code == 200, r.text[:80])
+    r = client.post("/api/notes/folders", headers=HA(tok), json={"name": "sharefold/sub"})
+    check(f"[{engine}] 建子文件夹", r.status_code == 200, r.text[:80])
+    r = client.post("/api/notes/folders", headers=HA(tok), json={"name": "sharefold/empty"})
+    check(f"[{engine}] 建空子文件夹", r.status_code == 200, r.text[:80])
+    r = client.post("/api/notes", headers=HA(tok), json={"title": "子笔记", "folder": "sharefold/sub"})
+    check(f"[{engine}] 子文件夹内建笔记", r.status_code == 200, r.text[:80])
     r = client.post("/api/notes/shares", headers=HA(tok),
                     json={"kind": "folder", "folder": "sharefold", "expireDays": 1})
-    check(f"[{engine}] 分享文件夹", r.status_code == 200 and (r.json() or {}).get("token", "").startswith("s_"),
-          r.text[:80])
+    ftoken = (r.json() or {}).get("token") or ""
+    check(f"[{engine}] 分享文件夹", r.status_code == 200 and ftoken.startswith("s_"),
+          ftoken[:12])
+    r = client.get(f"/api/share/{ftoken}")
+    sfolders = r.json().get("folders") or []
+    check(f"[{engine}] 分享回 folders 含子目录",
+          "sharefold" in sfolders and "sharefold/sub" in sfolders and "sharefold/empty" in sfolders,
+          str(sfolders))
     r = client.get("/api/notes", headers=HA(tok))
     note_shares = [x for x in ((r.json() or {}).get("shares") or []) if x.get("noteId") == nid]
     check(f"[{engine}] 列表含 shares", isinstance((r.json() or {}).get("shares"), list)
@@ -483,6 +497,132 @@ def run_suite(engine):
     check(f"[{engine}] 取消后同笔记全部分享已吊销", left == [], str(left)[:80])
     r = client.get(f"/api/share/{token}")
     check(f"[{engine}] 旧链接已失效", r.status_code == 404, str(r.status_code))
+
+    # ---------- 13. 团队仓库 + 成员同步审批 ----------
+    print("-- 13. 团队仓库 / 审批 --")
+    USER2 = "teammate"
+    cfg = storage.get_config()
+    cfg["users"][USER2] = {"password": sessions.hash_password("pw123456"),
+                           "nickname": USER2, "role": "user",
+                           "createdAt": "", "email": ""}
+    storage.save_config(cfg)
+    storage.ensure_user_dir(USER2)
+    storage.delete_user_file(USER2, "notes/index.json")
+    storage.save_user_json(USER2, "notes/folders.json", [])
+    tok2 = sessions.create_session(USER2)
+    client.get("/api/notes", headers=HA(tok2))
+    r = client.post("/api/notes/vaults/default/team", headers=HA(tok))
+    check(f"[{engine}] 默认仓不可转团队", r.status_code == 400, str(r.status_code))
+    r = client.post("/api/notes/vaults/system/team", headers=HA(tok))
+    check(f"[{engine}] 系统仓不可转团队", r.status_code == 400, str(r.status_code))
+    r = client.post("/api/notes/vaults", headers=HA(tok), json={"name": "项目组"})
+    tvid = (r.json() or {}).get("id")
+    check(f"[{engine}] 再建自建仓", r.status_code == 200 and bool(tvid), r.text[:80])
+    r = client.post(f"/api/notes/vaults/{tvid}/team", headers=HA(tok))
+    invite = (r.json() or {}).get("token") or ""
+    check(f"[{engine}] user 仓转团队", r.status_code == 200 and invite.startswith("t_"), invite[:12])
+    r = client.post("/api/notes/vaults/join", headers=HA(tok2), json={"token": invite})
+    check(f"[{engine}] 成员加入", r.status_code == 200 and r.json().get("id") == tvid, r.text[:80])
+    r = client.post("/api/notes/vaults/join", headers=HA(tok2), json={"token": invite})
+    check(f"[{engine}] 重复加入幂等", r.status_code == 200, r.text[:80])
+    r = client.get("/api/notes", headers=HA(tok2))
+    mvs = r.json().get("vaults") or []
+    mv = next((v for v in mvs if v.get("id") == tvid), None)
+    check(f"[{engine}] 成员仓库切换器可见团队仓",
+          bool(mv) and mv.get("kind") == "team" and mv.get("canEdit") is False, str(mv))
+    check(f"[{engine}] 成员投影不含邀请码", "invite" not in (mv or {}), str(mv))
+    r = client.get(f"/api/notes/vaults/{tvid}/team", headers=HA(tok2))
+    check(f"[{engine}] 成员看不到邀请 token",
+          r.status_code == 200 and "token" not in r.json(), str(list((r.json() or {}).keys())))
+    r = client.post("/api/notes", headers=HA(tok2), json={"title": "只读不可写", "vault": tvid})
+    check(f"[{engine}] 只读成员新建 403", r.status_code == 403, str(r.status_code))
+    r = client.post("/api/notes", headers=HA(tok), json={"title": "团队笔记", "vault": tvid})
+    tnid = (r.json() or {}).get("id")
+    check(f"[{engine}] 创建人在团队仓建笔记", r.status_code == 200 and bool(tnid), r.text[:80])
+    r = client.put(f"/api/notes/{tnid}", headers=HA(tok2), json={"content": "hack"})
+    check(f"[{engine}] 只读成员改笔记 403", r.status_code == 403, str(r.status_code))
+    r = client.put(f"/api/notes/vaults/{tvid}/members/{USER2}", headers=HA(tok),
+                   json={"canEdit": True})
+    check(f"[{engine}] 开启成员编辑权", r.status_code == 200 and r.json().get("canEdit") is True,
+          r.text[:80])
+    r = client.put(f"/api/notes/{tnid}", headers=HA(tok2), json={"content": "member edit"})
+    check(f"[{engine}] 可编辑成员改笔记", r.status_code == 200, r.text[:80])
+    r = client.get(f"/api/notes/{tnid}", headers=HA(tok))
+    check(f"[{engine}] 成员写入落创建人存储",
+          r.status_code == 200 and r.json().get("content") == "member edit", r.text[:80])
+    r = client.post("/api/sync/apikey", headers=HA(tok2), json={"vault": tvid})
+    check(f"[{engine}] 创建人未开同步时成员不能发钥", r.status_code == 403, str(r.status_code))
+    prefs = storage.get_prefs(USER) or {}
+    prefs["obsidianSync"] = True
+    storage.save_prefs(USER, prefs)
+    r = client.post("/api/sync/apikey", headers=HA(tok), json={"vault": tvid})
+    okey = (r.json() or {}).get("apiKey") or ""
+    check(f"[{engine}] 创建人团队仓令牌", r.status_code == 200 and okey.startswith("ohs_"), okey[:12])
+    r = client.post("/api/sync/apikey", headers=HA(tok2), json={"vault": tvid})
+    mkey = (r.json() or {}).get("apiKey") or ""
+    check(f"[{engine}] 可编辑成员发自己的钥", r.status_code == 200 and mkey.startswith("ohs_"), mkey[:12])
+    r = client.get("/api/sync/hello", headers=HK(mkey))
+    check(f"[{engine}] 成员钥 hello 指向创建人仓",
+          r.status_code == 200 and r.json().get("vault") == tvid
+          and r.json().get("pluginMin") == "0.0.5", r.text[:80])
+    for i in range(12):
+        client.post("/api/notes", headers=HA(tok), json={"title": "td%d" % i, "vault": tvid})
+    for i in range(10):
+        rd = client.delete("/api/sync/file", headers=HK(mkey), params={"path": "td%d.md" % i})
+        check(f"[{engine}] 成员删第 {i+1} 篇", rd.status_code == 200, rd.text[:80])
+    r = client.delete("/api/sync/file", headers=HK(mkey), params={"path": "td10.md"})
+    check(f"[{engine}] 成员第 11 篇无票 403", r.status_code == 403, str(r.status_code) + r.text[:60])
+    r = client.post("/api/sync/approvals", headers=HK(mkey),
+                    json={"kind": "bulk-delete", "paths": ["td10.md", "td11.md"]})
+    aid = (r.json() or {}).get("id") or ""
+    check(f"[{engine}] 成员提交 bulk-delete 审批", r.status_code == 200 and bool(aid), r.text[:80])
+    r = client.get("/api/inbox", headers=HA(tok))
+    items = r.json().get("items") or []
+    hit_in = next((x for x in items if x.get("ref") == aid), None)
+    check(f"[{engine}] 创建人收件箱有待审批", bool(hit_in), str(items[:2])[:80])
+    r = client.put("/api/inbox/" + hit_in["id"], headers=HA(tok),
+                   json={"action": "approve", "read": True})
+    check(f"[{engine}] 创建人批准", r.status_code == 200, r.text[:80])
+    r = client.get("/api/sync/approvals/" + aid, headers=HK(mkey))
+    check(f"[{engine}] 成员轮询获批", r.status_code == 200 and r.json().get("status") == "approved",
+          r.text[:80])
+    r = client.delete("/api/sync/file", headers={**HK(mkey), "X-Sync-Approval": aid},
+                      params={"path": "td10.md"})
+    check(f"[{engine}] 有票可删第 11 篇", r.status_code == 200, r.text[:80])
+    r = client.delete("/api/sync/file", headers=HK(okey), params={"path": "td11.md"})
+    check(f"[{engine}] 创建人删除不需票", r.status_code == 200, r.text[:80])
+    far = int(time.time() * 1000) + 86400000
+    r = client.post("/api/sync/file", headers=HK(mkey),
+                    json={"path": "团队笔记.md", "content": "# 团队笔记\n\noverwrite",
+                          "clientMtime": far})
+    check(f"[{engine}] 成员超窗口覆盖无票 403", r.status_code == 403, str(r.status_code))
+    r = client.post("/api/sync/approvals", headers=HK(mkey), json={"kind": "overwrite"})
+    oid = (r.json() or {}).get("id") or ""
+    check(f"[{engine}] 提交 overwrite 审批", r.status_code == 200 and bool(oid), r.text[:80])
+    r = client.get("/api/inbox", headers=HA(tok))
+    oin = next((x for x in (r.json().get("items") or []) if x.get("ref") == oid), None)
+    client.put("/api/inbox/" + oin["id"], headers=HA(tok), json={"action": "approve", "read": True})
+    r = client.post("/api/sync/file", headers={**HK(mkey), "X-Sync-Approval": oid},
+                    json={"path": "团队笔记.md", "content": "# 团队笔记\n\noverwrite",
+                          "clientMtime": far})
+    check(f"[{engine}] 有覆盖票可强制写", r.status_code == 200 and r.json().get("applied") is True,
+          r.text[:80])
+    r = client.post("/api/sync/approvals", headers=HK(okey), json={"kind": "overwrite"})
+    check(f"[{engine}] 创建人无需提交审批", r.status_code == 400, str(r.status_code))
+    r = client.delete(f"/api/notes/vaults/{tvid}", headers=HA(tok2))
+    check(f"[{engine}] 成员不能删团队仓", r.status_code == 403, str(r.status_code))
+    r = client.post("/api/notes/vaults", headers=HA(tok), json={"name": "可删仓"})
+    dvid = (r.json() or {}).get("id")
+    r = client.delete(f"/api/notes/vaults/{dvid}", headers=HA(tok))
+    check(f"[{engine}] user 仓删除仍 200", r.status_code == 200, str(r.status_code))
+    r = client.delete(f"/api/notes/vaults/{tvid}/team", headers=HA(tok))
+    check(f"[{engine}] 创建人转回普通仓", r.status_code == 200, r.text[:80])
+    r = client.get("/api/notes", headers=HA(tok2))
+    left_ids = {v.get("id") for v in (r.json().get("vaults") or [])}
+    check(f"[{engine}] 转回后成员投影消失", tvid not in left_ids, str(sorted(left_ids)))
+    r = client.get("/api/sync/list", headers=HK(mkey))
+    check(f"[{engine}] 转回后成员钥吊销", r.status_code == 401, str(r.status_code))
+
     st = sessions.create_session("t")
     sessions._sessions.clear()
     sessions.load_sessions()

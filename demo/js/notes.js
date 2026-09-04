@@ -63,6 +63,23 @@ const Notes = (() => {
   }
   function vaultMeta(id){ return vaults.find(v => v.id === id) || { id: id, name: id, kind: 'user' }; }
   function vaultLabel(id){ return vaultMeta(id).name || id; }
+  function vaultKindTag(v){
+    if (v.kind === 'system') return '（内置）';
+    if (v.kind === 'default') return '（默认）';
+    if (v.kind === 'team') return v.isOwner ? '（团队 · 我创建）' : (v.canEdit ? '（团队）' : '（团队 · 只读）');
+    return '';
+  }
+  function canDeleteVault(v){
+    if (!v) return false;
+    if (v.kind === 'user') return true;
+    if (v.kind === 'team' && v.isOwner) return true;
+    return false;
+  }
+  function vaultCanEdit(id){
+    const v = vaultMeta(id || currentVault);
+    if (v.kind === 'team' && v.canEdit === false && !v.isOwner) return false;
+    return true;
+  }
   const fmtSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
     : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
 
@@ -478,8 +495,17 @@ const Notes = (() => {
     document.querySelectorAll('.kb-menu').forEach(m => m.remove());
     const menu = document.createElement('div');
     menu.className = 'kb-menu';
-    items.forEach(([label, icon, fn]) => {
+    items.forEach(it => {
+      if (!it) return;
+      if (it === 'sep' || (it && it[0] === 'sep')){
+        const s = document.createElement('div');
+        s.className = 'sep';
+        menu.appendChild(s);
+        return;
+      }
+      const [label, icon, fn, kind] = it;
       const b = document.createElement('button');
+      if (kind === 'danger') b.className = 'danger';
       b.innerHTML = `<svg class="ic"><use href="#${icon}"/></svg>${label}`;
       b.addEventListener('click', () => { menu.remove(); fn(); });
       menu.appendChild(b);
@@ -585,10 +611,10 @@ const Notes = (() => {
     const pinned = n.pinned;
     const lock = n.readonly ? '<svg class="ic ni-icon" style="color:var(--om-text-3);width:11px;height:11px"><use href="#i-lock"/></svg>' : '';
     return `
-      <button class="note-item${n.id === currentId ? ' active' : ''}${selNotes.has(n.id) ? ' kb-selected' : ''}" data-note-id="${n.id}"${pinned ? '' : ' draggable="true"'}>
+      <button class="note-item${n.id === currentId ? ' active' : ''}${selNotes.has(n.id) ? ' kb-selected' : ''}" data-note-id="${n.id}"${pinned || !vaultCanEdit() ? '' : ' draggable="true"'}>
         ${treeIcon(pinned ? 'star' : 'note', !!shareOfNote(n.id), '此笔记已分享')}${lock}
         <span class="ni-title">${App.esc(n.title || '未命名笔记')}</span>
-        <span class="ni-act" data-note-act="${n.id}" title="笔记操作"><svg class="ic"><use href="#i-more"/></svg></span>
+        ${vaultCanEdit() ? `<span class="ni-act" data-note-act="${n.id}" title="笔记操作"><svg class="ic"><use href="#i-more"/></svg></span>` : ''}
       </button>`;
   }
 
@@ -615,14 +641,15 @@ const Notes = (() => {
       + (notes.length ? notes.map(n => noteItemHtml(n)).join('') : '');
     return `
       <div class="kb-folder${open ? ' open' : ''}${currentFolder === f ? ' current' : ''}${!depth ? ' kb-folder-root' : ''}">
-        <div class="kb-folder-row${selFolders.has(f) ? ' kb-selected' : ''}" data-folder-toggle="${App.esc(f)}"${locked ? '' : ' draggable="true"'}>
+        <div class="kb-folder-row${selFolders.has(f) ? ' kb-selected' : ''}" data-folder-toggle="${App.esc(f)}"${locked || !vaultCanEdit() ? '' : ' draggable="true"'}>
           <svg class="ic kb-chev"><use href="#i-chev-d"/></svg>
           ${treeIcon('folder', !!shareOfFolder(f), '此文件夹已分享')}
           <span class="kb-folder-name" title="${App.esc(f)}">${App.esc(folderLabel(f))}</span>
           <span class="kb-count num">${noteCountIn(f)}</span>
           ${locked ? '<span class="chip no-dot" style="font-size:10px;padding:2px 6px" title="系统内置文件夹，不可删除">内置</span>'
+            : (!vaultCanEdit() ? ''
             : `<button class="icon-btn-xs kb-folder-add" data-kb-add="${App.esc(f)}" title="在此文件夹内新建笔记或子文件夹"><svg class="ic"><use href="#i-plus"/></svg></button>
-               <button class="icon-btn-xs kb-folder-more" data-folder-act="${App.esc(f)}" title="文件夹操作：重命名 / 复制 / 导出 / 删除"><svg class="ic"><use href="#i-more"/></svg></button>`}
+               <button class="icon-btn-xs kb-folder-more" data-folder-act="${App.esc(f)}" title="文件夹操作：重命名 / 复制 / 导出 / 删除"><svg class="ic"><use href="#i-more"/></svg></button>`)}
         </div>
         <div class="kb-folder-body" ${open ? '' : 'hidden'}>
           ${inner || '<div class="kb-empty">暂无笔记，可新建或拖拽进来</div>'}
@@ -642,7 +669,7 @@ const Notes = (() => {
     html += `
       <div class="kb-sec-title" data-drop-root title="拖拽笔记到此处取消分组">
         <svg class="ic"><use href="#i-inbox"/></svg>${App.esc(vaultLabel(currentVault))}
-        ${isSys ? '' : '<button class="icon-btn-xs kb-root-add" data-kb-add="" title="新建笔记或文件夹"><svg class="ic"><use href="#i-plus"/></svg></button>'}
+        ${isSys || !vaultCanEdit() ? '' : '<button class="icon-btn-xs kb-root-add" data-kb-add="" title="新建笔记或文件夹"><svg class="ic"><use href="#i-plus"/></svg></button>'}
       </div>`;
 
     if (isSys){
@@ -699,8 +726,17 @@ const Notes = (() => {
     if (!btn) return;
     const v = vaultMeta(currentVault);
     const nameEl = $('#kbVaultName');
-    if (nameEl) nameEl.textContent = v.name || '笔记仓库';
+    if (nameEl){
+      const ro = v.kind === 'team' && !v.isOwner && v.canEdit === false;
+      nameEl.textContent = (v.name || '笔记仓库') + (ro ? ' · 只读' : '');
+    }
     btn.dataset.kind = v.kind || 'user';
+    if (v.kind === 'team' && !v.isOwner && v.canEdit === false)
+      btn.title = '团队仓库（只读）';
+    else if (v.kind === 'team')
+      btn.title = '团队笔记仓库';
+    else
+      btn.title = '切换笔记仓库';
   }
 
   async function selectVault(id){
@@ -740,7 +776,7 @@ const Notes = (() => {
 
   async function deleteCurrentVault(){
     const v = vaultMeta(currentVault);
-    if (v.kind !== 'user'){ showToast('该仓库不可删除', 'err'); return; }
+    if (!canDeleteVault(v)){ showToast('该仓库不可删除', 'err'); return; }
     if (!await App.confirmModal({
       title: '删除笔记仓库？', danger: true, okText: '永久删除',
       sub: `「${v.name}」及其全部笔记、文件夹将永久删除，不可恢复。默认仓库与系统内置仓库不受影响。`,
@@ -1073,7 +1109,7 @@ const Notes = (() => {
       try { localStorage.setItem(VAULT_KEY, currentVault); } catch (_) {}
       renderVaultSwitch();
     }
-    setReadonly(!!(meta && meta.readonly));
+    setReadonly(!!(meta && meta.readonly) || !vaultCanEdit());
     try {
       const d = await API.get('/api/notes/' + id);
       $('#edSrc').value = d.content;
@@ -1116,6 +1152,7 @@ const Notes = (() => {
   }
 
   async function create(folder){
+    if (!vaultCanEdit()){ showToast('此仓库为只读', 'err'); return; }
     try {
       if (currentVault === VAULT_SYSTEM && folder === undefined){
         showToast('系统内置仓库不可新建普通笔记，请先切换到默认仓库', 'err');
@@ -1212,6 +1249,7 @@ const Notes = (() => {
 
   /* ---------- 文件夹（支持在文件夹内再建文件夹） ---------- */
   async function newFolder(parent = ''){
+    if (!vaultCanEdit()){ showToast('此仓库为只读', 'err'); return; }
     const name = await App.promptModal({
       title: parent ? `在「${folderLabel(parent)}」内新建子文件夹` : '新建文件夹',
       sub: '可以把笔记拖入文件夹归类整理，文件夹支持多层嵌套',
@@ -1719,6 +1757,54 @@ const Notes = (() => {
     clearTimeout(shareSaveTimer);
     shareSaveTimer = setTimeout(saveShareNote, 900);
   }
+  function renderShareTree(notes, folders, root){
+    const rootP = (root || '').replace(/^\/+|\/+$/g, '');
+    const allFolders = (folders || []).slice().sort();
+    const noteHtml = n =>
+      `<button class="note-item" data-share-nid="${App.esc(n.id)}"><svg class="ic ni-icon"><use href="#i-note"/></svg><span class="ni-title">${App.esc(n.title)}</span></button>`;
+    const childFolders = prefix => allFolders.filter(f => {
+      if (prefix) return f.startsWith(prefix + '/') && !f.slice(prefix.length + 1).includes('/');
+      return f && !f.includes('/') && (!rootP || f === rootP);
+    });
+    const notesIn = prefix => notes.filter(n => (n.folder || '') === prefix);
+    const walk = prefix => {
+      const here = notesIn(prefix).map(noteHtml).join('');
+      const kids = (prefix === rootP ? childFolders(prefix) : childFolders(prefix))
+        .filter(f => f !== rootP);
+      const inner = kids.map(f => {
+        const open = true;
+        const body = walk(f);
+        const label = f.includes('/') ? f.slice(f.lastIndexOf('/') + 1) : f;
+        return `<div class="kb-folder open">
+          <div class="kb-folder-row" data-share-fold="${App.esc(f)}">
+            <svg class="ic kb-chev"><use href="#i-chev-d"/></svg>
+            <svg class="ic kb-folder-ic"><use href="#i-folder"/></svg>
+            <span class="kb-folder-name">${App.esc(label)}</span>
+          </div>
+          <div class="kb-folder-body">${body || '<div class="kb-empty">空</div>'}</div>
+        </div>`;
+      }).join('') + here;
+      return inner;
+    };
+    if (!rootP){
+      const topNotes = notes.filter(n => !(n.folder || '')).map(noteHtml).join('');
+      const topFolds = [...new Set(allFolders.map(f => f.split('/')[0]).filter(Boolean))];
+      const tree = topFolds.map(f => {
+        const body = walk(f);
+        return `<div class="kb-folder open">
+          <div class="kb-folder-row" data-share-fold="${App.esc(f)}">
+            <svg class="ic kb-chev"><use href="#i-chev-d"/></svg>
+            <svg class="ic kb-folder-ic"><use href="#i-folder"/></svg>
+            <span class="kb-folder-name">${App.esc(f)}</span>
+          </div>
+          <div class="kb-folder-body">${body || '<div class="kb-empty">空</div>'}</div>
+        </div>`;
+      }).join('') + topNotes;
+      return tree || '<div class="kb-empty">没有可查看的笔记</div>';
+    }
+    const tree = walk(rootP);
+    return tree || '<div class="kb-empty">没有可查看的笔记</div>';
+  }
   async function openShareOverlay(token){
     const mask = $('#kbShareViewMask');
     if (!mask) return;
@@ -1745,9 +1831,12 @@ const Notes = (() => {
         dlAll.href = '/api/share/' + encodeURIComponent(token) + '/export' + shareQ;
         dlAll.hidden = notes.length < 2;
       }
-      list.innerHTML = notes.map(n =>
-        `<button class="note-item" data-share-nid="${App.esc(n.id)}"><svg class="ic ni-icon"><use href="#i-note"/></svg><span class="ni-title">${App.esc(n.title)}</span></button>`
-      ).join('') || '<div class="kb-empty">没有可查看的笔记</div>';
+      if (d.kind === 'folder')
+        list.innerHTML = renderShareTree(notes, d.folders || [], d.folder || '');
+      else
+        list.innerHTML = notes.map(n =>
+          `<button class="note-item" data-share-nid="${App.esc(n.id)}"><svg class="ic ni-icon"><use href="#i-note"/></svg><span class="ni-title">${App.esc(n.title)}</span></button>`
+        ).join('') || '<div class="kb-empty">没有可查看的笔记</div>';
       const loadOne = async nid => {
         const n = await shareFetch('/api/share/' + encodeURIComponent(token) + '/notes/' + encodeURIComponent(nid));
         shareView.nid = nid;
@@ -1771,6 +1860,17 @@ const Notes = (() => {
           sub.textContent = '此分享允许编辑，但该笔记为只读或常驻，无法改写';
       };
       list.onclick = e => {
+        const fold = e.target.closest('[data-share-fold]');
+        if (fold && !e.target.closest('[data-share-nid]')){
+          const box = fold.parentElement;
+          const body = box && box.querySelector(':scope > .kb-folder-body');
+          if (box && body){
+            const open = !box.classList.contains('open');
+            box.classList.toggle('open', open);
+            body.hidden = !open;
+          }
+          return;
+        }
         const b = e.target.closest('[data-share-nid]');
         if (b) loadOne(b.dataset.shareNid);
       };
@@ -1801,11 +1901,130 @@ const Notes = (() => {
     if (!API.getToken()) App.lock();
   }
 
-  /* ---------- 事件 ---------- */
+  async function tryJoinFromUrl(){
+    try {
+      const t = new URLSearchParams(location.search).get('join');
+      if (!t || !API.getToken()) return;
+      const r = await API.post('/api/notes/vaults/join', { token: t });
+      try { history.replaceState({}, '', location.pathname + location.hash); } catch (_) {}
+      showToast(r.self ? '这是你创建的团队仓库' : ('已加入「' + (r.name || '团队仓库') + '」'));
+      await load();
+      if (r.id) await selectVault(r.id);
+    } catch (e) { showToast(e.message, 'err'); }
+  }
+  function teamInviteUrl(token){
+    return location.origin.replace(/\/$/, '') + '/?join=' + encodeURIComponent(token);
+  }
+  async function openTeamModal(){
+    const v = vaultMeta(currentVault);
+    if (v.kind === 'system' || v.kind === 'default'){
+      showToast('默认仓库与系统内置仓库不能转为团队仓库', 'err'); return;
+    }
+    App.openModal('kbTeamMask');
+    const body = $('#kbTeamBody');
+    const title = $('#kbTeamTitle');
+    const sub = $('#kbTeamSub');
+    body.innerHTML = '加载中…';
+    try {
+      if (v.kind === 'user'){
+        title.textContent = '转为团队仓库';
+        sub.textContent = '转换后可通过邀请链接邀请其他万事屋用户加入。仅你可将它转回普通仓库。';
+        body.innerHTML = `<p style="font-size:13px;color:var(--om-text-2);line-height:1.6">当前仓库「${App.esc(v.name)}」将变为团队笔记仓库。成员默认只读，你可以再为他们打开编辑权限。</p>
+          <button class="btn btn-primary" type="button" id="kbTeamConvert">转换为团队仓库</button>`;
+        $('#kbTeamConvert')?.addEventListener('click', async () => {
+          try {
+            await API.post('/api/notes/vaults/' + encodeURIComponent(currentVault) + '/team');
+            showToast('已转为团队仓库');
+            await load();
+            openTeamModal();
+          } catch (e) { showToast(e.message, 'err'); }
+        });
+        return;
+      }
+      const d = await API.get('/api/notes/vaults/' + encodeURIComponent(currentVault) + '/team');
+      title.textContent = d.name || '团队仓库';
+      sub.textContent = d.isOwner ? '你是创建人，可管理成员与邀请' : (d.canEdit ? '你是可编辑成员' : '你是只读成员');
+      let html = '';
+      if (d.isOwner){
+        const url = teamInviteUrl(d.token || '');
+        html += `<div class="set-row-label">邀请链接</div>
+          <div class="team-invite"><input class="input" id="kbTeamLink" readonly value="${App.esc(url)}">
+          <button class="btn btn-outline btn-sm" type="button" id="kbTeamCopy">复制</button>
+          <button class="btn btn-ghost btn-sm" type="button" id="kbTeamResetInv">重置</button></div>
+          <div class="set-row-sub" style="margin:8px 0 12px">也可把邀请码发给对方：<code>${App.esc(d.token || '')}</code></div>
+          <div class="set-row-label">成员</div>`;
+        html += (d.members || []).length
+          ? (d.members || []).map(m => `<div class="team-member" data-mu="${App.esc(m.u)}">
+              <span class="nm">${App.esc(m.u)}</span>
+              <button class="btn btn-ghost btn-sm" type="button" data-team-edit="${App.esc(m.u)}">${m.canEdit ? '关闭编辑' : '开启编辑'}</button>
+              <button class="btn btn-ghost btn-sm" type="button" data-team-kick="${App.esc(m.u)}" style="color:var(--om-danger)">移出</button>
+            </div>`).join('')
+          : '<div class="kb-empty">还没有成员，把邀请链接发给同事即可</div>';
+        html += `<div style="margin-top:16px"><button class="btn btn-outline btn-sm" type="button" id="kbTeamRevert" style="color:var(--om-danger)">转回普通仓库</button></div>`;
+      } else {
+        html += `<p style="font-size:13px;color:var(--om-text-2)">创建人：${App.esc(d.owner || '')}</p>
+          <button class="btn btn-outline" type="button" id="kbTeamLeave" style="color:var(--om-danger)">退出此团队仓库</button>`;
+      }
+      body.innerHTML = html;
+      $('#kbTeamCopy')?.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText($('#kbTeamLink').value); showToast('已复制邀请链接'); }
+        catch (e) { showToast('复制失败', 'err'); }
+      });
+      $('#kbTeamResetInv')?.addEventListener('click', async () => {
+        try {
+          await API.post('/api/notes/vaults/' + encodeURIComponent(currentVault) + '/invite');
+          showToast('邀请已重置');
+          openTeamModal();
+        } catch (e) { showToast(e.message, 'err'); }
+      });
+      $('#kbTeamRevert')?.addEventListener('click', async () => {
+        if (!await App.confirmModal({ title: '转回普通仓库？', danger: true, okText: '转回',
+          sub: '所有成员将失去访问权限。' })) return;
+        try {
+          await API.del('/api/notes/vaults/' + encodeURIComponent(currentVault) + '/team');
+          showToast('已转回普通仓库');
+          App.closeModal('kbTeamMask');
+          await load();
+        } catch (e) { showToast(e.message, 'err'); }
+      });
+      $('#kbTeamLeave')?.addEventListener('click', async () => {
+        try {
+          await API.post('/api/notes/vaults/' + encodeURIComponent(currentVault) + '/leave');
+          showToast('已退出');
+          App.closeModal('kbTeamMask');
+          currentVault = VAULT_DEFAULT;
+          await load();
+        } catch (e) { showToast(e.message, 'err'); }
+      });
+      body.onclick = async e => {
+        const ed = e.target.closest('[data-team-edit]');
+        const kick = e.target.closest('[data-team-kick]');
+        const vid = currentVault;
+        try {
+          if (ed){
+            const row = ed.closest('.team-member');
+            const on = ed.textContent.indexOf('开启') >= 0;
+            await API.put('/api/notes/vaults/' + encodeURIComponent(vid) + '/members/' + encodeURIComponent(ed.dataset.teamEdit), { canEdit: on });
+            showToast(on ? '已开启编辑权限' : '已关闭编辑权限');
+            openTeamModal();
+          }
+          if (kick){
+            if (!await App.confirmModal({ title: '移出成员？', danger: true, okText: '移出',
+              sub: '对方将立即失去此仓库访问权限。' })) return;
+            await API.del('/api/notes/vaults/' + encodeURIComponent(vid) + '/members/' + encodeURIComponent(kick.dataset.teamKick));
+            showToast('已移出');
+            openTeamModal();
+          }
+        } catch (err) { showToast(err.message, 'err'); }
+      };
+    } catch (e) {
+      body.innerHTML = '<div class="kb-empty">' + App.esc(e.message || '加载失败') + '</div>';
+    }
+  }
   function init(){
     /* 新建笔记：所有 + 号按钮都通过 kbMenu 弹出选择，不再常驻顶栏。
        原来 #noteNew / #folderNew 已从 HTML 移除，相应绑定也清掉。 */
-    App.onEnter(() => { load(); tryOpenShareFromUrl(); });
+    App.onEnter(() => { load(); tryOpenShareFromUrl(); tryJoinFromUrl(); });
     App.onReady(() => { if (!API.getToken()) tryOpenShareFromUrl(); });
     setInterval(pollOpenNote, 4000);
     $('#kbShareCreate')?.addEventListener('click', createShareLink);
@@ -1837,6 +2056,7 @@ const Notes = (() => {
       persistExistingShare().catch(err => showToast(err.message, 'err'));
     });
     $('#kbShareViewClose')?.addEventListener('click', leaveShareOverlay);
+    $('#kbTeamClose')?.addEventListener('click', () => App.closeModal('kbTeamMask'));
     $('#kbShareOutlineBtn')?.addEventListener('click', () =>
       setShareOutline(!$('#kbShareOutline')?.classList.contains('open')));
     $('#kbShareOutlineClose')?.addEventListener('click', () => setShareOutline(false));
@@ -1899,18 +2119,29 @@ const Notes = (() => {
       ['多选模式', 'i-check', () => setSelMode(!selMode)],
       ['新建笔记仓库', 'i-folder', () => createVault()],
       ['重命名当前仓库', 'i-pen', () => renameVault()],
-      ...(vaultMeta(currentVault).kind === 'user' ? [['删除当前仓库', 'i-trash', () => deleteCurrentVault()]] : []),
-      ['导入 Markdown / zip', 'i-download', () => importMd()],
+      ...(canDeleteVault(vaultMeta(currentVault)) ? [['删除当前仓库', 'i-trash', () => deleteCurrentVault(), 'danger']] : []),
+      ...((vaultMeta(currentVault).kind === 'user' || vaultMeta(currentVault).kind === 'team')
+        ? [['管理团队…', 'i-users', () => openTeamModal()]] : []),
+      ...(vaultCanEdit() ? [['导入 Markdown / zip', 'i-download', () => importMd()]] : []),
       ['导出全部笔记', 'i-upload', () => API.dl('/api/notes/all')],
     ]));
     $('#kbVaultBtn')?.addEventListener('click', e => {
       e.stopPropagation();
+      const cur = vaultMeta(currentVault);
+      const canDel = canDeleteVault(cur);
       const items = vaults.map(v => [
-        (v.id === currentVault ? '✓ ' : '') + v.name + (v.kind === 'system' ? '（内置）' : v.kind === 'default' ? '（默认）' : ''),
+        (v.id === currentVault ? '✓ ' : '') + v.name + vaultKindTag(v),
         'i-inbox',
         () => selectVault(v.id),
       ]);
+      items.push('sep');
       items.push(['新建仓库…', 'i-plus', () => createVault()]);
+      if (cur.kind !== 'system')
+        items.push(['重命名「' + (cur.name || '') + '」', 'i-pen', () => renameVault()]);
+      if (cur.kind === 'user' || (cur.kind === 'team' && cur.isOwner))
+        items.push(['管理团队…', 'i-users', () => openTeamModal()]);
+      if (canDel)
+        items.push(['删除「' + (cur.name || '') + '」', 'i-trash', () => deleteCurrentVault(), 'danger']);
       kbMenu($('#kbVaultBtn'), items);
     });
     /* 回收站入口：v0.2.26 整个底部条都是点击热区（按钮只是视觉），点击弹层 */
@@ -2232,6 +2463,7 @@ const Notes = (() => {
       const item = e.target.closest ? e.target.closest('[data-note-id]') : null;
       const row = e.target.closest ? e.target.closest('[data-folder-toggle]') : null;
       const assetRow = e.target.closest ? e.target.closest('[data-asset-name]') : null;
+      if (!vaultCanEdit() && (item || row)){ e.preventDefault(); return; }
       if (item){
         const id = item.dataset.noteId;
         if (!selNotes.has(id)) selNotes = new Set([id]);

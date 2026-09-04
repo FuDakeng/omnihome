@@ -11,3 +11,5 @@ data/config.json
 # （否则所有从该镜像启动的实例共用同一把钥匙）
 data/secret.key
 .DS_Store
+# 带空格的插件工作副本，不打进镜像
+obsidian-plugin/omnihome-sync 22.50.34

@@ -8,6 +8,7 @@ const App = (() => {
   const listeners = [];
   const readyListeners = [];
   let shareNeedLogin = false;
+  let inboxTimer = 0;
 
   /* ---------- 偏好 → 页面 ---------- */
   function applyPrefs(p){
@@ -133,6 +134,8 @@ const App = (() => {
     applyPrefs(prefs);
     unlock();
     listeners.forEach(fn => { try { fn(u); } catch (e) { console.error(e); } });
+    refreshInbox();
+    if (!inboxTimer) inboxTimer = setInterval(refreshInbox, 20000);
     checkVersionUpdate();
     if (reload) location.reload();
   }
@@ -233,6 +236,28 @@ const App = (() => {
     return (n / 1048576).toFixed(2) + ' MB';
   }
 
+  async function refreshInbox(){
+    if (!API.getToken()) return;
+    try {
+      const d = await API.get('/api/inbox');
+      const items = d.items || [];
+      const n = d.unread || 0;
+      const dot = $('#inboxDot');
+      if (dot) dot.hidden = !n;
+      const list = $('#inboxList');
+      if (!list) return;
+      if (!items.length){ list.innerHTML = '<div class="kb-empty" style="padding:18px">暂无通知</div>'; return; }
+      list.innerHTML = items.map(x => {
+        const need = x.type === 'sync-approval' && !x.action;
+        return `<div class="inbox-item${x.read ? '' : ' unread'}" data-iid="${esc(x.id)}">
+          <div class="t">${esc(x.title || '通知')}</div>
+          <div class="b">${esc(x.body || '')}</div>
+          ${need ? '<div class="ops"><button class="btn btn-primary btn-sm" data-in-act="approve">同意</button><button class="btn btn-ghost btn-sm" data-in-act="deny">拒绝</button></div>' : ''}
+        </div>`;
+      }).join('');
+    } catch (_) {}
+  }
+
   return {
     get user(){ return user; },
     get prefs(){ return prefs; },
@@ -242,7 +267,7 @@ const App = (() => {
     onEnter: fn => listeners.push(fn),
     onReady: fn => readyListeners.push(fn),
     openModal, closeModal, esc, fmtBytes,
-    promptModal, confirmModal, showChangelog,
+    promptModal, confirmModal, showChangelog, refreshInbox,
     _finishPrompt: finishPrompt, _finishConfirm: finishConfirm,
   };
 })();
@@ -265,6 +290,33 @@ const App = (() => {
   $('#confirmOk').addEventListener('click', () => App._finishConfirm(true));
   $('#confirmCancel').addEventListener('click', () => App._finishConfirm(false));
   $('#changelogOk').addEventListener('click', () => App.closeModal('changelogMask'));
+  $('#bellBtn')?.addEventListener('click', e => {
+    e.stopPropagation();
+    const p = $('#inboxPanel');
+    if (!p) return;
+    p.hidden = !p.hidden;
+    if (!p.hidden) App.refreshInbox();
+  });
+  $('#inboxList')?.addEventListener('click', async e => {
+    const act = e.target.closest('[data-in-act]');
+    const item = e.target.closest('[data-iid]');
+    if (!item) return;
+    const iid = item.dataset.iid;
+    try {
+      if (act){
+        await API.put('/api/inbox/' + encodeURIComponent(iid), { action: act.dataset.inAct, read: true });
+      } else {
+        await API.put('/api/inbox/' + encodeURIComponent(iid), { read: true });
+      }
+      App.refreshInbox();
+    } catch (err) { showToast(err.message, 'err'); }
+  });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#inboxPanel') && !e.target.closest('#bellBtn')){
+      const p = $('#inboxPanel');
+      if (p) p.hidden = true;
+    }
+  });
 })();
 
 /* 全局弹窗关闭：点遮罩 / Esc */

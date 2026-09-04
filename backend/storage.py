@@ -114,21 +114,26 @@ def _sync_key_vault(v) -> str:
     return VAULT_DEFAULT
 
 
-def gen_sync_key(username: str, vault_id: str = VAULT_DEFAULT) -> str:
+def gen_sync_key(username: str, vault_id: str = VAULT_DEFAULT,
+                 actor: Optional[str] = None) -> str:
     """为指定用户的指定仓库生成（或重置）同步 API Key，返回明文（仅此一次可见）。
-    同一仓库同时仅一枚：生成新 Key 会作废该仓库旧 Key。系统内置仓库禁止发令牌。"""
+    actor 为持钥人（团队成员钥的 u 仍是创建人）。同一 actor+仓库同时仅一枚。
+    系统内置仓库禁止发令牌。"""
     vid = vault_id or VAULT_DEFAULT
     if vid == VAULT_SYSTEM:
         raise ValueError("系统内置仓库不可创建同步令牌")
+    who = actor or username
     raw = SYNC_KEY_PREFIX + secrets.token_urlsafe(32)
     cfg = get_config()
     keys = {}
     for k, v in (cfg.get("syncKeys") or {}).items():
-        if _sync_key_owner(v) == username and _sync_key_vault(v) == vid:
+        act = v.get("actor") if isinstance(v, dict) else None
+        act = act or _sync_key_owner(v)
+        if act == who and _sync_key_vault(v) == vid:
             continue
         keys[k] = v
-    keys[_sync_key_hash(raw)] = {"u": username, "vault": vid, "prefix": raw[:12],
-                                 "created": int(time.time())}
+    keys[_sync_key_hash(raw)] = {"u": username, "vault": vid, "actor": who,
+                                 "prefix": raw[:12], "created": int(time.time())}
     cfg["syncKeys"] = keys
     save_config(cfg)
     return raw
@@ -141,34 +146,51 @@ def verify_sync_key(raw: str) -> Optional[str]:
 
 
 def verify_sync_context(raw: str) -> Optional[dict]:
-    """校验明文 API Key，命中返回 {u, vault}，否则 None。"""
+    """校验明文 API Key，命中返回 {u, vault, actor}，否则 None。"""
     if not raw:
         return None
     v = (get_config().get("syncKeys") or {}).get(_sync_key_hash(raw))
     if not v:
         return None
-    return {"u": _sync_key_owner(v), "vault": _sync_key_vault(v)}
+    owner = _sync_key_owner(v)
+    actor = v.get("actor") if isinstance(v, dict) else None
+    return {"u": owner, "vault": _sync_key_vault(v), "actor": actor or owner}
 
 
-def revoke_sync_key(username: str, vault_id: Optional[str] = None):
-    """吊销同步 API Key。vault_id 为空则吊销该用户全部；否则只吊销该仓库。"""
+def revoke_sync_key(username: str, vault_id: Optional[str] = None,
+                    actor: Optional[str] = None):
+    """吊销同步 API Key。
+    actor 指定则只吊销该持钥人；vault_id 为空则吊销该 actor（默认本人）全部；
+    若 actor 为空且 vault_id 有值：吊销「指向该仓库且 u=username」的全部钥（创建人解散团队仓）。"""
     cfg = get_config()
     keep = {}
+    who = actor or username
     for k, v in (cfg.get("syncKeys") or {}).items():
-        if _sync_key_owner(v) != username:
-            keep[k] = v
-            continue
-        if vault_id and _sync_key_vault(v) != vault_id:
-            keep[k] = v
+        act = v.get("actor") if isinstance(v, dict) else None
+        act = act or _sync_key_owner(v)
+        store = _sync_key_owner(v)
+        vid = _sync_key_vault(v)
+        if actor:
+            if act == who and (not vault_id or vid == vault_id):
+                continue
+        elif vault_id:
+            if store == username and vid == vault_id:
+                continue
+        else:
+            if act == username:
+                continue
+        keep[k] = v
     cfg["syncKeys"] = keep
     save_config(cfg)
 
 
 def sync_key_info(username: str, vault_id: str = VAULT_DEFAULT) -> dict:
-    """返回指定仓库的掩码信息（不含明文）。"""
+    """返回指定仓库、当前用户作为持钥人的掩码信息（不含明文）。"""
     vid = vault_id or VAULT_DEFAULT
     for v in (get_config().get("syncKeys") or {}).values():
-        if _sync_key_owner(v) == username and _sync_key_vault(v) == vid:
+        act = v.get("actor") if isinstance(v, dict) else None
+        act = act or _sync_key_owner(v)
+        if act == username and _sync_key_vault(v) == vid:
             prefix = v.get("prefix", "") if isinstance(v, dict) else ""
             created = v.get("created", 0) if isinstance(v, dict) else 0
             return {"enabled": True, "vault": vid, "prefix": prefix,
@@ -178,17 +200,29 @@ def sync_key_info(username: str, vault_id: str = VAULT_DEFAULT) -> dict:
 
 
 def list_sync_keys(username: str) -> list:
-    """列出该用户各仓库已启用的同步令牌（掩码，不含明文）。"""
+    """列出该用户作为持钥人的各仓库同步令牌（掩码，不含明文）。"""
     out = []
     for v in (get_config().get("syncKeys") or {}).values():
-        if _sync_key_owner(v) != username:
+        act = v.get("actor") if isinstance(v, dict) else None
+        act = act or _sync_key_owner(v)
+        if act != username:
             continue
         prefix = v.get("prefix", "") if isinstance(v, dict) else ""
         created = v.get("created", 0) if isinstance(v, dict) else 0
         out.append({"vault": _sync_key_vault(v), "enabled": True,
                     "prefix": prefix, "masked": (prefix + "…") if prefix else "已启用",
-                    "created": created})
+                    "created": created, "store": _sync_key_owner(v)})
     return out
+
+
+def owner_has_sync_key(owner: str, vault_id: str) -> bool:
+    vid = vault_id or VAULT_DEFAULT
+    for v in (get_config().get("syncKeys") or {}).values():
+        act = v.get("actor") if isinstance(v, dict) else None
+        act = act or _sync_key_owner(v)
+        if _sync_key_owner(v) == owner and act == owner and _sync_key_vault(v) == vid:
+            return True
+    return False
 
 
 def append_sync_log(username: str, entry: dict):
