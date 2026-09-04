@@ -811,6 +811,7 @@
   display: flex; align-items: center; gap: 8px;
   width: 100%; max-width: 100%;
   box-sizing: border-box;
+  position: relative;
   padding: 5px 10px;
   border-radius: 6px;
   border: 1px solid transparent;
@@ -830,18 +831,20 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .note-item .ni-date{ font-size: 11px; color: var(--om-text-3); flex: none; }
-/* 悬浮操作按钮：悬浮时滑出。v0.2.26 改为 hover 才占位（display:none → grid），
-   非 hover 时不再挤占标题宽度——标题占满整行，仅在真正溢出时省略号截断 */
+/* 操作按钮绝对叠在右侧：悬浮只改透明度与行背景，不插入文档流，避免行高/标题宽度跳动 */
 .note-item .ni-act{
-  flex: none; width: 22px; height: 22px;
-  display: none; place-items: center;
+  position: absolute; right: 6px; top: 50%; margin-top: -11px;
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  opacity: 0; pointer-events: none;
   border: 1px solid var(--om-border); border-radius: 6px;
   background: var(--om-surface); color: var(--om-text-3);
   cursor: pointer;
+  transition: opacity var(--om-t-fast), color var(--om-t-fast), border-color var(--om-t-fast);
 }
 .note-item .ni-act .ic{ width: 13px; height: 13px; }
-.note-item:hover .ni-act{ display: grid; opacity: 1; }
-.note-item:hover .ni-date{ display: none; }   /* 日期与操作按钮同位互斥，避免叠加遮挡 */
+.note-item:hover .ni-act{ opacity: 1; pointer-events: auto; }
+.note-item:hover .ni-date{ visibility: hidden; }   /* 日期与操作按钮同位互斥，避免叠加遮挡 */
 .note-item .ni-act:hover{ color: var(--om-primary); border-color: var(--om-primary); }
 /* 旧的悬浮删除按钮与 ni-sub 已废弃（按设计图改为一行式：图标+标题+日期） */
 .ni-del, .ni-sub{ display: none !important; }
@@ -2262,6 +2265,7 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 .kb-folder{ margin: 2px 0; }
 .kb-folder-row{
   display: flex; align-items: center; gap: 7px;
+  position: relative;
   padding: 7px 8px;
   border-radius: var(--om-radius-sm);
   font-size: var(--om-fs-sm); font-weight: 600;
@@ -2275,10 +2279,19 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 .kb-folder-ic{ width: 14px; height: 14px; color: var(--om-warning); }
 .kb-folder-name{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-count{ font-size: 10px; color: var(--om-text-3); }
-/* 悬浮新建/操作按钮：v0.2.26 改为 hover 才占位（原 opacity:0 常驻占位会把
-   笔记数统计挤离右缘、压缩标题可宽） */
-.kb-folder-del, .kb-folder-add, .kb-folder-more{ display: none; }
-.kb-folder-row:hover .kb-folder-del, .kb-folder-row:hover .kb-folder-add, .kb-folder-row:hover .kb-folder-more{ display: grid; opacity: 1; }
+/* 文件夹操作钮叠在右侧：悬浮只改背景色与按钮透明度，行高/标题/计数位置保持不动 */
+.kb-folder-del, .kb-folder-add, .kb-folder-more{
+  position: absolute; top: 50%; margin-top: -14px;
+  display: grid; place-items: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity var(--om-t-fast), background var(--om-t-fast), color var(--om-t-fast);
+}
+.kb-folder-more{ right: 4px; }
+.kb-folder-add{ right: 32px; }
+.kb-folder-del{ right: 60px; }
+.kb-folder-row:hover .kb-folder-del,
+.kb-folder-row:hover .kb-folder-add,
+.kb-folder-row:hover .kb-folder-more{ opacity: 1; pointer-events: auto; }
 /* 嵌套缩进：靠 .kb-folder-body 的 padding-left 嵌套传递（每层 12px），
    顶层 body 额外挂树状竖线（仅第一层，避免叠加占空） */
 .kb-folder-body{

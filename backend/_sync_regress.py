@@ -262,6 +262,48 @@ def run_suite(engine):
           r.text[:120])
     check(f"[{engine}] LWW 覆盖后正文更新",
           "新客户端" in storage.note_read(USER, lww_id, ""), "")
+    # 7d. 客户端已知站点 mtime 且服务端未变：2 秒窗口内连续保存应落地（Obsidian 边打字边同步）
+    r = client.post("/api/sync/file", headers=HK(key),
+                    json={"path": "LWW.md", "content": "# LWW\n\n连续输入",
+                          "clientMtime": int(time.time()) * 1000,
+                          "knownRemoteMtime": r.json().get("mtime")})
+    check(f"[{engine}] LWW 服务端未变时连续保存 -> applied True",
+          r.json().get("applied") is True, r.text[:160])
+    check(f"[{engine}] LWW 连续保存正文已落地",
+          "连续输入" in storage.note_read(USER, lww_id, ""), "")
+    # 7e. 正文未变不 bump mtime
+    mtime_keep = r.json().get("mtime")
+    r = client.post("/api/sync/file", headers=HK(key),
+                    json={"path": "LWW.md", "content": "# LWW\n\n连续输入",
+                          "clientMtime": int(time.time()) * 1000 + 5000,
+                          "knownRemoteMtime": mtime_keep})
+    check(f"[{engine}] LWW 正文相同 -> unchanged",
+          r.json().get("unchanged") is True and r.json().get("mtime") == mtime_keep,
+          r.text[:160])
+
+    # ---------- 7x. 同步附件 ----------
+    print("-- 7x. sync assets --")
+    png = base64.b64encode(
+        b"\x89PNG\r\n\x1a\n" + b"\x00" * 24).decode()
+    r = client.post("/api/sync/asset", headers=HK(key),
+                    json={"filename": "shot.png", "dataB64": png})
+    check(f"[{engine}] POST asset 200", r.status_code == 200, r.text[:120])
+    aname = r.json().get("name") or ""
+    check(f"[{engine}] asset 名含哈希后缀", aname.endswith(".png") and "-" in aname, aname)
+    r = client.get("/api/sync/asset", headers=HK(key), params={"name": aname})
+    check(f"[{engine}] GET asset 回读", r.status_code == 200 and r.json().get("dataB64") == png,
+          str(r.status_code))
+    r = client.get("/api/sync/assets", headers=HK(key))
+    names = [a["name"] for a in r.json().get("assets", [])]
+    check(f"[{engine}] list assets 含刚传文件", aname in names, str(names))
+    r = client.post("/api/sync/file", headers=HK(key),
+                    json={"path": "带图.md",
+                          "content": "# 带图\n\n![](/api/notes/assets/" + aname + ")\n",
+                          "clientMtime": int(time.time()) * 1000 + 10000})
+    check(f"[{engine}] 笔记引用附件可写入", r.status_code == 200 and r.json().get("applied") is True,
+          r.text[:120])
+    r = client.get("/api/sync/file", headers=HK(key), params={"path": "带图.md"})
+    check(f"[{engine}] 回读保留附件引用", aname in gcontent(r.json()), gcontent(r.json())[:80])
 
     # ---------- 8. 路径遍历防护 ----------
     print("-- 8. 路径遍历 --")

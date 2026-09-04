@@ -181,6 +181,41 @@ X-API-Key: <raw key>
 - **软删**：设笔记 `deleted` / `deleted_title` 时间戳，与 Web 端删除一致，**进门户「回收站」可恢复**，不物理删除正文。
 - `path` 未命中：返回 **404** `{ "detail": "文件不存在" }`。
 
+### 3.6 列出 / 读写附件
+
+笔记正文里的 `/api/notes/assets/{name}` 引用对应门户附件分区。Obsidian 插件会在推送笔记前上传引用文件、拉取笔记后下载缺失文件。
+
+```
+GET /api/sync/assets
+X-API-Key: <raw key>
+```
+
+**响应 200：** `{ "assets": [{ "name", "type", "size", "mtime" }] }`
+
+```
+GET /api/sync/asset?name=shot-ab12cd.png
+X-API-Key: <raw key>
+```
+
+**响应 200：** `{ "name", "dataB64", "type", "mtime" }`
+
+```
+POST /api/sync/asset
+X-API-Key: <raw key>
+Content-Type: application/json
+
+{ "filename": "shot.png", "dataB64": "<base64>" }
+```
+
+**响应 200：** `{ "name": "shot-ab12cd.png", "mtime": …, "unchanged": false }`
+
+- 支持 png/jpg/gif/webp/svg/pdf/mp3/mp4/webm/wav/zip，单文件上限 5MB。
+- `name` 为「原文件名主干 + 内容 sha256 前 6 位」，相同文件重复上传幂等。
+
+### 3.7 knownRemoteMtime
+
+`POST /api/sync/file` 可额外传 `knownRemoteMtime`（客户端上次同步记下的站点 mtime）。若当前站点 mtime **未超过**该值，视为服务端无独立变更，**即使** `clientMtime` 落在 2 秒窗口内也会落地本地内容（`applied:true`）。这避免 Obsidian 连续按键保存被误判为站点优先并回拉旧正文。
+
 ---
 
 ## 四、路径安全校验

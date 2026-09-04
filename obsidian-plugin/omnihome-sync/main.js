@@ -14,7 +14,7 @@
 
 const obsidian = require('obsidian');
 const {
-  Plugin, PluginSettingTab, Setting, Notice, Modal, TFile, requestUrl,
+  Plugin, PluginSettingTab, Setting, Notice, Modal, TFile, requestUrl, normalizePath,
 } = obsidian;
 
 const DELETE_VALVE = 10;            // 单轮删除安全阀阈值
@@ -27,7 +27,11 @@ const SELF_WRITE_MS = 4000;         // 自写抑制窗口（避免回环触发�
 
 /* 插件独立版本线（与服务端 app 版本解耦；须与 manifest.json 的 version 保持一致）。
    打进启动日志与设置页，用户反馈报错时可一眼确认所装插件版本。 */
-const PLUGIN_VERSION = '0.0.1';
+const PLUGIN_VERSION = '0.0.2';
+
+const ASSET_MAX = 5 * 1024 * 1024;   // 与服务端 ASSET_MAX 一致
+const ASSET_DIR = 'OmniHome-assets';  // 从站点拉取、本地无原路径的附件落点
+const ASSET_EXT_RE = /^(png|jpe?g|gif|webp|svg|pdf|mp3|mp4|webm|wav|zip)$/i;
 
 const DEFAULT_SETTINGS = {
   serverUrl: '',
@@ -36,6 +40,8 @@ const DEFAULT_SETTINGS = {
   pollSeconds: 8,
   // baseline: path -> { lm: 本地上次同步 mtime(ms), rm: 远端上次同步 mtime(ms) }
   baseline: {},
+  // assetMap: vaultPath -> { name, lm } ；反向键 '#name' -> vaultPath
+  assetMap: {},
 };
 
 /* ---------- 工具 ---------- */
@@ -76,6 +82,42 @@ function decodeSyncContent(data) {
   if (data && typeof data.contentB64 === 'string') return b64decode(data.contentB64);
   if (data && typeof data.content === 'string') return data.content;
   return null;
+}
+
+function b64encodeBytes(u8) {
+  const bytes = u8 instanceof Uint8Array ? u8 : new Uint8Array(u8);
+  let bin = '';
+  const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  }
+  return btoa(bin);
+}
+function b64decodeBytes(b64) {
+  const bin = atob(String(b64 || ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+function fileExt(p) {
+  const m = /\.([A-Za-z0-9]+)$/.exec(String(p || ''));
+  return m ? m[1].toLowerCase() : '';
+}
+function isAssetExt(p) { return ASSET_EXT_RE.test(fileExt(p)); }
+function posixJoin(dir, rel) {
+  const left = String(dir || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  const right = String(rel || '').replace(/\\/g, '/');
+  const raw = left ? (left + '/' + right) : right;
+  const parts = [];
+  raw.split('/').forEach((seg) => {
+    if (!seg || seg === '.') return;
+    if (seg === '..') { parts.pop(); return; }
+    parts.push(seg);
+  });
+  return parts.join('/');
+}
+function decodeAssetName(s) {
+  try { return decodeURIComponent(String(s || '')); } catch (e) { return String(s || ''); }
 }
 
 /* 把响应 JSON 解析失败转成「可定位」错误：服务端由 FastAPI 生成，JSON 必然合法，
@@ -175,6 +217,7 @@ class OmniHomeSyncPlugin extends Plugin {
     const data = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data || {});
     if (!this.settings.baseline || typeof this.settings.baseline !== 'object') this.settings.baseline = {};
+    if (!this.settings.assetMap || typeof this.settings.assetMap !== 'object') this.settings.assetMap = {};
   }
   async saveSettings() { await this.saveData(this.settings); }
   canSync() {
@@ -239,10 +282,19 @@ class OmniHomeSyncPlugin extends Plugin {
     return this.api('GET', '/api/sync/list').then((d) => (d && d.files) || []);
   }
   remoteGet(path) { return this.api('GET', '/api/sync/file', { query: { path: path } }); }
-  remotePut(path, content, clientMtime) {
+  remotePut(path, content, clientMtime, knownRemoteMtime) {
     // 正文走 base64：请求体对内容安全网关/WAF 不透明，避免 <script>/<svg> 等特征被拦截或改写
-    return this.api('POST', '/api/sync/file',
-      { body: { path: path, contentB64: b64encode(content), clientMtime: clientMtime } });
+    const body = { path: path, contentB64: b64encode(content), clientMtime: clientMtime };
+    if (knownRemoteMtime) body.knownRemoteMtime = knownRemoteMtime;
+    return this.api('POST', '/api/sync/file', { body: body });
+  }
+  remotePutAsset(filename, bytes) {
+    return this.api('POST', '/api/sync/asset', {
+      body: { filename: filename, dataB64: b64encodeBytes(bytes) },
+    });
+  }
+  remoteGetAsset(name) {
+    return this.api('GET', '/api/sync/asset', { query: { name: name } });
   }
   remoteRename(oldPath, newPath) {
     return this.api('PUT', '/api/sync/file/rename', { body: { oldPath: oldPath, newPath: newPath } });
@@ -347,12 +399,160 @@ class OmniHomeSyncPlugin extends Plugin {
     }
   }
 
+  /* ---------- 附件：笔记内引用的本地文件 ↔ 站点 /api/notes/assets ---------- */
+  resolveLocalAssetPath(notePath, link) {
+    let raw = String(link || '').trim();
+    if (!raw) return null;
+    raw = raw.split('#')[0].split('|')[0].trim();
+    if (!raw) return null;
+    if (/^(https?:|data:|app:|file:|obsidian:)/i.test(raw)) return null;
+    if (raw.indexOf('/api/notes/assets/') >= 0) return null;
+    try { raw = decodeURIComponent(raw); } catch (e) { /* 保持原样 */ }
+    raw = raw.replace(/\\/g, '/').replace(/^\.\//, '');
+    let dest = null;
+    try { dest = this.app.metadataCache.getFirstLinkpathDest(raw, notePath); } catch (e) { dest = null; }
+    if (dest instanceof TFile) return dest.path;
+    const joined = posixJoin(parentDir(notePath), raw);
+    const abs = normalizePath(joined || raw);
+    const hit = this.app.vault.getAbstractFileByPath(abs);
+    if (hit instanceof TFile) return hit.path;
+    return null;
+  }
+  rememberAsset(localPath, name, lm) {
+    if (!this.settings.assetMap) this.settings.assetMap = {};
+    const map = this.settings.assetMap;
+    map[localPath] = { name: name, lm: lm || 0 };
+    map['#' + name] = localPath;
+  }
+  async uploadLocalAsset(localPath) {
+    const file = this.app.vault.getAbstractFileByPath(localPath);
+    if (!(file instanceof TFile) || !isAssetExt(file.path)) return null;
+    const map = this.settings.assetMap || {};
+    const rec = map[localPath];
+    const lm = (file.stat && file.stat.mtime) || 0;
+    if (rec && rec.name && rec.lm === lm) return rec.name;
+    const buf = await this.app.vault.readBinary(file);
+    if (buf.byteLength > ASSET_MAX) {
+      console.warn('[OmniHome Sync] 附件超过 5MB，跳过：' + localPath);
+      return rec && rec.name ? rec.name : null;
+    }
+    const resp = await this.remotePutAsset(file.name, buf);
+    if (!resp || !resp.name) return null;
+    this.rememberAsset(localPath, resp.name, lm);
+    return resp.name;
+  }
+  async downloadRemoteAsset(name) {
+    const map = this.settings.assetMap || {};
+    let localPath = map['#' + name];
+    if (localPath) {
+      const hit = this.app.vault.getAbstractFileByPath(localPath);
+      if (hit instanceof TFile) return localPath;
+    }
+    localPath = ASSET_DIR + '/' + name;
+    const existing = this.app.vault.getAbstractFileByPath(localPath);
+    if (existing instanceof TFile) {
+      this.rememberAsset(localPath, name, (existing.stat && existing.stat.mtime) || 0);
+      return localPath;
+    }
+    const data = await this.remoteGetAsset(name);
+    const bytes = b64decodeBytes((data && data.dataB64) || '');
+    if (!bytes.length) throw new Error('附件下载为空：' + name);
+    this.markSelfWrite(localPath);
+    await this.ensureVaultFolder(ASSET_DIR);
+    const again = this.app.vault.getAbstractFileByPath(localPath);
+    if (again instanceof TFile) {
+      await this.app.vault.modifyBinary(again, bytes.buffer);
+    } else {
+      await this.app.vault.createBinary(localPath, bytes.buffer);
+    }
+    const saved = this.app.vault.getAbstractFileByPath(localPath);
+    this.rememberAsset(localPath, name, (saved && saved.stat && saved.stat.mtime) || nowMs());
+    return localPath;
+  }
+  collectAssetSpans(md, notePath) {
+    const spans = [];
+    const push = (start, end, localPath, isEmbed, alt) => {
+      if (!localPath || !isAssetExt(localPath)) return;
+      spans.push({ start: start, end: end, localPath: localPath, isEmbed: !!isEmbed, alt: alt || '' });
+    };
+    const wiki = /(!?)\[\[([^\]|#]+)(\|[^\]]*)?\]\]/g;
+    let m;
+    while ((m = wiki.exec(md))) {
+      const local = this.resolveLocalAssetPath(notePath, m[2]);
+      push(m.index, m.index + m[0].length, local, m[1] === '!', m[2]);
+    }
+    const mdLink = /(!?)\[([^\]]*)\]\(\s*<?([^)>\s]+)>?\s*\)/g;
+    while ((m = mdLink.exec(md))) {
+      const href = m[3] || '';
+      if (/^(https?:|data:|app:)/i.test(href)) continue;
+      if (href.indexOf('/api/notes/assets/') >= 0) continue;
+      const local = this.resolveLocalAssetPath(notePath, href);
+      push(m.index, m.index + m[0].length, local, m[1] === '!', m[2] || '');
+    }
+    spans.sort((a, b) => b.start - a.start);
+    const kept = [];
+    let lastStart = Infinity;
+    for (let i = 0; i < spans.length; i++) {
+      if (spans[i].end > lastStart) continue;
+      kept.push(spans[i]);
+      lastStart = spans[i].start;
+    }
+    return kept;
+  }
+  async toServerMarkdown(notePath, md) {
+    const spans = this.collectAssetSpans(md, notePath);
+    let out = md;
+    for (let i = 0; i < spans.length; i++) {
+      const s = spans[i];
+      const name = await this.uploadLocalAsset(s.localPath);
+      if (!name) continue;
+      const url = '/api/notes/assets/' + encodeURIComponent(name);
+      const alt = (s.alt || name).replace(/[\[\]]/g, '');
+      const repl = s.isEmbed ? ('![' + alt + '](' + url + ')') : ('[' + alt + '](' + url + ')');
+      out = out.slice(0, s.start) + repl + out.slice(s.end);
+    }
+    return out;
+  }
+  async fromServerMarkdown(notePath, md) {
+    const re = /(!?)\[([^\]]*)\]\(\s*<?(\/api\/notes\/assets\/[^)>\s]+)>?\s*\)/g;
+    const hits = [];
+    let m;
+    while ((m = re.exec(md))) {
+      const href = m[3] || '';
+      const nm = decodeAssetName((href.split('/api/notes/assets/')[1] || '').split('?')[0]);
+      if (!nm) continue;
+      hits.push({ start: m.index, end: m.index + m[0].length, name: nm, isEmbed: m[1] === '!', alt: m[2] || '' });
+    }
+    let out = md;
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const h = hits[i];
+      let localPath;
+      try { localPath = await this.downloadRemoteAsset(h.name); }
+      catch (e) {
+        console.warn('[OmniHome Sync] 附件下载失败：', h.name, e);
+        continue;
+      }
+      const wiki = (h.isEmbed ? '!' : '') + '[[' + localPath + ']]';
+      out = out.slice(0, h.start) + wiki + out.slice(h.end);
+    }
+    return out;
+  }
+
   /* ---------- 单文件操作 ---------- */
   async pushFile(f, baseline) {
     const content = await this.app.vault.read(f.file);
-    const resp = await this.remotePut(f.path, content, f.mtime);
+    const wire = await this.toServerMarkdown(f.path, content);
+    const knownRm = (baseline[f.path] && baseline[f.path].rm) || 0;
+    const resp = await this.remotePut(f.path, wire, f.mtime, knownRm);
     if (resp && resp.applied === false) {
-      // 站点优先（LWW 拒绝本地推送）：回拉站点较新版本，本地让位
+      // 仅当站点 mtime 确实超过上次同步基线，才视为远端独立变更并回拉。
+      // 2s LWW 窗口拒绝连续本地保存时服务端并无新内容，回拉会触发 Obsidian
+      // 「文件已被外部修改，正在自动合并更改」，冲掉正在输入的正文、光标跳到行首。
+      const siteMtime = (resp && resp.mtime) || 0;
+      if (siteMtime <= knownRm + LWW_WINDOW_MS) {
+        baseline[f.path] = { lm: f.mtime, rm: knownRm || siteMtime };
+        return false;
+      }
       await this.pullFile(f.path, f.file, { mtime: resp.mtime }, baseline);
       return true;
     }
@@ -361,14 +561,21 @@ class OmniHomeSyncPlugin extends Plugin {
   }
   async pullFile(path, file, r, baseline) {
     const data = await this.remoteGet(path);
-    const content = decodeSyncContent(data);
+    let content = decodeSyncContent(data);
     if (content === null) {
       // 既无 contentB64 也无 content：服务端与插件版本不匹配。绝不写空正文（会清空本地笔记）。
       throw new Error('服务端响应缺少正文字段（contentB64/content），请将服务端更新到 0.2.29 及以上');
     }
+    content = await this.fromServerMarkdown(path, content);
     this.markSelfWrite(path);
     let target = file;
     if (target) {
+      const cur = await this.app.vault.read(target);
+      if (cur === content) {
+        const lm = (target.stat && target.stat.mtime) || nowMs();
+        baseline[path] = { lm: lm, rm: (data && data.mtime) || (r && r.mtime) || nowMs() };
+        return false;
+      }
       await this.app.vault.modify(target, content);
     } else {
       await this.ensureVaultFolder(parentDir(path));
@@ -618,7 +825,7 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
         });
         if (!ok) return;
         plugin.stopPolling();
-        plugin.settings = Object.assign({}, DEFAULT_SETTINGS, { baseline: {} });
+        plugin.settings = Object.assign({}, DEFAULT_SETTINGS, { baseline: {}, assetMap: {} });
         await plugin.saveSettings();
         plugin.setStatus('off');
         this.display();
@@ -627,7 +834,7 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
 
     containerEl.createEl('p', {
       cls: 'omnihome-sync-help',
-      text: '同步范围：普通笔记（不含常驻笔记、每日计划、灵感速记）。冲突按最后修改时间优先（LWW，2 秒内站点优先）。单轮删除超过 ' + DELETE_VALVE + ' 个会暂停并请你确认。',
+      text: '同步范围：普通笔记及其引用的附件（图片 / 文件，≤5MB）。不含常驻笔记、每日计划、灵感速记。冲突按最后修改时间优先（LWW，2 秒内站点优先；服务端无独立变更时不会回拉以免打断正在编辑的正文）。单轮删除超过 ' + DELETE_VALVE + ' 个会暂停并请你确认。',
     });
   }
 }

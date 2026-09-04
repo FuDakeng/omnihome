@@ -2,6 +2,7 @@
 监控 / 天气 / 单词 / 书签 / 笔记 / 计划 / 日历 / 保险库 / 工具箱 / 搜索 / 备份。
 """
 import re
+import hashlib
 import threading
 import time
 import uuid
@@ -1372,8 +1373,11 @@ def delete_folder(name: str, authorization: Optional[str] = Header(None)):
 _ASSET_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
                 "image/webp": ".webp", "image/svg+xml": ".svg"}
 _ASSET_MEDIA = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml"}
-_ASSET_NAME = re.compile(r"^[\w\-]+\.(?:png|jpe?g|gif|webp|svg)$", re.I)
+                ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+                ".pdf": "application/pdf", ".mp3": "audio/mpeg", ".mp4": "video/mp4",
+                ".webm": "video/webm", ".wav": "audio/wav", ".zip": "application/zip"}
+_ASSET_NAME = re.compile(
+    r"^[\w.\u4e00-\u9fff\-]+\.(?:png|jpe?g|gif|webp|svg|pdf|mp3|mp4|webm|wav|zip)$", re.I)
 ASSET_MAX = 5 * 1024 * 1024
 
 
@@ -2110,6 +2114,27 @@ class SyncFileIn(BaseModel):
     content: str = ""                    # 旧客户端明文正文（回退用）
     contentB64: Optional[str] = None     # 新客户端 base64 正文（优先；规避中间网关/WAF 篡改）
     clientMtime: Optional[int] = None    # 客户端本地文件 mtime（毫秒），用于 LWW
+    knownRemoteMtime: Optional[int] = None  # 客户端上次同步时记下的站点 mtime；未变则连续本地保存应落地
+
+
+def _sync_apply_note(username, nid, folder, title, body_md, site_mtime, norm):
+    """落地一篇已存在笔记。正文/标题/文件夹均未变则不 bump updated，避免轮询误判远端变更。"""
+    old_body = storage.note_read(username, nid, "")
+    idx = storage.notes_index(username)
+    hit = next((it for it in idx if it.get("id") == nid), None)
+    old_title = (hit or {}).get("title") or ""
+    old_folder = (hit or {}).get("folder") or ""
+    new_title = title or old_title or "未命名笔记"
+    if old_body == body_md and new_title == old_title and folder == old_folder:
+        return {"path": norm, "mtime": site_mtime, "id": nid, "applied": True, "unchanged": True}
+    storage.note_write(username, nid, body_md)
+    now = int(time.time())
+    if hit is not None:
+        hit["title"] = new_title
+        hit["folder"] = folder
+        hit["updated"] = now
+        storage.save_notes_index(username, idx)
+    return {"path": norm, "mtime": now * 1000, "id": nid, "applied": True}
 
 
 @router.post("/api/sync/file")
@@ -2118,7 +2143,8 @@ def sync_put_file(body: SyncFileIn,
     """写入 / 更新一篇笔记。命中现有 path 则按 LWW 决定是否覆盖；未命中则新建。
     LWW（2 秒内站点优先）：仅当客户端文件明显更新（clientMtime > 站点 mtime + 2000）
     才覆盖站点；否则站点胜，拒绝覆盖（applied=False）并返回站点 mtime，客户端应改拉取。
-    这样站点（真源）永不会被近乎同时或更旧的推送覆盖。"""
+    例外：若客户端带上 knownRemoteMtime 且站点 mtime 未超过该值，说明服务端自上次同步后
+    并无独立变更（常见于 Obsidian 连续按键保存），连续本地推送直接落地，避免回拉旧正文。"""
     username = require_sync_user(x_api_key)
     norm = _validate_sync_path(body.path)
     folder, fname = _split_sync_path(norm)
@@ -2134,24 +2160,16 @@ def sync_put_file(body: SyncFileIn,
     title, body_md = _parse_md(text.encode("utf-8"), fname)
     meta = _resolve_sync_path(username, norm)
     client_mtime = int(body.clientMtime or 0)
+    known_rm = int(body.knownRemoteMtime or 0)
 
     if meta:
         site_mtime = int(meta.get("updated") or 0) * 1000
-        if client_mtime <= site_mtime + 2000:
+        site_unchanged = known_rm > 0 and site_mtime <= known_rm
+        if (not site_unchanged) and client_mtime <= site_mtime + 2000:
             return {"path": norm, "mtime": site_mtime, "id": meta["id"],
                     "applied": False, "reason": "site-wins"}
-        nid = meta["id"]
-        storage.note_write(username, nid, body_md)
-        idx = storage.notes_index(username)
-        now = int(time.time())
-        for it in idx:
-            if it.get("id") == nid:
-                it["title"] = title or it.get("title") or "未命名笔记"
-                it["folder"] = folder
-                it["updated"] = now
-                break
-        storage.save_notes_index(username, idx)
-        return {"path": norm, "mtime": now * 1000, "id": nid, "applied": True}
+        return _sync_apply_note(username, meta["id"], folder, title, body_md,
+                                site_mtime, norm)
 
     # 未命中 -> 新建（先逐级补齐文件夹，否则笔记在目录树中不可见）
     if folder:
@@ -2216,6 +2234,104 @@ def sync_delete_file(path: str,
             break
     storage.save_notes_index(username, idx)
     return {"ok": True, "softDeleted": True}
+
+
+# ---------- 同步附件（笔记内引用的图片/文件，X-API-Key） ----------
+def _validate_sync_asset_name(name: str) -> str:
+    raw = (name or "").replace("\\", "/").strip()
+    if not raw or "/" in raw or raw.startswith(".") or ".." in raw:
+        raise HTTPException(400, "非法附件名")
+    if not _ASSET_NAME.match(raw):
+        raise HTTPException(400, "不支持的附件类型")
+    return raw
+
+
+def _asset_payload_meta(raw):
+    try:
+        meta = json.loads(raw)
+        d = meta.get("d", "")
+        pad = 2 if d.endswith("==") else (1 if d.endswith("=") else 0)
+        size = len(d) * 3 // 4 - pad
+        return meta, size
+    except Exception:
+        return None, 0
+
+
+def _sync_asset_stored_name(filename: str, data: bytes) -> str:
+    ext = Path(filename or "").suffix.lower()
+    if ext == ".jpeg":
+        ext = ".jpg"
+    if ext not in _ASSET_MEDIA:
+        raise HTTPException(400, "仅支持 png/jpg/gif/webp/svg/pdf/mp3/mp4/webm/wav/zip")
+    stem = re.sub(r"[^\w\u4e00-\u9fff-]", "_", Path(filename or "").stem)[:24]
+    digest = hashlib.sha256(data).hexdigest()[:6]
+    return (stem or "file") + "-" + digest + ext
+
+
+class SyncAssetIn(BaseModel):
+    filename: str
+    dataB64: str
+    mime: Optional[str] = None
+
+
+@router.get("/api/sync/assets")
+def sync_list_assets(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """列出当前用户全部可同步附件（供客户端补齐引用文件）。"""
+    username = require_sync_user(x_api_key)
+    out = []
+    for name in storage.asset_list(username):
+        if not _ASSET_NAME.match(name):
+            continue
+        raw = storage.asset_read(username, name)
+        if raw is None:
+            continue
+        meta, size = _asset_payload_meta(raw)
+        if not meta:
+            continue
+        out.append({"name": name, "type": meta.get("t", ""),
+                    "size": size, "mtime": int(meta.get("ts") or 0) * 1000})
+    return {"assets": out}
+
+
+@router.get("/api/sync/asset")
+def sync_get_asset(name: str, x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """按附件名读取二进制（base64），供 Obsidian 落成本地文件。"""
+    username = require_sync_user(x_api_key)
+    name = _validate_sync_asset_name(name)
+    raw = storage.asset_read(username, name)
+    if raw is None:
+        raise HTTPException(404, "附件不存在")
+    meta, _size = _asset_payload_meta(raw)
+    if not meta or "d" not in meta:
+        raise HTTPException(500, "附件数据损坏")
+    return {"name": name, "dataB64": meta["d"], "type": meta.get("t", ""),
+            "mtime": int(meta.get("ts") or 0) * 1000}
+
+
+@router.post("/api/sync/asset")
+def sync_put_asset(body: SyncAssetIn,
+                   x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """上传笔记引用的附件。同内容哈希同名，重复推送幂等。"""
+    username = require_sync_user(x_api_key)
+    try:
+        data = base64.b64decode(body.dataB64)
+    except Exception:
+        raise HTTPException(400, "dataB64 不是合法的 base64")
+    if not data:
+        raise HTTPException(400, "附件内容为空")
+    if len(data) > ASSET_MAX:
+        raise HTTPException(400, "附件过大（上限 5MB）")
+    name = _sync_asset_stored_name(body.filename or "", data)
+    mime = _ASSET_MEDIA.get(Path(name).suffix.lower(), body.mime or "application/octet-stream")
+    existing = storage.asset_read(username, name)
+    now = int(time.time())
+    if existing:
+        meta, _ = _asset_payload_meta(existing)
+        if meta and meta.get("d") == base64.b64encode(data).decode():
+            return {"name": name, "mtime": int(meta.get("ts") or 0) * 1000, "unchanged": True}
+    payload = json.dumps({"t": mime, "d": base64.b64encode(data).decode(), "ts": now})
+    storage.asset_write(username, name, payload)
+    return {"name": name, "mtime": now * 1000, "unchanged": False}
 
 
 # ---------- 今日计划（plan.md，已弃用：仪表盘改绑知识库常驻笔记） ----------
