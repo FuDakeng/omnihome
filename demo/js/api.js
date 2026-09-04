@@ -23,13 +23,19 @@ const API = (() => {
     } catch (e) {
       throw new Error('无法连接万事屋服务');
     }
-    if (res.status === 401){
-      App.onUnauthorized();
-      throw new Error('未登录或会话已过期');
-    }
     const text = await res.text();
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch (e) { data = text; }
+    if (res.status === 401){
+      const msg = (data && data.detail) || '未登录或会话已过期';
+      const textMsg = typeof msg === 'string' ? msg : JSON.stringify(msg);
+      /* 登录/注册/切换账号的 401 是凭证错误，不能清会话、也不能改口风 */
+      if (!/^\/api\/auth\/(login|register|switch|session|first)\b/.test(url)){
+        App.onUnauthorized();
+        throw new Error('未登录或会话已过期');
+      }
+      throw new Error(textMsg);
+    }
     if (!res.ok){
       const msg = (data && data.detail) || ('请求失败 ' + res.status);
       throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));

@@ -574,16 +574,19 @@ const Notes = (() => {
     const now = Date.now() / 1000;
     return shares.find(s => s.kind === 'folder' && s.folder === f && (!s.expireAt || s.expireAt > now));
   }
-  const shareMark = title => `<span class="kb-share-mark" title="${App.esc(title || '已分享')}">享</span>`;
+  function treeIcon(kind, shared, title){
+    const href = kind === 'folder' ? '#i-folder' : (kind === 'star' ? '#i-star' : '#i-note');
+    const cls = kind === 'folder' ? 'ic kb-folder-ic' : 'ic ni-icon';
+    return `<span class="kb-ic${shared ? ' is-shared' : ''}"${shared ? ` title="${App.esc(title || '已分享')}"` : ''}><svg class="${cls}"><use href="${href}"/></svg></span>`;
+  }
 
   /* ---------- 树状目录渲染（图标 + 标题 + ⋯，单行） ---------- */
   function noteItemHtml(n){
     const pinned = n.pinned;
     const lock = n.readonly ? '<svg class="ic ni-icon" style="color:var(--om-text-3);width:11px;height:11px"><use href="#i-lock"/></svg>' : '';
-    const sh = shareOfNote(n.id) ? shareMark('此笔记已分享') : '';
     return `
       <button class="note-item${n.id === currentId ? ' active' : ''}${selNotes.has(n.id) ? ' kb-selected' : ''}" data-note-id="${n.id}"${pinned ? '' : ' draggable="true"'}>
-        <svg class="ic ni-icon"><use href="${pinned ? '#i-star' : '#i-note'}"/></svg>${lock}${sh}
+        ${treeIcon(pinned ? 'star' : 'note', !!shareOfNote(n.id), '此笔记已分享')}${lock}
         <span class="ni-title">${App.esc(n.title || '未命名笔记')}</span>
         <span class="ni-act" data-note-act="${n.id}" title="笔记操作"><svg class="ic"><use href="#i-more"/></svg></span>
       </button>`;
@@ -614,9 +617,8 @@ const Notes = (() => {
       <div class="kb-folder${open ? ' open' : ''}${currentFolder === f ? ' current' : ''}${!depth ? ' kb-folder-root' : ''}">
         <div class="kb-folder-row${selFolders.has(f) ? ' kb-selected' : ''}" data-folder-toggle="${App.esc(f)}"${locked ? '' : ' draggable="true"'}>
           <svg class="ic kb-chev"><use href="#i-chev-d"/></svg>
-          <svg class="ic kb-folder-ic"><use href="#i-folder"/></svg>
+          ${treeIcon('folder', !!shareOfFolder(f), '此文件夹已分享')}
           <span class="kb-folder-name" title="${App.esc(f)}">${App.esc(folderLabel(f))}</span>
-          ${shareOfFolder(f) ? shareMark('此文件夹已分享') : ''}
           <span class="kb-count num">${noteCountIn(f)}</span>
           ${locked ? '<span class="chip no-dot" style="font-size:10px;padding:2px 6px" title="系统内置文件夹，不可删除">内置</span>'
             : `<button class="icon-btn-xs kb-folder-add" data-kb-add="${App.esc(f)}" title="在此文件夹内新建笔记或子文件夹"><svg class="ic"><use href="#i-plus"/></svg></button>
@@ -1678,7 +1680,10 @@ const Notes = (() => {
     const src = $('#kbShareSrc'), pv = $('#kbSharePreview'), body = $('#kbShareEdBody');
     const useLive = shareView.canEdit && !!shareLiveEd && mode === 'edit';
     if (shareLiveEd){ useLive ? shareLiveEd.show() : shareLiveEd.hide(); }
-    if (src) src.style.display = (!shareView.canEdit || mode === 'preview' || useLive) ? 'none' : '';
+    if (src){
+      src.removeAttribute('hidden');
+      src.style.display = (!shareView.canEdit || mode === 'preview' || useLive) ? 'none' : '';
+    }
     if (pv) pv.style.display = (shareView.canEdit && mode === 'edit') ? 'none' : '';
     body?.classList.toggle('single', !shareView.canEdit || mode !== 'split');
     if (!useLive) renderSharePreview();
@@ -1770,6 +1775,7 @@ const Notes = (() => {
         if (b) loadOne(b.dataset.shareNid);
       };
       if (notes[0]) loadOne(notes[0].id);
+      App.setShareNeedLogin(false);
       if (!API.getToken()) App.lock(false);
     } catch (e) {
       title.textContent = '无法打开分享';
@@ -1777,6 +1783,7 @@ const Notes = (() => {
       list.innerHTML = '';
       if (e.needLogin){
         mask.classList.remove('open');
+        App.setShareNeedLogin(true);
         App.lock();
       }
     }
@@ -1799,8 +1806,8 @@ const Notes = (() => {
     /* 新建笔记：所有 + 号按钮都通过 kbMenu 弹出选择，不再常驻顶栏。
        原来 #noteNew / #folderNew 已从 HTML 移除，相应绑定也清掉。 */
     App.onEnter(() => { load(); tryOpenShareFromUrl(); });
+    App.onReady(() => { if (!API.getToken()) tryOpenShareFromUrl(); });
     setInterval(pollOpenNote, 4000);
-    tryOpenShareFromUrl();
     $('#kbShareCreate')?.addEventListener('click', createShareLink);
     $('#kbShareCopy')?.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText($('#kbShareLink').value); showToast('链接已复制'); }

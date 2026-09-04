@@ -825,6 +825,28 @@
 .note-item.active{ background: var(--om-primary-ghost); border-color: var(--om-primary-border); }
 .note-item .ni-icon{ width: 14px; height: 14px; flex: none; color: var(--om-text-3); }
 .note-item.active .ni-icon{ color: var(--om-primary); }
+.kb-ic{
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.kb-ic.is-shared .ni-icon,
+.kb-ic.is-shared .kb-folder-ic{ color: var(--om-primary); }
+.kb-ic.is-shared::after{
+  content: '';
+  position: absolute;
+  right: -3px;
+  bottom: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--om-primary);
+  box-shadow: 0 0 0 1.5px var(--om-surface);
+  pointer-events: none;
+}
 .note-item .ni-title{
   flex: 1; min-width: 0;
   font-weight: 500;
@@ -1661,12 +1683,6 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
   display: flex; align-items: center; gap: 6px;
   font-size: 12.5px; font-weight: 700; color: var(--om-text-1);
   padding: 4px 0 6px;
-}
-.kb-share-mark{
-  flex: none; font-size: 10px; font-weight: 700; line-height: 1;
-  padding: 2px 5px; border-radius: 4px;
-  color: var(--om-primary); background: var(--om-primary-ghost);
-  border: 1px solid var(--om-primary-border, var(--om-primary));
 }
 .kb-trash-sort{
   display: flex; align-items: center; flex-wrap: wrap; gap: 8px;

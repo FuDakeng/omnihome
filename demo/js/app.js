@@ -6,6 +6,8 @@ const App = (() => {
   let user = null;
   let prefs = null;
   const listeners = [];
+  const readyListeners = [];
+  let shareNeedLogin = false;
 
   /* ---------- 偏好 → 页面 ---------- */
   function applyPrefs(p){
@@ -56,13 +58,26 @@ const App = (() => {
 
   /* ---------- 登录门控（独立登录页：未登录时隐藏主界面，不再模糊展示） ---------- */
   function lock(showAuth){
+    /* 需登录分享已判定要出登录页时，boot 末尾的 lock(false) 不得再把登录藏掉（Safari 上尤其容易白屏） */
+    if (shareNeedLogin && showAuth === false) showAuth = true;
     if (showAuth !== false) $('#authScreen').classList.add('open');
     else $('#authScreen').classList.remove('open');
     $('.app').hidden = true;
   }
   function unlock(){
+    shareNeedLogin = false;
     $('#authScreen').classList.remove('open');
     $('.app').hidden = false;
+  }
+  function setShareNeedLogin(v){
+    shareNeedLogin = !!v;
+    if (shareNeedLogin){
+      const sub = $('#authSub');
+      if (sub) sub.textContent = '此分享需要登录后查看';
+    }
+  }
+  function fireReady(){
+    readyListeners.forEach(fn => { try { fn(); } catch (e) { console.error(e); } });
   }
 
   function shareTokenFromUrl(){
@@ -109,6 +124,7 @@ const App = (() => {
        需登录分享会在打开失败时再 lock()。 */
     lock(!shareTokenFromUrl());
     finishBoot();
+    fireReady();
   }
 
   async function enter(u, reload){
@@ -222,8 +238,9 @@ const App = (() => {
     get prefs(){ return prefs; },
         applyPrefs, applyUser, renderAvatar,
     boot, enter, lock, unlock, onUnauthorized, logout,
-    shareTokenFromUrl,
+    shareTokenFromUrl, setShareNeedLogin,
     onEnter: fn => listeners.push(fn),
+    onReady: fn => readyListeners.push(fn),
     openModal, closeModal, esc, fmtBytes,
     promptModal, confirmModal, showChangelog,
     _finishPrompt: finishPrompt, _finishConfirm: finishConfirm,

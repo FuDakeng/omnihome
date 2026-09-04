@@ -457,6 +457,14 @@ def run_suite(engine):
     r = client.get(f"/api/share/{ltoken}", headers=HA(tok))
     check(f"[{engine}] 需登录分享已登录可读",
           r.status_code == 200 and r.json().get("requireLogin") is True, r.text[:80])
+    r = client.post("/api/auth/login", json={"username": USER, "password": "wrong-pass"})
+    det = ""
+    try:
+        det = str((r.json() or {}).get("detail") or "")
+    except Exception:
+        det = (r.text or "")[:80]
+    check(f"[{engine}] 密码错误 401", r.status_code == 401, str(r.status_code))
+    check(f"[{engine}] 密码错误提示含密码", "密码" in det, det[:80])
     r = client.get(f"/api/share/{token}/notes/{nid}/export")
     check(f"[{engine}] 分享下载当前 md",
           r.status_code == 200 and b"edited via share" in (r.content or b""),
