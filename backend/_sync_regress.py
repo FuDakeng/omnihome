@@ -413,7 +413,17 @@ def run_suite(engine):
     r = client.post("/api/notes/shares", headers=HA(tok),
                     json={"kind": "note", "noteId": nid, "expireDays": 7, "canEdit": True})
     token = (r.json() or {}).get("token") or ""
+    sid = (r.json() or {}).get("id") or ""
     check(f"[{engine}] 创建笔记分享", r.status_code == 200 and token.startswith("s_"), token[:12])
+    r = client.put(f"/api/notes/shares/{sid}", headers=HA(tok), json={"canEdit": False})
+    check(f"[{engine}] 更新分享关闭编辑", r.status_code == 200 and r.json().get("canEdit") is False,
+          r.text[:80])
+    r = client.get(f"/api/share/{token}")
+    check(f"[{engine}] 关闭编辑后公开只读", r.status_code == 200 and r.json().get("canEdit") is False,
+          r.text[:80])
+    r = client.put(f"/api/notes/shares/{sid}", headers=HA(tok), json={"canEdit": True})
+    check(f"[{engine}] 更新分享重新开启编辑", r.status_code == 200 and r.json().get("canEdit") is True,
+          r.text[:80])
     r = client.get(f"/api/share/{token}")
     check(f"[{engine}] 公开读取分享", r.status_code == 200 and r.json().get("canEdit") is True, r.text[:80])
     r = client.get(f"/api/share/{token}/notes/{nid}")

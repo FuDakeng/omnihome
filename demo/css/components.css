@@ -1335,6 +1335,29 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
 #confirmMask{ z-index: 260; }
 /* 公开分享层须高于登录页（.auth-page z-index:150），否则访客只看到登录 */
 #kbShareViewMask{ z-index: 180; }
+.kb-share-view{
+  width: min(1120px, 96vw); max-height: 92vh; height: 92vh;
+  display: flex; flex-direction: column;
+}
+.kb-share-view-head{
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.kb-share-view-actions{ display: flex; align-items: center; gap: 8px; flex: none; }
+.kb-share-view-layout{
+  display: grid; grid-template-columns: 180px minmax(0, 1fr) auto;
+  flex: 1; min-height: 0; border-top: 1px solid var(--om-border);
+}
+#kbShareViewList{
+  overflow: auto; padding: 8px 6px; border-right: 1px solid var(--om-border);
+}
+#kbShareViewList .note-item.active{ background: var(--om-primary-ghost); color: var(--om-primary); }
+.kb-share-ed{ display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.kb-share-ed .ed-body{ flex: 1; min-height: 0; }
+.kb-share-outline{
+  position: relative; top: auto; align-self: stretch;
+  height: 100%; max-height: none;
+  border-radius: 0; border-top: 0; border-bottom: 0; border-right: 0;
+}
 .modal{
   width: min(420px, 92vw);
   border-radius: var(--om-radius-lg);

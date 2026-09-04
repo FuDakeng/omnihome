@@ -29,6 +29,7 @@ const Notes = (() => {
   let dirty = false;
   let saveTimer = null;
   let liveEd = null;       // LiveMD 实例（原地实时渲染）
+  let shareLiveEd = null;  // 分享页独立 LiveMD，不与主编辑器抢实例
   let selNotes = new Set();    // ctrl/cmd 多选：笔记 id 集合
   let selFolders = new Set();  // ctrl/cmd 多选：文件夹路径集合
   let selAssets = new Set();   // ctrl/cmd 多选：附件名集合（拖动可批量引用入编辑区）
@@ -1523,24 +1524,51 @@ const Notes = (() => {
     }
     App.openModal('kbShareMask');
   }
+  async function persistExistingShare(){
+    const sid = $('#kbShareRevoke')?.dataset.sid;
+    if (!sid || $('#kbShareRevoke')?.hidden) return null;
+    const days = parseInt($('#kbShareExpire .seg-btn.active')?.dataset.days || '7', 10);
+    const d = await API.put('/api/notes/shares/' + encodeURIComponent(sid), {
+      expireDays: days,
+      canEdit: $('#kbShareEdit').classList.contains('on'),
+      requireLogin: $('#kbShareNeedLogin')?.classList.contains('on'),
+    });
+    await load();
+    return d;
+  }
   async function createShareLink(){
     if (!shareTarget) return;
     const days = parseInt($('#kbShareExpire .seg-btn.active')?.dataset.days || '7', 10);
+    const payload = {
+      kind: shareTarget.kind,
+      noteId: shareTarget.noteId || '',
+      folder: shareTarget.folder || '',
+      vault: currentVault,
+      expireDays: days,
+      canEdit: $('#kbShareEdit').classList.contains('on'),
+      requireLogin: $('#kbShareNeedLogin')?.classList.contains('on'),
+    };
     try {
-      const d = await API.post('/api/notes/shares', {
-        kind: shareTarget.kind,
-        noteId: shareTarget.noteId || '',
-        folder: shareTarget.folder || '',
-        vault: currentVault,
-        expireDays: days,
-        canEdit: $('#kbShareEdit').classList.contains('on'),
-        requireLogin: $('#kbShareNeedLogin')?.classList.contains('on'),
-      });
-      const url = shareLinkUrl(d.token);
-      $('#kbShareLink').value = url;
-      $('#kbShareLinkRow').hidden = false;
-      showToast('链接已生成，默认开启查看权限');
-      await load();
+      const sid = $('#kbShareRevoke')?.dataset.sid;
+      let token = '';
+      if (sid && !$('#kbShareRevoke').hidden){
+        const d = await persistExistingShare();
+        token = (d && d.token) || ($('#kbShareLink').value.match(/[?&]s=([^&]+)/) || [])[1] || '';
+        token = token ? decodeURIComponent(token) : '';
+        if (!token) token = (d && d.token) || '';
+        showToast(payload.canEdit ? '已更新：持有链接可编辑' : '已更新分享设置');
+      } else {
+        const d = await API.post('/api/notes/shares', payload);
+        token = d.token;
+        $('#kbShareRevoke').hidden = false;
+        $('#kbShareRevoke').dataset.sid = d.id || '';
+        showToast('链接已生成');
+        await load();
+      }
+      if (token){
+        $('#kbShareLink').value = shareLinkUrl(token);
+        $('#kbShareLinkRow').hidden = false;
+      }
     } catch (e) { showToast(e.message, 'err'); }
   }
 
@@ -1601,16 +1629,101 @@ const Notes = (() => {
       if (s) openShareOverlay(s);
     } catch (_) {}
   }
+  const shareView = { token: '', canEdit: false, nid: '', mode: 'split' };
+  let shareSaveTimer = 0;
+  function destroyShareLive(){
+    if (shareLiveEd){ try { shareLiveEd.destroy(); } catch (_) {} shareLiveEd = null; }
+  }
+  function rewriteShareAssets(html){
+    html = String(html || '').replace(/src="\/api\/notes\/assets\//g,
+      'src="/api/share/' + encodeURIComponent(shareView.token) + '/assets/');
+    const access = API.getToken();
+    if (access)
+      html = html.replace(/(\/api\/share\/[^"]+\/assets\/[^"?]+)/g,
+        '$1?access=' + encodeURIComponent(access));
+    return html;
+  }
+  function renderSharePreview(){
+    const pv = $('#kbSharePreview');
+    if (!pv) return;
+    let html = mdRender($('#kbShareSrc')?.value || '') || '<p style="color:var(--om-text-3)">空笔记</p>';
+    pv.innerHTML = rewriteShareAssets(html);
+    highlightPreviewCode(pv);
+  }
+  function renderShareOutline(){
+    const body = $('#kbShareOutlineBody');
+    if (!body) return;
+    const items = mdOutline($('#kbShareSrc')?.value || '');
+    body.innerHTML = items.length
+      ? items.map(h =>
+          '<button class="md-outline-item lv' + h.level + '" type="button" data-sh-target="' +
+          App.esc(h.id) + '">' + App.esc(h.text) + '</button>').join('')
+      : '<div class="md-outline-empty">当前笔记没有标题</div>';
+  }
+  function setShareOutline(on){
+    const p = $('#kbShareOutline');
+    if (!p) return;
+    if (on){
+      renderShareOutline();
+      p.classList.add('open');
+      $('#kbShareOutlineBtn')?.classList.add('on');
+    } else {
+      p.classList.remove('open');
+      $('#kbShareOutlineBtn')?.classList.remove('on');
+    }
+  }
+  function setShareMode(mode){
+    shareView.mode = mode;
+    $$('#kbShareModeSeg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.shMode === mode));
+    const src = $('#kbShareSrc'), pv = $('#kbSharePreview'), body = $('#kbShareEdBody');
+    const useLive = shareView.canEdit && !!shareLiveEd && mode === 'edit';
+    if (shareLiveEd){ useLive ? shareLiveEd.show() : shareLiveEd.hide(); }
+    if (src) src.style.display = (!shareView.canEdit || mode === 'preview' || useLive) ? 'none' : '';
+    if (pv) pv.style.display = (shareView.canEdit && mode === 'edit') ? 'none' : '';
+    body?.classList.toggle('single', !shareView.canEdit || mode !== 'split');
+    if (!useLive) renderSharePreview();
+    renderShareOutline();
+  }
+  function attachShareLive(){
+    destroyShareLive();
+    const ta = $('#kbShareSrc');
+    if (!ta || !window.LiveMD || !shareView.canEdit) return;
+    shareLiveEd = LiveMD.attach(ta, { afterRebuild: renderShareOutline });
+    shareLiveEd.hide();
+  }
+  async function saveShareNote(){
+    if (!shareView.canEdit || !shareView.nid || !shareView.token) return;
+    try {
+      const content = $('#kbShareSrc').value;
+      await shareFetch('/api/share/' + encodeURIComponent(shareView.token) +
+        '/notes/' + encodeURIComponent(shareView.nid), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      const st = $('#kbShareFootStatus');
+      if (st) st.textContent = '已保存 · ' + content.length + ' 字';
+    } catch (err) { showToast(err.message || '保存失败', 'err'); }
+  }
+  function onShareSrcInput(){
+    if (!shareView.canEdit) return;
+    renderSharePreview();
+    renderShareOutline();
+    const st = $('#kbShareFootStatus');
+    if (st) st.textContent = '编辑中…';
+    clearTimeout(shareSaveTimer);
+    shareSaveTimer = setTimeout(saveShareNote, 900);
+  }
   async function openShareOverlay(token){
     const mask = $('#kbShareViewMask');
     if (!mask) return;
+    shareView.token = token;
     mask.classList.add('open');
     const list = $('#kbShareViewList');
-    const body = $('#kbShareViewBody');
     const title = $('#kbShareViewTitle');
     const sub = $('#kbShareViewSub');
     list.innerHTML = '加载中…';
-    body.innerHTML = '';
+    $('#kbSharePreview').innerHTML = '';
     try {
       const d = await shareFetch('/api/share/' + encodeURIComponent(token));
       title.textContent = d.name || '分享';
@@ -1623,37 +1736,20 @@ const Notes = (() => {
       ).join('') || '<div class="kb-empty">没有可查看的笔记</div>';
       const loadOne = async nid => {
         const n = await shareFetch('/api/share/' + encodeURIComponent(token) + '/notes/' + encodeURIComponent(nid));
-        let html = mdRender(n.content || '') || '<p style="color:var(--om-text-3)">空笔记</p>';
-        html = html.replace(/src="\/api\/notes\/assets\//g,
-          'src="/api/share/' + encodeURIComponent(token) + '/assets/');
-        const access = API.getToken();
-        if (access)
-          html = html.replace(/(\/api\/share\/[^"]+\/assets\/[^"?]+)/g,
-            '$1?access=' + encodeURIComponent(access));
-        body.innerHTML = '<h3 style="margin:0 0 12px">' + App.esc(n.title || '') + '</h3>' + html;
-        highlightPreviewCode(body);
-        if (n.canEdit){
-          const editor = document.createElement('div');
-          editor.style.marginTop = '16px';
-          editor.innerHTML =
-            '<div class="set-row-label" style="margin-bottom:8px">编辑笔记</div>' +
-            '<textarea class="input" id="kbShareEditSrc" style="width:100%;min-height:220px;padding:12px 14px;font-family:var(--om-font-mono);line-height:1.6"></textarea>' +
-            '<div style="margin-top:10px;display:flex;justify-content:flex-end"><button class="btn btn-primary btn-sm" type="button" id="kbShareSave">保存</button></div>';
-          body.appendChild(editor);
-          const ta = editor.querySelector('#kbShareEditSrc');
-          ta.value = n.content || '';
-          editor.querySelector('#kbShareSave').addEventListener('click', async () => {
-            try {
-              await shareFetch('/api/share/' + encodeURIComponent(token) + '/notes/' + encodeURIComponent(nid), {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: ta.value }),
-              });
-              showToast('已保存');
-              loadOne(nid);
-            } catch (err) { showToast(err.message || '保存失败', 'err'); }
-          });
-        }
+        shareView.nid = nid;
+        shareView.canEdit = !!n.canEdit;
+        $$('#kbShareViewList .note-item').forEach(b =>
+          b.classList.toggle('active', b.dataset.shareNid === nid));
+        $('#kbShareSrc').value = n.content || '';
+        $('#kbShareEdBar').hidden = !shareView.canEdit;
+        $('#kbShareFoot').hidden = !shareView.canEdit;
+        $('#kbShareFootStatus').textContent = shareView.canEdit ? ('已保存 · ' + (n.content || '').length + ' 字') : '只读';
+        title.textContent = n.title || d.name || '分享';
+        if (shareView.canEdit) attachShareLive();
+        else destroyShareLive();
+        setShareMode(shareView.canEdit ? 'split' : 'preview');
+        if (d.canEdit && !n.canEdit)
+          sub.textContent = '此分享允许编辑，但该笔记为只读或常驻，无法改写';
       };
       list.onclick = e => {
         const b = e.target.closest('[data-share-nid]');
@@ -1672,6 +1768,10 @@ const Notes = (() => {
     }
   }
   function leaveShareOverlay(){
+    clearTimeout(shareSaveTimer);
+    if (shareView.canEdit) saveShareNote();
+    destroyShareLive();
+    setShareOutline(false);
     $('#kbShareViewMask')?.classList.remove('open');
     if (!API.getToken()) App.lock();
   }
@@ -1703,8 +1803,71 @@ const Notes = (() => {
       const b = e.target.closest('.seg-btn');
       if (!b) return;
       $$('#kbShareExpire .seg-btn').forEach(x => x.classList.toggle('active', x === b));
+      persistExistingShare().catch(err => showToast(err.message, 'err'));
+    });
+    $('#kbShareEdit')?.addEventListener('click', () => {
+      persistExistingShare().catch(err => showToast(err.message, 'err'));
+    });
+    $('#kbShareNeedLogin')?.addEventListener('click', () => {
+      persistExistingShare().catch(err => showToast(err.message, 'err'));
     });
     $('#kbShareViewClose')?.addEventListener('click', leaveShareOverlay);
+    $('#kbShareOutlineBtn')?.addEventListener('click', () =>
+      setShareOutline(!$('#kbShareOutline')?.classList.contains('open')));
+    $('#kbShareOutlineClose')?.addEventListener('click', () => setShareOutline(false));
+    $('#kbShareOutlineBody')?.addEventListener('click', e => {
+      const it = e.target.closest('[data-sh-target]');
+      if (!it) return;
+      if (shareView.canEdit && shareView.mode === 'edit') setShareMode('split');
+      setTimeout(() => {
+        const el = document.getElementById(it.dataset.shTarget);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 60);
+    });
+    $$('#kbShareModeSeg .seg-btn').forEach(b =>
+      b.addEventListener('click', () => setShareMode(b.dataset.shMode)));
+    $('#kbShareSrc')?.addEventListener('input', onShareSrcInput);
+    $('#kbShareEdBar')?.addEventListener('click', e => {
+      const btn = e.target.closest('[data-sh-act]');
+      if (!btn || !shareView.canEdit) return;
+      const act = btn.dataset.shAct;
+      const ta = $('#kbShareSrc');
+      const liveOn = () => shareLiveEd && shareLiveEd.isShown();
+      const srcInsert = text => {
+        ta.focus();
+        document.execCommand('insertText', false, text);
+        ta.dispatchEvent(new Event('input'));
+      };
+      const wrapSel = (pre, suf, ph) => {
+        if (liveOn()){ shareLiveEd.wrapSelection(pre, suf, ph || ''); return; }
+        const s = ta.selectionStart, e2 = ta.selectionEnd;
+        const sel = ta.value.slice(s, e2);
+        const mid = sel || ph || '';
+        ta.focus();
+        document.execCommand('insertText', false, pre + mid + suf);
+        ta.dispatchEvent(new Event('input'));
+      };
+      const linePrefix = prefix => {
+        if (liveOn()){ shareLiveEd.lineInsert(prefix); return; }
+        const s = ta.selectionStart;
+        const lineStart = ta.value.lastIndexOf('\n', s - 1) + 1;
+        ta.setSelectionRange(lineStart, lineStart);
+        srcInsert(prefix);
+      };
+      if (act === 'bold') wrapSel('**', '**', '粗体');
+      else if (act === 'italic') wrapSel('*', '*', '斜体');
+      else if (act === 'strike') wrapSel('~~', '~~', '删除线');
+      else if (act === 'inline-code') wrapSel('`', '`', 'code');
+      else if (act === 'h1') linePrefix('# ');
+      else if (act === 'h2') linePrefix('## ');
+      else if (act === 'h3') linePrefix('### ');
+      else if (act === 'ul') linePrefix('- ');
+      else if (act === 'ol') linePrefix('1. ');
+      else if (act === 'task') linePrefix('- [ ] ');
+      else if (act === 'quote') linePrefix('> ');
+      else if (act === 'code') wrapSel('\n```\n', '\n```\n', 'code');
+      else if (act === 'link') wrapSel('[', '](https://)', '链接文字');
+    });
 
     /* 顶部 "..." 溢出菜单：导入 / 导出（设计图把显眼按钮收纳收起） */
     $('#notesOverflowBtn')?.addEventListener('click', () => kbMenu($('#notesOverflowBtn'), [

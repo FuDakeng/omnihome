@@ -2318,6 +2318,34 @@ def revoke_share(sid: str, authorization: Optional[str] = Header(None)):
     return {"ok": True}
 
 
+class SharePatchIn(BaseModel):
+    expireDays: Optional[int] = None
+    canEdit: Optional[bool] = None
+    requireLogin: Optional[bool] = None
+
+
+@router.put("/api/notes/shares/{sid}")
+def update_share(sid: str, body: SharePatchIn, authorization: Optional[str] = Header(None)):
+    """更新已有分享的权限 / 有效期，不更换链接。"""
+    username = require_user(authorization)
+    items = _share_gc(username)
+    rec = next((x for x in items if x.get("id") == sid), None)
+    if not rec:
+        raise HTTPException(404, "分享不存在")
+    if body.canEdit is not None:
+        rec["canEdit"] = bool(body.canEdit)
+    if body.requireLogin is not None:
+        rec["requireLogin"] = bool(body.requireLogin)
+    if body.expireDays is not None:
+        days = max(0, min(3650, int(body.expireDays)))
+        rec["expireAt"] = int(time.time()) + (3650 if days == 0 else days) * 86400
+    _shares_save(username, items)
+    return {"ok": True, "id": sid, "canEdit": bool(rec.get("canEdit")),
+            "requireLogin": bool(rec.get("requireLogin")),
+            "expireAt": int(rec.get("expireAt") or 0),
+            "token": rec.get("token") or ""}
+
+
 def _require_share(token: str):
     found = _resolve_share(token)
     if not found:
@@ -2357,9 +2385,10 @@ def share_get_note(token: str, nid: str, authorization: Optional[str] = Header(N
     hit = next((n for n in notes if n["id"] == nid), None)
     if not hit:
         raise HTTPException(404, "不在此分享范围内")
+    editable = bool(rec.get("canEdit")) and not hit.get("readonly") and not hit.get("pinned")
     return {"id": nid, "title": hit.get("title") or "", "folder": hit.get("folder") or "",
             "content": storage.note_read(username, nid),
-            "updated": int(hit.get("updated") or 0), "canEdit": bool(rec.get("canEdit"))}
+            "updated": int(hit.get("updated") or 0), "canEdit": editable}
 
 
 class ShareNoteIn(BaseModel):
