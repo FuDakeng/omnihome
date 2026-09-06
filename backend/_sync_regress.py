@@ -307,6 +307,9 @@ def run_suite(engine):
           r.text[:80])
     r = client.get("/api/sync/hello", headers=HK(key))
     check(f"[{engine}] 关闭后令牌握手 403", r.status_code == 403, str(r.status_code) + r.text[:80])
+    closed_msg = str((r.json() or {}).get("detail") or r.text)
+    check(f"[{engine}] 关闭后提示仓库同步已关",
+          "已关闭" in closed_msg and "同步" in closed_msg, closed_msg[:80])
     r = client.get("/api/sync/apikey?vault=default", headers=HA(tok))
     info = r.json() or {}
     check(f"[{engine}] 关闭后令牌仍在且未吊销",
@@ -598,15 +601,16 @@ def run_suite(engine):
           r.status_code == 200 and r.json().get("content") == "member edit", r.text[:80])
     r = client.post("/api/sync/apikey", headers=HA(tok2), json={"vault": tvid})
     check(f"[{engine}] 创建人未开同步时成员不能发钥", r.status_code == 403, str(r.status_code))
-    prefs = storage.get_prefs(USER) or {}
-    prefs["obsidianSync"] = True
-    storage.save_prefs(USER, prefs)
+    r = client.put("/api/sync/enabled", headers=HA(tok), json={"vault": tvid, "enabled": True})
+    check(f"[{engine}] 创建人开启仓库同步开关",
+          r.status_code == 200 and r.json().get("enabled") is True, r.text[:80])
+    r = client.post("/api/sync/apikey", headers=HA(tok2), json={"vault": tvid})
+    mkey = (r.json() or {}).get("apiKey") or ""
+    check(f"[{engine}] 开启同步后成员无需创建人令牌即可发钥",
+          r.status_code == 200 and mkey.startswith("ohs_"), mkey[:12] + r.text[:80])
     r = client.post("/api/sync/apikey", headers=HA(tok), json={"vault": tvid})
     okey = (r.json() or {}).get("apiKey") or ""
     check(f"[{engine}] 创建人团队仓令牌", r.status_code == 200 and okey.startswith("ohs_"), okey[:12])
-    r = client.post("/api/sync/apikey", headers=HA(tok2), json={"vault": tvid})
-    mkey = (r.json() or {}).get("apiKey") or ""
-    check(f"[{engine}] 可编辑成员发自己的钥", r.status_code == 200 and mkey.startswith("ohs_"), mkey[:12])
     r = client.get("/api/sync/hello", headers=HK(mkey))
     check(f"[{engine}] 成员钥 hello 指向创建人仓",
           r.status_code == 200 and r.json().get("vault") == tvid

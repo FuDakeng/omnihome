@@ -513,8 +513,20 @@ const Notes = (() => {
   }
 
   /* ---------- 加号小菜单（选择新建笔记 / 文件夹） ---------- */
-  function kbMenu(btn, items){
+  let _kbMenuAnchor = null;
+  let _kbMenuDocClose = null;
+  function closeKbMenu(){
     document.querySelectorAll('.kb-menu').forEach(m => m.remove());
+    _kbMenuAnchor = null;
+    if (_kbMenuDocClose){
+      document.removeEventListener('click', _kbMenuDocClose);
+      _kbMenuDocClose = null;
+    }
+  }
+  function kbMenu(btn, items){
+    const same = _kbMenuAnchor === btn && document.querySelector('.kb-menu');
+    closeKbMenu();
+    if (same) return;
     const menu = document.createElement('div');
     menu.className = 'kb-menu';
     items.forEach(it => {
@@ -529,16 +541,23 @@ const Notes = (() => {
       const b = document.createElement('button');
       if (kind === 'danger') b.className = 'danger';
       b.innerHTML = `<svg class="ic"><use href="#${icon}"/></svg>${label}`;
-      b.addEventListener('click', () => { menu.remove(); fn(); });
+      b.addEventListener('click', (e) => { e.stopPropagation(); closeKbMenu(); fn(); });
       menu.appendChild(b);
     });
     document.body.appendChild(menu);
+    _kbMenuAnchor = btn;
     const r = btn.getBoundingClientRect();
     let top = r.bottom + 6;
     if (top + menu.offsetHeight > innerHeight - 8) top = r.top - menu.offsetHeight - 6;
     menu.style.left = Math.max(8, Math.min(r.left, innerWidth - menu.offsetWidth - 8)) + 'px';
     menu.style.top = top + 'px';
-    setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 0);
+    setTimeout(() => {
+      _kbMenuDocClose = (e) => {
+        if (btn.contains(e.target) || menu.contains(e.target)) return;
+        closeKbMenu();
+      };
+      document.addEventListener('click', _kbMenuDocClose);
+    }, 0);
   }
   function openKbMenu(btn, folder){
     kbMenu(btn, [
@@ -2024,11 +2043,11 @@ const Notes = (() => {
           <button class="btn btn-outline btn-sm" type="button" id="kbTeamCopy">复制</button>
           <button class="btn btn-ghost btn-sm" type="button" id="kbTeamResetInv">重置</button></div>
           <div class="set-row-sub" style="margin:8px 0 12px">对方可在知识库 ⋯ 菜单选择「加入团队仓库」并填入邀请码。</div>
-          <div class="set-row-label">成员</div>`;
+          <div class="team-member-head"><span>成员</span><span>编辑权限</span><span></span></div>`;
         html += (d.members || []).length
           ? (d.members || []).map(m => `<div class="team-member" data-mu="${App.esc(m.u)}">
               <span class="nm">${App.esc(m.u)}</span>
-              <button class="btn btn-ghost btn-sm" type="button" data-team-edit="${App.esc(m.u)}">${m.canEdit ? '关闭编辑' : '开启编辑'}</button>
+              <button class="switch${m.canEdit ? ' on' : ''}" type="button" role="switch" data-team-edit="${App.esc(m.u)}" aria-checked="${m.canEdit ? 'true' : 'false'}" title="编辑权限"></button>
               <button class="btn btn-ghost btn-sm" type="button" data-team-kick="${App.esc(m.u)}" style="color:var(--om-danger)">移出</button>
             </div>`).join('')
           : '<div class="kb-empty">还没有成员，把邀请码或链接发给同事即可</div>';
@@ -2077,12 +2096,15 @@ const Notes = (() => {
         const kick = e.target.closest('[data-team-kick]');
         try {
           if (ed){
-            const on = ed.textContent.indexOf('开启') >= 0;
-            await API.put('/api/notes/vaults/' + encodeURIComponent(vid) + '/members/' + encodeURIComponent(ed.dataset.teamEdit), { canEdit: on });
-            showToast(on ? '已开启编辑权限' : '已关闭编辑权限');
+            e.stopPropagation();
+            const next = !ed.classList.contains('on');
+            await API.put('/api/notes/vaults/' + encodeURIComponent(vid) + '/members/' + encodeURIComponent(ed.dataset.teamEdit), { canEdit: next });
+            showToast(next ? '已开启编辑权限' : '已关闭编辑权限');
             openTeamModal(vid);
+            return;
           }
           if (kick){
+            e.stopPropagation();
             if (!await App.confirmModal({ title: '移出成员？', danger: true, okText: '移出',
               sub: '对方将立即失去此仓库访问权限。' })) return;
             await API.del('/api/notes/vaults/' + encodeURIComponent(vid) + '/members/' + encodeURIComponent(kick.dataset.teamKick));
@@ -2445,7 +2467,9 @@ const Notes = (() => {
     });
 
     /* 顶部 "..." 溢出菜单：导入 / 导出（设计图把显眼按钮收纳收起） */
-    $('#notesOverflowBtn')?.addEventListener('click', () => kbMenu($('#notesOverflowBtn'), [
+    $('#notesOverflowBtn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      kbMenu($('#notesOverflowBtn'), [
       ['新建笔记仓库', 'i-folder', () => createVault()],
       ['加入团队仓库…', 'i-users', () => joinTeamPrompt()],
       ['重命名当前仓库', 'i-pen', () => renameVault()],
@@ -2456,7 +2480,8 @@ const Notes = (() => {
       ['Obsidian 同步…', 'i-swap', () => openObsidianModal()],
       ...(vaultCanEdit() ? [['导入 Markdown / zip', 'i-download', () => importMd()]] : []),
       ['导出全部笔记', 'i-upload', () => API.dl('/api/notes/all')],
-    ]));
+    ]);
+    });
     $('#kbVaultBtn')?.addEventListener('click', e => {
       e.stopPropagation();
       const items = vaults.map(v => [

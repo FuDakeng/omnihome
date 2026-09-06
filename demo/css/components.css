@@ -1228,6 +1228,7 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
   background: var(--om-surface-3);
   transition: background var(--om-t-fast);
   flex: none;
+  cursor: pointer;
 }
 .switch::after{
   content: "";
@@ -2741,10 +2742,23 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 .inbox-item .t{ font-size: 13px; font-weight: 650; color: var(--om-text-1); }
 .inbox-item .b{ font-size: 12px; color: var(--om-text-2); margin-top: 3px; line-height: 1.5; }
 .inbox-item .ops{ display: flex; gap: 8px; margin-top: 8px; }
+.team-member-head{
+  display: grid; grid-template-columns: minmax(0, 1fr) 72px auto;
+  align-items: center; gap: 8px;
+  padding: 4px 0 8px; margin-bottom: 2px;
+  border-bottom: 1px solid var(--om-border);
+  font-size: 11px; font-weight: 650; color: var(--om-text-3);
+  letter-spacing: .02em;
+}
+.team-member-head span:nth-child(2),
+.team-member-head span:nth-child(3){ text-align: center; }
 .team-member{
-  display: flex; align-items: center; gap: 8px;
+  display: grid; grid-template-columns: minmax(0, 1fr) 72px auto;
+  align-items: center; gap: 8px;
   padding: 8px 0; border-bottom: 1px solid var(--om-border);
 }
-.team-member .nm{ flex: 1; min-width: 0; font-size: 13px; font-weight: 600; }
+.team-member .nm{ min-width: 0; font-size: 13px; font-weight: 600; }
+.team-member .switch{ justify-self: center; }
+.team-member [data-team-kick]{ justify-self: end; padding: 0 4px; }
 .team-invite{ display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .team-invite .input{ flex: 1; min-width: 0; padding-left: 12px; height: 34px; font-size: 12.5px; }

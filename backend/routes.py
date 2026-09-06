@@ -3161,7 +3161,7 @@ def require_sync_ctx(x_api_key: Optional[str]) -> dict:
         raise HTTPException(403, "系统内置仓库不可同步")
     ctx.setdefault("actor", ctx["u"])
     if not _vault_sync_enabled(ctx["u"], ctx.get("vault") or ""):
-        raise HTTPException(403, "该笔记仓库已关闭 Obsidian 同步")
+        raise HTTPException(403, "万事屋服务端已关闭当前笔记仓库的同步功能")
     return ctx
 
 
@@ -3323,8 +3323,6 @@ def sync_apikey_create(body: Optional[SyncKeyIn] = Body(default=None),
             raise HTTPException(403, "只读成员不能同步此团队仓库")
         if not _vault_sync_enabled(tctx["store"], vid):
             raise HTTPException(403, "创建人尚未开启此仓库的 Obsidian 同步")
-        if not storage.owner_has_sync_key(tctx["store"], vid):
-            raise HTTPException(403, "创建人尚未为此仓库启用同步")
         store, actor = tctx["store"], username
     try:
         raw = storage.gen_sync_key(store, vid, actor=actor)

@@ -27,7 +27,7 @@ const SELF_WRITE_MS = 4000;         // 自写抑制窗口（避免回环触发�
 
 /* 插件独立版本线（与服务端 app 版本解耦；须与 manifest.json 的 version 保持一致）。
    打进启动日志与设置页，用户反馈报错时可一眼确认所装插件版本。 */
-const PLUGIN_VERSION = '0.0.7';
+const PLUGIN_VERSION = '0.0.8';
 
 const ASSET_MAX = 5 * 1024 * 1024;   // 与服务端 ASSET_MAX 一致
 const ASSET_DIR = 'OmniHome-assets';  // 从站点拉取、本地无原路径的附件落点
@@ -74,6 +74,17 @@ function firstDiffSummary(oldT, newT) {
     return '第 ' + (i + 1) + ' 行由「' + clipSync(a[i]) + '」改为「' + clipSync(b[i]) + '」';
   }
   return '正文有变更';
+}
+const VAULT_CLOSED_HINT = '万事屋服务端已关闭当前笔记仓库的同步功能';
+function isVaultSyncClosed(msg) {
+  const s = String(msg || '');
+  return s.indexOf('已关闭') >= 0 && s.indexOf('同步') >= 0;
+}
+function formatSyncLogTs(ts) {
+  const d = ts ? new Date(Number(ts) * 1000) : null;
+  if (!d || isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
 }
 function nowMs() { return Date.now(); }
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
@@ -241,6 +252,7 @@ class OmniHomeSyncPlugin extends Plugin {
     this._lastNotify = 0;
     this._lastErrNotify = 0;
     this.lastError = '';
+    this.vaultSyncClosed = false;
 
     this.remote = {};
     this.statusBar = this.addStatusBarItem();
@@ -334,7 +346,7 @@ class OmniHomeSyncPlugin extends Plugin {
               : (raw ? JSON.parse(raw) : null);
             detail = (j && j.detail) || '';
           } catch (ex) { /* 错误体可能非 JSON */ }
-          lastErr = new Error(detail || ('请求失败 ' + st));
+          lastErr = this.syncApiError(detail, st);
           throw lastErr;
         }
         lastErr = new Error('无法连接服务端：' + msg);
@@ -346,8 +358,9 @@ class OmniHomeSyncPlugin extends Plugin {
       if (resp.status >= 400) {
         let detail = '';
         try { detail = (JSON.parse(text) || {}).detail || ''; } catch (e) { /* 错误体可能非 JSON */ }
-        throw new Error(detail || ('请求失败 ' + resp.status));
+        throw this.syncApiError(detail, resp.status);
       }
+      this.vaultSyncClosed = false;
       try {
         return text ? JSON.parse(text) : {};
       } catch (e) {
@@ -359,6 +372,14 @@ class OmniHomeSyncPlugin extends Plugin {
       }
     }
     throw lastErr || new Error('请求失败');
+  }
+  syncApiError(detail, status) {
+    const raw = Array.isArray(detail) ? detail.map(function (x) { return String(x); }).join(' ') : String(detail || '').trim();
+    if (isVaultSyncClosed(raw)) {
+      this.vaultSyncClosed = true;
+      return new Error(VAULT_CLOSED_HINT);
+    }
+    return new Error(raw || ('请求失败 ' + status));
   }
   remoteList() {
     return this.api('GET', '/api/sync/list').then((d) => (d && d.files) || []);
@@ -576,14 +597,28 @@ class OmniHomeSyncPlugin extends Plugin {
     }
   }
   pushNoteLog(kind, path, summary, fromEnd, toEnd) {
-    const title = noteTitleFromPath(path);
-    this.api('POST', '/api/sync/log', {
-      body: {
-        kind: kind, title: title, summary: summary || '', path: path || '',
-        fromEnd: fromEnd || '万事屋', toEnd: toEnd || 'Obsidian',
-        msg: kind + ' ' + title,
-      },
-    }).catch(() => {});
+    if (!this.settings.log) this.settings.log = [];
+    const rec = {
+      ts: Math.floor(Date.now() / 1000),
+      kind: kind,
+      title: noteTitleFromPath(path),
+      summary: String(summary || ''),
+      path: path || '',
+      from: fromEnd || '万事屋',
+      to: toEnd || 'Obsidian',
+    };
+    this.settings.log.unshift(rec);
+    this.settings.log = this.settings.log.slice(0, 80);
+    this.saveSettings();
+    if (this.canSync() && !this.vaultSyncClosed) {
+      this.api('POST', '/api/sync/log', {
+        body: {
+          kind: rec.kind, title: rec.title, summary: rec.summary, path: rec.path,
+          fromEnd: rec.from, toEnd: rec.to,
+          msg: rec.kind + ' ' + rec.title,
+        },
+      }).catch(() => {});
+    }
   }
 
   /* ---------- 自写抑制（避免拉取/删除触发的事件回环） ---------- */
@@ -1007,7 +1042,7 @@ class OmniHomeSyncPlugin extends Plugin {
     if (t - this._lastErrNotify >= ERR_THROTTLE_MS) {
       this._lastErrNotify = t;
       new Notice('OmniHome Sync 错误：' + msg, 8000);
-      this.pushLog('error', msg);
+      if (!isVaultSyncClosed(msg)) this.pushLog('error', msg);
     }
   }
 
@@ -1033,6 +1068,28 @@ class OmniHomeSyncPlugin extends Plugin {
   }
 }
 
+function renderNoteLogBox(box, logs) {
+  box.empty();
+  const rows = (logs || []).filter((x) => x && ['add', 'edit', 'delete'].indexOf(x.kind) >= 0);
+  if (!rows.length) {
+    box.createEl('p', { text: '暂无笔记变更记录', cls: 'omnihome-sync-muted' });
+    return;
+  }
+  const kindLabel = { add: '新增', edit: '修改', delete: '删除' };
+  rows.slice(0, 40).forEach((x) => {
+    const item = box.createDiv({ cls: 'omnihome-sync-log-item' });
+    const top = item.createDiv({ cls: 'omnihome-sync-log-top' });
+    top.createEl('span', { text: kindLabel[x.kind] || String(x.kind || ''), cls: 'omnihome-sync-chip kind-' + x.kind });
+    top.createEl('span', { text: (x.title || x.path || '未命名笔记'), cls: 'nm' });
+    top.createEl('span', { text: formatSyncLogTs(x.ts), cls: 'ts' });
+    const from = x.from || x.fromEnd || '';
+    const to = x.to || x.toEnd || '';
+    if (from && to) item.createDiv({ cls: 'omnihome-sync-log-dir', text: from + ' → ' + to });
+    const sum = x.summary || x.msg || '';
+    if (sum) item.createDiv({ cls: 'omnihome-sync-log-sum', text: sum });
+  });
+}
+
 /* ============================================================
    设置页
    ============================================================ */
@@ -1049,6 +1106,9 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
       text: '插件版本 v' + ((plugin.manifest && plugin.manifest.version) || PLUGIN_VERSION) +
         '　·　正文经 base64 传输（规避中间内容安全网关 / WAF 篡改响应导致的 JSON 解析崩坏）',
     });
+    if (plugin.vaultSyncClosed || isVaultSyncClosed(plugin.lastError)) {
+      containerEl.createDiv({ cls: 'omnihome-sync-banner', text: VAULT_CLOSED_HINT });
+    }
 
     new Setting(containerEl)
       .setName('服务端地址')
@@ -1164,16 +1224,21 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
     const logHead = containerEl.createEl('h3', { text: '同步日志' });
     logHead.style.marginTop = '18px';
     const logBox = containerEl.createDiv({ cls: 'omnihome-sync-log' });
-    const logs = plugin.settings.log || [];
-    if (!logs.length) logBox.createEl('p', { text: '暂无记录', cls: 'omnihome-sync-help' });
-    else logs.slice(0, 40).forEach((x) => {
-      const line = logBox.createDiv({ cls: 'omnihome-sync-log-line' });
-      const ts = x && x.ts ? new Date(x.ts * 1000) : null;
-      const pad = (n) => String(n).padStart(2, '0');
-      const tstr = ts ? (pad(ts.getMonth() + 1) + '-' + pad(ts.getDate()) + ' ' + pad(ts.getHours()) + ':' + pad(ts.getMinutes()) + ':' + pad(ts.getSeconds())) : '';
-      line.createEl('span', { text: tstr, cls: 'ts' });
-      line.createEl('span', { text: (x && x.msg) || '', cls: (x && x.level) === 'error' ? 'err' : '' });
-    });
+    renderNoteLogBox(logBox, plugin.settings.log);
+    if (plugin.canSync()) {
+      plugin.api('GET', '/api/sync/log', { query: { limit: 80 } }).then((d) => {
+        const rows = (d && d.logs) || [];
+        if (rows.some((x) => x && ['add', 'edit', 'delete'].indexOf(x.kind) >= 0)) {
+          renderNoteLogBox(logBox, rows);
+        }
+      }).catch(() => {
+        if (!(plugin.vaultSyncClosed || isVaultSyncClosed(plugin.lastError))) return;
+        if (containerEl.querySelector('.omnihome-sync-banner')) return;
+        const ban = containerEl.createDiv({ cls: 'omnihome-sync-banner', text: VAULT_CLOSED_HINT });
+        const help = containerEl.querySelector('h2');
+        if (help && help.nextSibling) containerEl.insertBefore(ban, help.nextSibling);
+      });
+    }
 
     containerEl.createEl('p', {
       cls: 'omnihome-sync-help',
