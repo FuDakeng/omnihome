@@ -1027,7 +1027,7 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('API Key')
-      .setDesc('在门户「设置 → 功能设置 → Obsidian 插件同步」为对应笔记仓库生成，明文仅显示一次。')
+      .setDesc('在门户知识库 ⋯ 菜单「Obsidian 同步」为当前笔记仓库生成，明文仅显示一次。')
       .addText((t) => {
         t.inputEl.type = 'password';
         t.setPlaceholder('ohs_\u2026').setValue(plugin.settings.apiKey)

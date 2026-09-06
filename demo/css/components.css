@@ -1240,6 +1240,10 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
 }
 .switch.on{ background: var(--om-primary); }
 .switch.on::after{ transform: translateX(17px); }
+.switch:disabled{ opacity: .45; cursor: not-allowed; }
+.switch-hit{ display: inline-flex; align-items: center; }
+.switch-hit.locked{ cursor: not-allowed; }
+.switch-hit.locked .switch{ pointer-events: none; }
 
 .checkbox{ display: flex; align-items: center; gap: 8px; font-size: var(--om-fs-sm); color: var(--om-text-2); cursor: pointer; padding: 4px 0; }
 .checkbox input{ display: none; }
@@ -1696,24 +1700,43 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
 .kb-trash-sort .seg-btn{ padding: 4px 10px; font-size: 12px; }
 .kb-trash-seg{ color: var(--om-text-2); }
 .kb-trash-sep{ color: var(--om-text-3); margin: 0 3px; }
-.obsidian-sync-card .card-pad{ display: flex; flex-direction: column; gap: 0; }
-.obsidian-sync-card .set-row{
-  align-items: flex-start; padding: 18px 0;
+.modal-obsidian{
+  width: min(560px, 94vw);
+  max-height: min(88vh, 740px);
+  display: flex; flex-direction: column;
 }
-.obsidian-sync-card .set-row + .set-row{ border-top: 1px solid var(--om-border); }
-.obsidian-sync-card .set-row .switch{ margin-top: 4px; }
+.modal-obsidian .m-head{
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.modal-obsidian .m-head > div{ min-width: 0; }
+.modal-obsidian .m-head .chip{ flex: none; margin-top: 2px; }
+.modal-obsidian .m-body{
+  gap: 0; overflow-y: auto; max-height: min(64vh, 560px);
+}
+.modal-obsidian .set-row{
+  align-items: flex-start; padding: 16px 0;
+}
+.modal-obsidian .set-row .switch{ margin-top: 4px; }
+.obsidian-lock-note{
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 2px 0 8px; padding: 10px 12px;
+  background: var(--om-warning-soft);
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius-sm);
+  color: var(--om-text-2); font-size: 12px; line-height: 1.55;
+}
+.obsidian-lock-note[hidden]{ display: none; }
+.obsidian-lock-note .ic{ width: 14px; height: 14px; color: var(--om-warning); flex: none; margin-top: 1px; }
 .obsidian-sync-body{
-  margin-top: 4px; padding-top: 4px;
-  border-top: 1px solid var(--om-border);
+  margin-top: 0; padding-top: 0;
   display: flex; flex-direction: column; gap: 0;
 }
-.obsidian-sync-body > .set-row{ border-top: 0; }
-.obsidian-sync-block{ padding: 20px 0; border-bottom: 1px solid var(--om-border); }
+.obsidian-sync-block{ padding: 18px 0; border-bottom: 1px solid var(--om-border); }
 .obsidian-sync-block:last-child{ border-bottom: 0; padding-bottom: 8px; }
 .obsidian-sync-block .set-row-label{ margin-bottom: 6px; }
 .obsidian-sync-block .set-row-sub{ margin-bottom: 12px; line-height: 1.6; }
 .obsidian-url-ctrl{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; max-width: min(100%, 420px); }
-.obsidian-url-ctrl .input-wrap{ flex: 1; min-width: 200px; }
+.obsidian-url-ctrl .input-wrap{ flex: 1; min-width: 160px; }
 .obsidian-url-ctrl .input{
   padding-left: 14px; height: 36px;
   font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
@@ -1723,7 +1746,7 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
   display: grid; grid-template-columns: minmax(120px, 1fr) auto;
   align-items: center; gap: 10px 12px;
   padding: 12px 14px; border: 1px solid var(--om-border); border-radius: 10px;
-  background: var(--om-surface);
+  background: var(--om-surface-2);
 }
 .sync-vault-row .nm{ font-size: 13px; font-weight: 650; color: var(--om-text-1); }
 .sync-vault-row .key{ min-width: 0; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--om-text-2); word-break: break-all; }
@@ -1733,9 +1756,9 @@ input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
   .sync-vault-row .sv-actions{ justify-content: flex-start; }
 }
 .sync-log{
-  max-height: 220px; overflow: auto;
+  max-height: 180px; overflow: auto;
   padding: 8px 10px; border: 1px solid var(--om-border); border-radius: 10px;
-  background: var(--om-surface); font-size: 12px; line-height: 1.65; color: var(--om-text-2);
+  background: var(--om-surface-2); font-size: 12px; line-height: 1.65; color: var(--om-text-2);
 }
 .sync-log .lg{ display: grid; grid-template-columns: 118px 64px 1fr; gap: 8px; padding: 4px 0; border-bottom: 1px dashed var(--om-border); }
 .sync-log .lg:last-child{ border-bottom: 0; }

@@ -1073,43 +1073,6 @@
                   </div>
                 </div>
               </article>
-              <article class="card obsidian-sync-card">
-                <div class="card-head">
-                  <h3 class="card-title"><svg class="ic"><use href="#i-swap"/></svg>Obsidian 插件同步</h3>
-                  <span class="chip no-dot" id="obsidianSyncChip">未开启</span>
-                </div>
-                <div class="card-pad">
-                  <div class="set-row">
-                    <div class="set-row-info"><div class="set-row-label">启用 Obsidian 同步</div>
-                      <div class="set-row-sub">开启后可为每个笔记仓库生成同步令牌，用官方插件把仓库与 Obsidian 双向同步。系统内置仓库不可创建令牌。</div></div>
-                    <button class="switch" id="obsidianSyncEnabled" role="switch"></button>
-                  </div>
-                  <div class="set-row">
-                    <div class="set-row-info"><div class="set-row-label">Obsidian 插件</div>
-                      <div class="set-row-sub">下载后把 <code>omnihome-sync</code> 文件夹放到仓库的 <code>.obsidian/plugins/</code> 下并启用。也可使用 BRAT 侧载。</div></div>
-                    <button class="btn btn-sm btn-primary" id="pluginDownload"><svg class="ic"><use href="#i-download"/></svg>下载插件</button>
-                  </div>
-                  <div id="obsidianSyncBody" class="obsidian-sync-body" hidden>
-                    <div class="set-row">
-                      <div class="set-row-info"><div class="set-row-label">服务端地址</div>
-                        <div class="set-row-sub">填入插件「服务端地址」（含协议与端口，无末尾斜杠）</div></div>
-                      <div class="set-row-ctrl obsidian-url-ctrl">
-                        <div class="input-wrap"><input class="input" id="syncBaseUrl" readonly></div>
-                        <button class="btn btn-outline btn-sm" id="syncBaseUrlCopy"><svg class="ic"><use href="#i-copy"/></svg>复制地址</button>
-                      </div>
-                    </div>
-                    <div class="obsidian-sync-block">
-                      <div class="set-row-label">各仓库同步令牌</div>
-                      <div class="set-row-sub" style="margin-bottom:10px">明文仅生成时可见。一键复制会带上服务端地址与 API Key，可在 Obsidian 插件设置里粘贴导入。</div>
-                      <div id="syncVaultKeys" class="sync-vault-keys"></div>
-                    </div>
-                    <div class="obsidian-sync-block">
-                      <div class="set-row-label">同步日志</div>
-                      <div class="sync-log" id="syncLogBox">暂无记录</div>
-                    </div>
-                  </div>
-                </div>
-              </article>
               <article class="card">
                 <div class="card-head">
                   <h3 class="card-title"><svg class="ic"><use href="#i-download"/></svg>浏览器扩展</h3>
@@ -1616,6 +1579,60 @@
     <div class="m-body" id="kbTeamBody"></div>
     <div class="m-foot">
       <button class="btn btn-ghost" id="kbTeamClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="kbObsidianMask">
+  <div class="modal modal-obsidian">
+    <div class="m-head">
+      <div>
+        <h3>Obsidian 同步</h3>
+        <p id="kbObsidianSub">为当前笔记仓库配置插件同步</p>
+      </div>
+      <span class="chip no-dot" id="kbObsidianChip">未开启</span>
+    </div>
+    <div class="m-body">
+      <div class="set-row">
+        <div class="set-row-info"><div class="set-row-label">启用 Obsidian 同步</div>
+          <div class="set-row-sub" id="kbObsidianEnableSub">开启后可为当前笔记仓库生成同步令牌，用官方插件与 Obsidian 双向同步。</div></div>
+        <div class="set-row-ctrl">
+          <span class="switch-hit" id="kbObsidianSwitchHit">
+            <button class="switch" id="kbObsidianEnabled" role="switch"></button>
+          </span>
+        </div>
+      </div>
+      <div class="obsidian-lock-note" id="kbObsidianBlockNote" hidden>
+        <svg class="ic"><use href="#i-bell"/></svg>
+        <span id="kbObsidianBlockText"></span>
+      </div>
+      <div class="set-row">
+        <div class="set-row-info"><div class="set-row-label">Obsidian 插件</div>
+          <div class="set-row-sub">下载后把 <code>omnihome-sync</code> 文件夹放到仓库的 <code>.obsidian/plugins/</code> 下并启用。也可使用 BRAT 侧载。</div></div>
+        <button class="btn btn-sm btn-primary" id="kbObsidianPluginDl"><svg class="ic"><use href="#i-download"/></svg>下载插件</button>
+      </div>
+      <div id="kbObsidianBody" class="obsidian-sync-body" hidden>
+        <div class="set-row">
+          <div class="set-row-info"><div class="set-row-label">服务端地址</div>
+            <div class="set-row-sub">填入插件「服务端地址」（含协议与端口，无末尾斜杠）</div></div>
+          <div class="set-row-ctrl obsidian-url-ctrl">
+            <div class="input-wrap"><input class="input" id="kbObsidianUrl" readonly></div>
+            <button class="btn btn-outline btn-sm" id="kbObsidianUrlCopy"><svg class="ic"><use href="#i-copy"/></svg>复制地址</button>
+          </div>
+        </div>
+        <div class="obsidian-sync-block">
+          <div class="set-row-label">当前仓库同步令牌</div>
+          <div class="set-row-sub" id="kbObsidianTokenSub">明文仅生成时可见。一键复制会带上服务端地址与 API Key，可在 Obsidian 插件设置里粘贴导入。</div>
+          <div id="kbObsidianVaultKey" class="sync-vault-keys"></div>
+        </div>
+        <div class="obsidian-sync-block">
+          <div class="set-row-label">同步日志</div>
+          <div class="sync-log" id="kbObsidianLog">暂无记录</div>
+        </div>
+      </div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-primary" id="kbObsidianClose">关闭</button>
     </div>
   </div>
 </div>

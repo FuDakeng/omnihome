@@ -88,6 +88,14 @@ const Notes = (() => {
     if (v.kind === 'team' && v.canEdit === false && !v.isOwner) return false;
     return true;
   }
+  function vaultSyncBlock(v){
+    v = v || vaultMeta(currentVault);
+    if ((v && v.kind === 'system') || (v && v.id === VAULT_SYSTEM) || currentVault === VAULT_SYSTEM)
+      return '系统内置仓库不可与 Obsidian 同步，无法开启。';
+    if (v && v.kind === 'team' && !v.isOwner && v.canEdit === false)
+      return '你对此团队仓库只有只读权限，无法开启 Obsidian 同步。';
+    return '';
+  }
   const fmtSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
     : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
 
@@ -2081,6 +2089,144 @@ const Notes = (() => {
       body.innerHTML = '<div class="kb-empty">' + App.esc(e.message || '加载失败') + '</div>';
     }
   }
+  /* ---------- Obsidian 同步（知识库 ⋯ 菜单 · 当前仓库） ---------- */
+  let _obsidianPlain = '';
+  let _obsidianPlainVault = '';
+
+  function fmtObsidianLogTs(ts){
+    const d = new Date((ts || 0) * 1000);
+    if (isNaN(d.getTime())) return '';
+    const p = n => String(n).padStart(2, '0');
+    return `${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+
+  async function openObsidianModal(){
+    await loadObsidianModal();
+    App.openModal('kbObsidianMask');
+  }
+
+  async function loadObsidianModal(){
+    const v = vaultMeta(currentVault);
+    const block = vaultSyncBlock(v);
+    const sw = $('#kbObsidianEnabled');
+    const hit = $('#kbObsidianSwitchHit');
+    const chip = $('#kbObsidianChip');
+    const body = $('#kbObsidianBody');
+    const note = $('#kbObsidianBlockNote');
+    const urlEl = $('#kbObsidianUrl');
+    if (urlEl) urlEl.value = location.origin.replace(/\/$/, '');
+    if ($('#kbObsidianSub')) $('#kbObsidianSub').textContent = '当前仓库「' + (v.name || currentVault) + '」';
+    if ($('#kbObsidianTokenSub')) $('#kbObsidianTokenSub').textContent = '为「' + (v.name || currentVault)
+      + '」配置令牌。明文仅生成时可见；一键复制会带上服务端地址与 API Key，可在 Obsidian 插件设置里粘贴导入。';
+
+    if (block){
+      if (sw){
+        sw.disabled = true;
+        sw.classList.remove('on');
+        sw.setAttribute('aria-disabled', 'true');
+      }
+      hit?.classList.add('locked');
+      if (chip){
+        chip.textContent = '不可同步';
+        chip.className = 'chip warning no-dot';
+      }
+      $('#kbObsidianEnableSub').textContent = block;
+      if (note){
+        note.hidden = false;
+        $('#kbObsidianBlockText').textContent = block;
+      }
+      if (body) body.hidden = true;
+      await refreshObsidianPluginBtn();
+      return;
+    }
+
+    if (sw){
+      sw.disabled = false;
+      sw.removeAttribute('aria-disabled');
+    }
+    hit?.classList.remove('locked');
+    $('#kbObsidianEnableSub').textContent = '开启后可为当前笔记仓库生成同步令牌，用官方插件与 Obsidian 双向同步。';
+    if (note) note.hidden = true;
+
+    let on = false;
+    try {
+      const prefs = await API.get('/api/settings');
+      on = !!(prefs && prefs.obsidianSync);
+    } catch (e) {}
+    sw?.classList.toggle('on', on);
+    if (chip){
+      chip.textContent = on ? '已开启' : '未开启';
+      chip.className = on ? 'chip success no-dot' : 'chip no-dot';
+    }
+    if (body) body.hidden = !on;
+    await refreshObsidianPluginBtn();
+    if (on) await Promise.all([renderObsidianVaultKey(), renderObsidianLog()]);
+  }
+
+  async function refreshObsidianPluginBtn(){
+    try {
+      const pc = await API.get('/api/plugin/check');
+      const btn = $('#kbObsidianPluginDl');
+      if (!btn) return;
+      btn.dataset.available = pc.available ? '1' : '';
+      if (pc.available && pc.version && !btn.dataset.ver){
+        btn.dataset.ver = '1';
+        btn.append(' v' + pc.version);
+      }
+    } catch (e) {}
+  }
+
+  async function renderObsidianVaultKey(){
+    const box = $('#kbObsidianVaultKey');
+    if (!box) return;
+    const v = vaultMeta(currentVault);
+    let info = { enabled: false };
+    try {
+      info = await API.get('/api/sync/apikey?vault=' + encodeURIComponent(currentVault));
+    } catch (e) {}
+    const k = (info.keys || []).find(x => x.vault === currentVault) || (info.enabled ? info : null);
+    const tag = v.kind === 'team' ? '<span class="chip no-dot" style="margin-left:6px;font-size:10px">团队</span>' : '';
+    const mask = (k && k.prefix)
+      ? `<span class="chip no-dot" style="margin-left:6px;font-size:10px" title="令牌前缀">${App.esc(k.prefix)}…</span>`
+      : '';
+    const hasKey = !!(k && (k.prefix || k.enabled));
+    box.innerHTML = `<div class="sync-vault-row">
+      <div class="nm">${App.esc(v.name || currentVault)}${tag}${mask}</div>
+      <div class="sv-actions">
+        ${hasKey ? `<button class="btn btn-outline btn-sm" data-obs-bundle>一键复制连接信息</button>
+        <button class="btn btn-primary btn-sm" data-obs-gen>重置</button>
+        <button class="btn btn-outline btn-sm" style="color:var(--om-danger)" data-obs-rev>吊销</button>`
+          : `<button class="btn btn-primary btn-sm" data-obs-gen data-obs-new="1">生成令牌</button>`}
+      </div>
+    </div>`;
+  }
+
+  async function renderObsidianLog(){
+    const box = $('#kbObsidianLog');
+    if (!box) return;
+    try {
+      const d = await API.get('/api/sync/log?vault=' + encodeURIComponent(currentVault) + '&limit=60');
+      const logs = d.logs || [];
+      if (!logs.length){ box.textContent = '暂无记录'; return; }
+      box.innerHTML = logs.map(x =>
+        `<div class="lg"><span class="ts">${fmtObsidianLogTs(x.ts)}</span><span class="lv ${(x.level||'')==='error'?'err':(x.level||'')==='warn'?'warn':''}">${App.esc(x.source || '')}</span><span>${App.esc(x.msg || '')}</span></div>`
+      ).join('');
+    } catch (e) { box.textContent = '日志加载失败'; }
+  }
+
+  async function copyObsidianBundle(){
+    if (!_obsidianPlain || _obsidianPlainVault !== currentVault){
+      showToast('请先生成或重置令牌后再复制连接信息', 'err');
+      return;
+    }
+    const url = ($('#kbObsidianUrl')?.value || location.origin).replace(/\/$/, '');
+    const v = vaultMeta(currentVault);
+    const blob = 'OMNIHOME_SYNC\nurl: ' + url + '\nkey: ' + _obsidianPlain
+      + '\nvault: ' + currentVault + (v.name ? '\nvaultName: ' + v.name : '') + '\n';
+    try { await navigator.clipboard.writeText(blob); showToast('已复制服务端地址与 API Key，可在插件设置里一键粘贴'); }
+    catch (err) { showToast('复制失败', 'err'); }
+  }
+
   function init(){
     /* 新建笔记：所有 + 号按钮都通过 kbMenu 弹出选择，不再常驻顶栏。
        原来 #noteNew / #folderNew 已从 HTML 移除，相应绑定也清掉。 */
@@ -2117,6 +2263,90 @@ const Notes = (() => {
     });
     $('#kbShareViewClose')?.addEventListener('click', leaveShareOverlay);
     $('#kbTeamClose')?.addEventListener('click', () => App.closeModal('kbTeamMask'));
+    $('#kbObsidianClose')?.addEventListener('click', () => App.closeModal('kbObsidianMask'));
+    $('#kbObsidianMask')?.addEventListener('click', e => {
+      if (e.target === $('#kbObsidianMask')) App.closeModal('kbObsidianMask');
+    });
+    $('#kbObsidianSwitchHit')?.addEventListener('click', e => {
+      if (!$('#kbObsidianEnabled')?.disabled && !$('#kbObsidianSwitchHit')?.classList.contains('locked')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      showToast($('#kbObsidianBlockText')?.textContent || '此仓库不可开启 Obsidian 同步', 'err');
+    });
+    $('#kbObsidianEnabled')?.addEventListener('click', async () => {
+      if ($('#kbObsidianEnabled').disabled) return;
+      const block = vaultSyncBlock();
+      if (block){
+        $('#kbObsidianEnabled').classList.remove('on');
+        showToast(block, 'err');
+        return;
+      }
+      const next = $('#kbObsidianEnabled').classList.contains('on');
+      try {
+        await API.put('/api/settings', { obsidianSync: next });
+        showToast(next ? '已开启 Obsidian 同步' : '已关闭（已有令牌仍可用，只是隐藏管理入口）');
+        await loadObsidianModal();
+      } catch (e) {
+        $('#kbObsidianEnabled').classList.toggle('on', !next);
+        showToast(e.message, 'err');
+      }
+    });
+    $('#kbObsidianPluginDl')?.addEventListener('click', () => {
+      if ($('#kbObsidianPluginDl').dataset.available !== '1'){
+        showToast('当前部署未包含插件目录', 'err');
+        return;
+      }
+      API.dl('/api/plugin.zip');
+    });
+    $('#kbObsidianUrlCopy')?.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText($('#kbObsidianUrl').value); showToast('服务端地址已复制'); }
+      catch (e) { showToast('复制失败，请手动选中复制', 'err'); }
+    });
+    $('#kbObsidianVaultKey')?.addEventListener('click', async e => {
+      const gen = e.target.closest('[data-obs-gen]');
+      const bundle = e.target.closest('[data-obs-bundle]');
+      const rev = e.target.closest('[data-obs-rev]');
+      if (!gen && !bundle && !rev) return;
+      const block = vaultSyncBlock();
+      if (block){ showToast(block, 'err'); return; }
+      const vid = currentVault;
+      if (gen){
+        const isNew = gen.dataset.obsNew === '1';
+        if (!await App.confirmModal({
+          title: isNew ? '生成同步令牌？' : '重置同步令牌？',
+          danger: !isNew, okText: isNew ? '生成' : '重置',
+          sub: isNew
+            ? '新令牌仅此次可复制到连接信息中，请立刻粘贴到 Obsidian 插件。'
+            : '旧令牌将立即失效。新令牌仅此次可复制到连接信息中，请立刻粘贴到 Obsidian 插件。',
+        })) return;
+        try {
+          const d = await API.post('/api/sync/apikey?vault=' + encodeURIComponent(vid), { vault: vid });
+          if (d.vault && d.vault !== vid){
+            showToast('签发仓库与当前仓库不一致，请刷新后重试', 'err');
+            return;
+          }
+          _obsidianPlain = d.apiKey || '';
+          _obsidianPlainVault = vid;
+          await renderObsidianVaultKey();
+          await renderObsidianLog();
+          await copyObsidianBundle();
+        } catch (err) { showToast(err.message, 'err'); }
+      }
+      if (bundle) await copyObsidianBundle();
+      if (rev){
+        if (!await App.confirmModal({
+          title: '吊销同步令牌？', danger: true, okText: '吊销',
+          sub: '当前仓库的 Obsidian 同步将立即断开，不影响笔记内容。',
+        })) return;
+        try {
+          await API.del('/api/sync/apikey?vault=' + encodeURIComponent(vid));
+          if (_obsidianPlainVault === vid){ _obsidianPlain = ''; _obsidianPlainVault = ''; }
+          showToast('已吊销');
+          await renderObsidianVaultKey();
+          await renderObsidianLog();
+        } catch (err) { showToast(err.message, 'err'); }
+      }
+    });
     $('#kbShareOutlineBtn')?.addEventListener('click', () =>
       setShareOutline(!$('#kbShareOutline')?.classList.contains('open')));
     $('#kbShareOutlineClose')?.addEventListener('click', () => setShareOutline(false));
@@ -2182,6 +2412,8 @@ const Notes = (() => {
       ...(canDeleteVault(vaultMeta(currentVault)) ? [['删除当前仓库', 'i-trash', () => deleteCurrentVault(), 'danger']] : []),
       ...((vaultMeta(currentVault).kind === 'user' || vaultMeta(currentVault).kind === 'team')
         ? [['管理团队…', 'i-users', () => openTeamModal()]] : []),
+      'sep',
+      ['Obsidian 同步…', 'i-swap', () => openObsidianModal()],
       ...(vaultCanEdit() ? [['导入 Markdown / zip', 'i-download', () => importMd()]] : []),
       ['导出全部笔记', 'i-upload', () => API.dl('/api/notes/all')],
     ]));
