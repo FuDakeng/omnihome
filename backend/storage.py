@@ -96,7 +96,7 @@ def valid_username(name: str) -> bool:
 SYNC_KEY_PREFIX = "ohs_"          # OmniHome Sync，便于识别与掩码展示
 VAULT_DEFAULT = "default"
 VAULT_SYSTEM = "system"
-SYNC_LOG_MAX = 200
+SYNC_LOG_MAX = 400
 
 
 def _sync_key_hash(raw: str) -> str:
@@ -236,6 +236,12 @@ def append_sync_log(username: str, entry: dict):
         "source": entry.get("source") or "server",
         "level": entry.get("level") or "info",
         "msg": str(entry.get("msg") or "")[:500],
+        "kind": str(entry.get("kind") or "")[:16],
+        "title": str(entry.get("title") or "")[:120],
+        "from": str(entry.get("from") or "")[:32],
+        "to": str(entry.get("to") or "")[:32],
+        "summary": str(entry.get("summary") or "")[:240],
+        "path": str(entry.get("path") or "")[:240],
     }
     logs.insert(0, rec)
     save_user_json(username, "notes/sync-log.json", logs[:SYNC_LOG_MAX])

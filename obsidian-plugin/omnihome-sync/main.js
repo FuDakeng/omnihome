@@ -27,7 +27,7 @@ const SELF_WRITE_MS = 4000;         // 自写抑制窗口（避免回环触发�
 
 /* 插件独立版本线（与服务端 app 版本解耦；须与 manifest.json 的 version 保持一致）。
    打进启动日志与设置页，用户反馈报错时可一眼确认所装插件版本。 */
-const PLUGIN_VERSION = '0.0.6';
+const PLUGIN_VERSION = '0.0.7';
 
 const ASSET_MAX = 5 * 1024 * 1024;   // 与服务端 ASSET_MAX 一致
 const ASSET_DIR = 'OmniHome-assets';  // 从站点拉取、本地无原路径的附件落点
@@ -53,6 +53,27 @@ function isHiddenPath(p) {
 function parentDir(p) {
   const i = String(p).lastIndexOf('/');
   return i > 0 ? String(p).slice(0, i) : '';
+}
+function noteTitleFromPath(p) {
+  const n = String(p || '').split('/').pop() || '';
+  return n.replace(/\.md$/i, '') || '未命名笔记';
+}
+function clipSync(s, n) {
+  s = String(s || '').replace(/\s+/g, ' ').trim();
+  n = n || 36;
+  return s.length > n ? s.slice(0, n) + '…' : s;
+}
+function firstDiffSummary(oldT, newT) {
+  const a = String(oldT || '').split('\n');
+  const b = String(newT || '').split('\n');
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    if (a[i] === b[i]) continue;
+    if (a[i] == null) return '第 ' + (i + 1) + ' 行新增「' + clipSync(b[i]) + '」';
+    if (b[i] == null) return '第 ' + (i + 1) + ' 行删除「' + clipSync(a[i]) + '」';
+    return '第 ' + (i + 1) + ' 行由「' + clipSync(a[i]) + '」改为「' + clipSync(b[i]) + '」';
+  }
+  return '正文有变更';
 }
 function nowMs() { return Date.now(); }
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
@@ -554,6 +575,16 @@ class OmniHomeSyncPlugin extends Plugin {
       this.api('POST', '/api/sync/log', { body: { level: rec.level, msg: rec.msg } }).catch(() => {});
     }
   }
+  pushNoteLog(kind, path, summary, fromEnd, toEnd) {
+    const title = noteTitleFromPath(path);
+    this.api('POST', '/api/sync/log', {
+      body: {
+        kind: kind, title: title, summary: summary || '', path: path || '',
+        fromEnd: fromEnd || '万事屋', toEnd: toEnd || 'Obsidian',
+        msg: kind + ' ' + title,
+      },
+    }).catch(() => {});
+  }
 
   /* ---------- 自写抑制（避免拉取/删除触发的事件回环） ---------- */
   markSelfWrite(path) { this.selfWrites[path] = nowMs(); }
@@ -820,9 +851,12 @@ class OmniHomeSyncPlugin extends Plugin {
         return false;
       }
       await this.app.vault.modify(target, content);
+      this.pushNoteLog('edit', path, firstDiffSummary(cur, content), '万事屋', 'Obsidian');
     } else {
       await this.ensureVaultFolder(parentDir(path));
       target = await this.app.vault.create(path, content);
+      const first = String(content || '').trim().split('\n')[0] || '空白笔记';
+      this.pushNoteLog('add', path, '从万事屋拉取新建，开头「' + clipSync(first, 48) + '」', '万事屋', 'Obsidian');
     }
     const lm = (target && target.stat && target.stat.mtime) || nowMs();
     baseline[path] = { lm: lm, rm: (data && data.mtime) || (r && r.mtime) || nowMs() };
@@ -832,6 +866,7 @@ class OmniHomeSyncPlugin extends Plugin {
     this.markSelfWrite(f.path);
     try { await this.app.vault.trash(f.file, true); }   // 移入 vault 内 .trash（可恢复）
     catch (e) { try { await this.app.vault.delete(f.file); } catch (e2) { /* 忽略 */ } }
+    this.pushNoteLog('delete', f.path, '服务端已删除，本地移入回收站', '万事屋', 'Obsidian');
     delete baseline[f.path];
     return true;
   }

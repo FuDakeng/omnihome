@@ -206,11 +206,15 @@ const App = (() => {
   function confirmModal(opts = {}){
     return new Promise(resolve => {
       $('#confirmTitle').textContent = opts.title || '请确认';
+      $('#confirmTitle').classList.toggle('warn', !!opts.warning);
       $('#confirmSub').textContent = opts.sub || '';
       $('#confirmSub').hidden = !opts.sub;
+      $('#confirmSub').classList.toggle('warn', !!opts.warning);
+      $('#confirmBox')?.classList.toggle('modal-warn', !!opts.warning);
       const ok = $('#confirmOk');
       ok.innerHTML = `<svg class="ic"><use href="#i-check"/></svg>${opts.okText || '确定'}`;
-      ok.classList.toggle('danger', !!opts.danger);
+      ok.classList.toggle('danger', !!opts.danger && !opts.warning);
+      ok.classList.toggle('warning', !!opts.warning);
       confirmResolver = resolve;
       openModal('confirmMask');
     });

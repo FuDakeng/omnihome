@@ -1075,6 +1075,19 @@
               </article>
               <article class="card">
                 <div class="card-head">
+                  <h3 class="card-title"><svg class="ic"><use href="#i-swap"/></svg>Obsidian 插件</h3>
+                  <span class="chip no-dot" id="pluginDownloadChip">检测中…</span>
+                </div>
+                <div class="card-pad">
+                  <div class="set-row">
+                    <div class="set-row-info"><div class="set-row-label">下载同步插件</div>
+                      <div class="set-row-sub">下载后把 <code>omnihome-sync</code> 文件夹放到仓库的 <code>.obsidian/plugins/</code> 下并启用。也可使用 BRAT 侧载。与知识库仓库 ⋯ 菜单中的下载为同一安装包。</div></div>
+                    <button class="btn btn-sm btn-primary" id="pluginDownload"><svg class="ic"><use href="#i-download"/></svg>下载插件</button>
+                  </div>
+                </div>
+              </article>
+              <article class="card">
+                <div class="card-head">
                   <h3 class="card-title"><svg class="ic"><use href="#i-download"/></svg>浏览器扩展</h3>
                   <span class="chip no-dot num" id="extState">检测中…</span>
                 </div>
@@ -1479,7 +1492,7 @@
 
 <!-- ==================== 统一确认弹窗（替代 confirm） ==================== -->
 <div class="modal-mask" id="confirmMask">
-  <div class="modal">
+  <div class="modal" id="confirmBox">
     <div class="m-head"><h3 id="confirmTitle">请确认</h3><p id="confirmSub" hidden></p></div>
     <div class="m-foot">
       <button class="btn btn-ghost" id="confirmCancel">取消</button>
@@ -1606,11 +1619,6 @@
         <svg class="ic"><use href="#i-bell"/></svg>
         <span id="kbObsidianBlockText"></span>
       </div>
-      <div class="set-row">
-        <div class="set-row-info"><div class="set-row-label">Obsidian 插件</div>
-          <div class="set-row-sub">下载后把 <code>omnihome-sync</code> 文件夹放到仓库的 <code>.obsidian/plugins/</code> 下并启用。也可使用 BRAT 侧载。</div></div>
-        <button class="btn btn-sm btn-primary" id="kbObsidianPluginDl"><svg class="ic"><use href="#i-download"/></svg>下载插件</button>
-      </div>
       <div id="kbObsidianBody" class="obsidian-sync-body" hidden>
         <div class="set-row">
           <div class="set-row-info"><div class="set-row-label">服务端地址</div>
@@ -1627,8 +1635,14 @@
         </div>
         <div class="obsidian-sync-block">
           <div class="set-row-label">同步日志</div>
+          <div class="set-row-sub">本仓库笔记的新增、修改、删除记录，含同步方向与内容摘要。</div>
           <div class="sync-log" id="kbObsidianLog">暂无记录</div>
         </div>
+      </div>
+      <div class="set-row obsidian-plugin-row">
+        <div class="set-row-info"><div class="set-row-label">Obsidian 插件</div>
+          <div class="set-row-sub">下载后把 <code>omnihome-sync</code> 文件夹放到仓库的 <code>.obsidian/plugins/</code> 下并启用。也可使用 BRAT 侧载。</div></div>
+        <button class="btn btn-sm btn-primary" id="kbObsidianPluginDl"><svg class="ic"><use href="#i-download"/></svg>下载插件</button>
       </div>
     </div>
     <div class="m-foot">

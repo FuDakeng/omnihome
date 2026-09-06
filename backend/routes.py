@@ -1367,6 +1367,7 @@ def _vault_public(v: dict, username: str) -> dict:
     else:
         out["isOwner"] = True
         out["canEdit"] = True
+    out["syncEnabled"] = _vault_sync_enabled(username, v.get("id") or "")
     return out
 
 
@@ -1393,6 +1394,30 @@ def _team_ctx(username: str, vid: str = ""):
                 "is_owner": True, "vid": vid, "local": local}
     return {"store": username, "rec": local, "can_edit": True,
             "is_owner": True, "vid": vid, "local": local}
+
+
+def _vault_sync_enabled(username: str, vid: str) -> bool:
+    """当前仓库是否允许 Obsidian 同步。关闭后令牌仍保留但不予放行。
+    未写过 syncEnabled 时兼容旧数据：已有创建人令牌或曾开过全局开关则视为开启。"""
+    vid = (vid or "").strip() or VAULT_DEFAULT
+    if vid == VAULT_SYSTEM:
+        return False
+    try:
+        tctx = _team_ctx(username, vid)
+    except HTTPException:
+        rec = _vault_by_id(username, vid) or {}
+        store = username
+    else:
+        rec = tctx["rec"] or {}
+        store = tctx["store"]
+        vid = tctx["vid"]
+    if rec.get("kind") == "system":
+        return False
+    if "syncEnabled" in rec:
+        return bool(rec.get("syncEnabled"))
+    if storage.owner_has_sync_key(store, vid):
+        return True
+    return bool((storage.get_prefs(store) or {}).get("obsidianSync"))
 
 
 def _require_vault_edit(username: str, vid: str = ""):
@@ -3135,6 +3160,8 @@ def require_sync_ctx(x_api_key: Optional[str]) -> dict:
     if ctx.get("vault") == VAULT_SYSTEM:
         raise HTTPException(403, "系统内置仓库不可同步")
     ctx.setdefault("actor", ctx["u"])
+    if not _vault_sync_enabled(ctx["u"], ctx.get("vault") or ""):
+        raise HTTPException(403, "该笔记仓库已关闭 Obsidian 同步")
     return ctx
 
 
@@ -3288,13 +3315,14 @@ def sync_apikey_create(body: Optional[SyncKeyIn] = Body(default=None),
     if tctx["rec"].get("kind") == "system" or vid == VAULT_SYSTEM:
         raise HTTPException(400, "系统内置仓库不可创建同步令牌")
     if tctx["is_owner"]:
+        if not _vault_sync_enabled(username, vid):
+            raise HTTPException(403, "请先开启此仓库的 Obsidian 同步")
         store, actor = username, username
     else:
         if not tctx["can_edit"]:
             raise HTTPException(403, "只读成员不能同步此团队仓库")
-        owner_prefs = storage.get_prefs(tctx["store"]) or {}
-        if not owner_prefs.get("obsidianSync"):
-            raise HTTPException(403, "创建人尚未开启 Obsidian 同步")
+        if not _vault_sync_enabled(tctx["store"], vid):
+            raise HTTPException(403, "创建人尚未开启此仓库的 Obsidian 同步")
         if not storage.owner_has_sync_key(tctx["store"], vid):
             raise HTTPException(403, "创建人尚未为此仓库启用同步")
         store, actor = tctx["store"], username
@@ -3315,7 +3343,8 @@ def sync_apikey_info(vault: str = VAULT_DEFAULT,
     username = require_user(authorization)
     info = storage.sync_key_info(username, vault or VAULT_DEFAULT)
     info["keys"] = storage.list_sync_keys(username)
-    info["obsidianSync"] = bool((storage.get_prefs(username) or {}).get("obsidianSync"))
+    info["vaultSync"] = _vault_sync_enabled(username, vault or VAULT_DEFAULT)
+    info["obsidianSync"] = info["vaultSync"]
     return info
 
 
@@ -3329,6 +3358,32 @@ def sync_apikey_revoke(vault: str = "",
     storage.append_sync_log(username, {"vault": vault or "", "source": "web",
                                     "msg": "吊销同步令牌" + (("（" + vault + "）") if vault else "（全部）")})
     return {"ok": True}
+
+
+class SyncVaultEnabledIn(BaseModel):
+    vault: str = ""
+    enabled: bool = False
+
+
+@router.put("/api/sync/enabled")
+def sync_vault_set_enabled(body: SyncVaultEnabledIn,
+                           authorization: Optional[str] = Header(None)):
+    """按笔记仓库独立开关同步。关闭后令牌立即失效但不吊销，重开后可继续使用。"""
+    username = require_user(authorization)
+    tctx = _team_ctx(username, body.vault)
+    vid = tctx["vid"]
+    rec = tctx["rec"] or {}
+    if rec.get("kind") == "system" or vid == VAULT_SYSTEM:
+        raise HTTPException(400, "系统内置仓库不可开启同步")
+    if not tctx["is_owner"]:
+        raise HTTPException(403, "仅创建人可开关此仓库的同步")
+    data = _ensure_vaults(tctx["store"])
+    hit = next((x for x in data["items"] if x["id"] == vid), None)
+    if not hit:
+        raise HTTPException(404, "笔记仓库不存在")
+    hit["syncEnabled"] = bool(body.enabled)
+    _save_vaults(tctx["store"], data)
+    return {"ok": True, "vault": vid, "enabled": bool(hit["syncEnabled"])}
 
 
 @router.get("/api/sync/hello")
@@ -3353,13 +3408,25 @@ def sync_log_get(vault: str = "", limit: int = 80,
     else:
         username = require_user(authorization)
         vid = vault or ""
+        if vid:
+            try:
+                tctx = _team_ctx(username, vid)
+                username, vid = tctx["store"], tctx["vid"]
+            except HTTPException:
+                pass
     return {"logs": storage.read_sync_log(username, vid or None, limit)}
 
 
 class SyncLogIn(BaseModel):
-    msg: str
+    msg: str = ""
     level: str = "info"
     vault: str = ""
+    kind: str = ""
+    title: str = ""
+    summary: str = ""
+    path: str = ""
+    fromEnd: str = ""
+    toEnd: str = ""
 
 
 @router.post("/api/sync/log")
@@ -3369,6 +3436,9 @@ def sync_log_post(body: SyncLogIn,
     storage.append_sync_log(ctx["u"], {
         "vault": body.vault or ctx["vault"], "source": "obsidian",
         "level": body.level or "info", "msg": body.msg,
+        "kind": body.kind, "title": body.title, "summary": body.summary,
+        "path": body.path,
+        "from": body.fromEnd, "to": body.toEnd,
     })
     return {"ok": True}
 
@@ -3491,6 +3561,41 @@ class SyncFileIn(BaseModel):
     knownRemoteMtime: Optional[int] = None  # 客户端上次同步时记下的站点 mtime；未变则连续本地保存应落地
 
 
+def _clip_sync(s: str, n: int = 40) -> str:
+    s = re.sub(r"\s+", " ", (s or "")).strip()
+    return s if len(s) <= n else s[:n] + "…"
+
+
+def _diff_summary(old: str, new: str) -> str:
+    old_lines = (old or "").splitlines()
+    new_lines = (new or "").splitlines()
+    n = max(len(old_lines), len(new_lines))
+    for i in range(n):
+        a = old_lines[i] if i < len(old_lines) else None
+        b = new_lines[i] if i < len(new_lines) else None
+        if a == b:
+            continue
+        if a is None:
+            return "第 %d 行新增「%s」" % (i + 1, _clip_sync(b))
+        if b is None:
+            return "第 %d 行删除「%s」" % (i + 1, _clip_sync(a))
+        return "第 %d 行由「%s」改为「%s」" % (i + 1, _clip_sync(a), _clip_sync(b))
+    if len(old_lines) != len(new_lines):
+        return "正文行数 %d → %d" % (len(old_lines), len(new_lines))
+    return "正文有变更"
+
+
+def _log_vault_note(username: str, vault_id: str, *, kind: str, title: str,
+                    summary: str, path: str = "", source: str = "obsidian",
+                    frm: str = "Obsidian", to: str = "万事屋"):
+    storage.append_sync_log(username, {
+        "vault": vault_id, "source": source, "kind": kind,
+        "title": title, "summary": summary, "path": path,
+        "from": frm, "to": to,
+        "msg": "%s %s" % (kind, title or path),
+    })
+
+
 def _sync_apply_note(username, nid, folder, title, body_md, site_mtime, norm, vault_id=""):
     """落地一篇已存在笔记。正文/标题/文件夹均未变则不 bump updated，避免轮询误判远端变更。"""
     if folder:
@@ -3514,7 +3619,16 @@ def _sync_apply_note(username, nid, folder, title, body_md, site_mtime, norm, va
             hit["vault"] = vault_id
         hit["updated"] = now
         storage.save_notes_index(username, idx)
-    return {"path": norm, "mtime": now * 1000, "id": nid, "applied": True}
+    bits = []
+    if new_title != old_title and old_title:
+        bits.append("标题「%s」→「%s」" % (_clip_sync(old_title, 24), _clip_sync(new_title, 24)))
+    if folder != old_folder:
+        bits.append("文件夹「%s」→「%s」" % (_clip_sync(old_folder or "根目录", 24),
+                                      _clip_sync(folder or "根目录", 24)))
+    if old_body != body_md:
+        bits.append(_diff_summary(old_body, body_md))
+    return {"path": norm, "mtime": now * 1000, "id": nid, "applied": True,
+            "title": new_title, "summary": "；".join(bits) or "内容已更新"}
 
 
 @router.post("/api/sync/file")
@@ -3552,8 +3666,13 @@ def sync_put_file(body: SyncFileIn,
         if (not site_unchanged) and client_mtime <= site_mtime + 2000:
             return {"path": norm, "mtime": site_mtime, "id": meta["id"],
                     "applied": False, "reason": "site-wins"}
-        return _sync_apply_note(username, meta["id"], folder, title, body_md,
-                                site_mtime, norm, vault_id)
+        out = _sync_apply_note(username, meta["id"], folder, title, body_md,
+                               site_mtime, norm, vault_id)
+        if out.get("applied") and not out.get("unchanged"):
+            _log_vault_note(username, vault_id, kind="edit",
+                            title=out.get("title") or title or fname,
+                            summary=out.get("summary") or "内容已更新", path=norm)
+        return out
 
     # 未命中 -> 新建（先逐级补齐文件夹，否则笔记在目录树中不可见）
     if folder:
@@ -3561,12 +3680,17 @@ def sync_put_file(body: SyncFileIn,
     nid = uuid.uuid4().hex[:8]
     now = int(time.time())
     stem = fname[:-3] if fname.lower().endswith(".md") else fname
+    note_title = title or stem or "未命名笔记"
     idx = storage.notes_index(username)
-    idx.insert(0, {"id": nid, "title": title or stem or "未命名笔记",
+    idx.insert(0, {"id": nid, "title": note_title,
                    "tags": [], "folder": folder, "vault": vault_id,
                    "pinned": False, "updated": now})
     storage.save_notes_index(username, idx)
     storage.note_write(username, nid, body_md)
+    first = (body_md or "").strip().splitlines()
+    snippet = _clip_sync(first[0] if first else "空白笔记", 48)
+    _log_vault_note(username, vault_id, kind="add", title=note_title,
+                    summary="新建笔记，开头「%s」" % snippet, path=norm)
     return {"path": norm, "mtime": now * 1000, "id": nid, "applied": True}
 
 
@@ -3600,6 +3724,10 @@ def sync_rename_file(body: SyncRenameIn,
             it["updated"] = now
             break
     storage.save_notes_index(username, idx)
+    _log_vault_note(username, vault_id, kind="edit",
+                    title=new_title or (meta.get("title") or ""),
+                    summary="路径「%s」→「%s」" % (_clip_sync(old, 36), _clip_sync(new, 36)),
+                    path=new)
     return {"ok": True, "path": new, "id": meta["id"], "mtime": now * 1000}
 
 
@@ -3623,6 +3751,10 @@ def sync_delete_file(path: str,
             it["deleted_title"] = it.get("title") or ""
             break
     storage.save_notes_index(username, idx)
+    _log_vault_note(username, vault_id, kind="delete",
+                    title=(meta.get("title") or Path(norm).stem or "未命名笔记"),
+                    summary="删除笔记「%s」" % _clip_sync(meta.get("title") or norm, 48),
+                    path=norm)
     return {"ok": True, "softDeleted": True}
 
 

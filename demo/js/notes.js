@@ -96,6 +96,12 @@ const Notes = (() => {
       return '你对此团队仓库只有只读权限，无法开启 Obsidian 同步。';
     return '';
   }
+  function vaultSyncSwitchLocked(v){
+    v = v || vaultMeta(currentVault);
+    if (v && v.kind === 'team' && !v.isOwner)
+      return '仅创建人可开关此团队仓库的同步。';
+    return '';
+  }
   const fmtSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
     : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
 
@@ -2108,6 +2114,7 @@ const Notes = (() => {
   async function loadObsidianModal(){
     const v = vaultMeta(currentVault);
     const block = vaultSyncBlock(v);
+    const switchLock = vaultSyncSwitchLocked(v);
     const sw = $('#kbObsidianEnabled');
     const hit = $('#kbObsidianSwitchHit');
     const chip = $('#kbObsidianChip');
@@ -2118,6 +2125,8 @@ const Notes = (() => {
     if ($('#kbObsidianSub')) $('#kbObsidianSub').textContent = '当前仓库「' + (v.name || currentVault) + '」';
     if ($('#kbObsidianTokenSub')) $('#kbObsidianTokenSub').textContent = '为「' + (v.name || currentVault)
       + '」配置令牌。明文仅生成时可见；一键复制会带上服务端地址与 API Key，可在 Obsidian 插件设置里粘贴导入。';
+
+    await refreshObsidianPluginBtn();
 
     if (block){
       if (sw){
@@ -2136,30 +2145,44 @@ const Notes = (() => {
         $('#kbObsidianBlockText').textContent = block;
       }
       if (body) body.hidden = true;
-      await refreshObsidianPluginBtn();
       return;
     }
 
-    if (sw){
-      sw.disabled = false;
-      sw.removeAttribute('aria-disabled');
-    }
-    hit?.classList.remove('locked');
-    $('#kbObsidianEnableSub').textContent = '开启后可为当前笔记仓库生成同步令牌，用官方插件与 Obsidian 双向同步。';
-    if (note) note.hidden = true;
-
     let on = false;
     try {
-      const prefs = await API.get('/api/settings');
-      on = !!(prefs && prefs.obsidianSync);
+      const info = await API.get('/api/sync/apikey?vault=' + encodeURIComponent(currentVault));
+      on = !!info.vaultSync;
     } catch (e) {}
+
+    if (switchLock){
+      if (sw){
+        sw.disabled = true;
+        sw.setAttribute('aria-disabled', 'true');
+      }
+      hit?.classList.add('locked');
+      $('#kbObsidianEnableSub').textContent = switchLock + (on
+        ? ' 当前仓库同步已开启。'
+        : ' 当前仓库同步已关闭。');
+      if (note){
+        note.hidden = false;
+        $('#kbObsidianBlockText').textContent = switchLock;
+      }
+    } else {
+      if (sw){
+        sw.disabled = false;
+        sw.removeAttribute('aria-disabled');
+      }
+      hit?.classList.remove('locked');
+      $('#kbObsidianEnableSub').textContent = '仅对当前仓库生效。关闭后同步立即不可用，已有令牌会失效但不会被吊销，重新开启后可继续使用。';
+      if (note) note.hidden = true;
+    }
+
     sw?.classList.toggle('on', on);
     if (chip){
-      chip.textContent = on ? '已开启' : '未开启';
+      chip.textContent = on ? '已开启' : '已关闭';
       chip.className = on ? 'chip success no-dot' : 'chip no-dot';
     }
     if (body) body.hidden = !on;
-    await refreshObsidianPluginBtn();
     if (on) await Promise.all([renderObsidianVaultKey(), renderObsidianLog()]);
   }
 
@@ -2205,12 +2228,23 @@ const Notes = (() => {
     const box = $('#kbObsidianLog');
     if (!box) return;
     try {
-      const d = await API.get('/api/sync/log?vault=' + encodeURIComponent(currentVault) + '&limit=60');
-      const logs = d.logs || [];
-      if (!logs.length){ box.textContent = '暂无记录'; return; }
-      box.innerHTML = logs.map(x =>
-        `<div class="lg"><span class="ts">${fmtObsidianLogTs(x.ts)}</span><span class="lv ${(x.level||'')==='error'?'err':(x.level||'')==='warn'?'warn':''}">${App.esc(x.source || '')}</span><span>${App.esc(x.msg || '')}</span></div>`
-      ).join('');
+      const d = await API.get('/api/sync/log?vault=' + encodeURIComponent(currentVault) + '&limit=80');
+      const logs = (d.logs || []).filter(x => ['add', 'edit', 'delete'].indexOf(x.kind) >= 0);
+      if (!logs.length){ box.textContent = '暂无笔记变更记录'; return; }
+      const kindLabel = { add: '新增', edit: '修改', delete: '删除' };
+      const kindChip = { add: 'success', edit: 'info', delete: 'danger' };
+      box.innerHTML = logs.map(x => {
+        const dir = (x.from && x.to) ? (x.from + ' → ' + x.to) : '';
+        return `<div class="sync-log-item">
+          <div class="sync-log-top">
+            <span class="chip ${kindChip[x.kind] || ''} no-dot">${kindLabel[x.kind] || App.esc(x.kind)}</span>
+            <span class="nm">${App.esc(x.title || x.path || '未命名笔记')}</span>
+            <span class="ts">${fmtObsidianLogTs(x.ts)}</span>
+          </div>
+          ${dir ? `<div class="sync-log-dir">${App.esc(dir)}</div>` : ''}
+          <div class="sync-log-sum">${App.esc(x.summary || x.msg || '')}</div>
+        </div>`;
+      }).join('');
     } catch (e) { box.textContent = '日志加载失败'; }
   }
 
@@ -2281,10 +2315,16 @@ const Notes = (() => {
         showToast(block, 'err');
         return;
       }
+      const lock = vaultSyncSwitchLocked();
+      if (lock){
+        $('#kbObsidianEnabled').classList.toggle('on');
+        showToast(lock, 'err');
+        return;
+      }
       const next = $('#kbObsidianEnabled').classList.contains('on');
       try {
-        await API.put('/api/settings', { obsidianSync: next });
-        showToast(next ? '已开启 Obsidian 同步' : '已关闭（已有令牌仍可用，只是隐藏管理入口）');
+        await API.put('/api/sync/enabled', { vault: currentVault, enabled: next });
+        showToast(next ? '已开启当前仓库的 Obsidian 同步' : '已关闭：令牌仍保留但同步不可用，重新开启后可继续使用');
         await loadObsidianModal();
       } catch (e) {
         $('#kbObsidianEnabled').classList.toggle('on', !next);
@@ -2314,10 +2354,10 @@ const Notes = (() => {
         const isNew = gen.dataset.obsNew === '1';
         if (!await App.confirmModal({
           title: isNew ? '生成同步令牌？' : '重置同步令牌？',
-          danger: !isNew, okText: isNew ? '生成' : '重置',
+          warning: true, okText: isNew ? '生成' : '重置',
           sub: isNew
-            ? '新令牌仅此次可复制到连接信息中，请立刻粘贴到 Obsidian 插件。'
-            : '旧令牌将立即失效。新令牌仅此次可复制到连接信息中，请立刻粘贴到 Obsidian 插件。',
+            ? '请保管好同步令牌，向他人提供可能导致数据泄漏！'
+            : '旧令牌将立即失效。请保管好同步令牌，向他人提供可能导致数据泄漏！',
         })) return;
         try {
           const d = await API.post('/api/sync/apikey?vault=' + encodeURIComponent(vid), { vault: vid });

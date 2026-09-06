@@ -155,6 +155,13 @@ def run_suite(engine):
     idx = storage.notes_index(USER)
     check(f"[{engine}] 索引标题解析正确", any(i["title"] == "笔记A" for i in idx),
           str([i["title"] for i in idx]))
+    rlog = client.get("/api/sync/log?vault=default&limit=20", headers=HA(tok))
+    logs = (rlog.json() or {}).get("logs") or []
+    add_log = next((x for x in logs if x.get("kind") == "add" and x.get("title") == "笔记A"), None)
+    check(f"[{engine}] 新建写入笔记级日志",
+          rlog.status_code == 200 and bool(add_log)
+          and add_log.get("from") == "Obsidian" and add_log.get("to") == "万事屋"
+          and "新建" in (add_log.get("summary") or ""), str(add_log)[:160])
 
     # base64 传输：正文含 HTML/JS/SVG 特征串时，响应体不得出现明文特征（对 WAF 不透明）
     evil = ('# ev\n\n<script>document.createElement("iframe")</script>\n'
@@ -226,6 +233,11 @@ def run_suite(engine):
     r = client.delete("/api/sync/file", headers=HK(key), params={"path": "工作/待删.md"})
     check(f"[{engine}] DELETE softDeleted", r.status_code == 200 and r.json().get("softDeleted") is True,
           r.text[:120])
+    rlog = client.get("/api/sync/log?vault=default&limit=20", headers=HA(tok))
+    del_log = next((x for x in (rlog.json() or {}).get("logs") or [] if x.get("kind") == "delete"), None)
+    check(f"[{engine}] 删除写入笔记级日志",
+          bool(del_log) and del_log.get("title") == "待删"
+          and del_log.get("from") == "Obsidian", str(del_log)[:160])
     idx = storage.notes_index(USER)
     hit = next(i for i in idx if i["id"] == nid)
     check(f"[{engine}] 笔记标记 deleted", bool(hit.get("deleted")), str(hit.get("deleted")))
@@ -281,6 +293,35 @@ def run_suite(engine):
     check(f"[{engine}] LWW 正文相同 -> unchanged",
           r.json().get("unchanged") is True and r.json().get("mtime") == mtime_keep,
           r.text[:160])
+    rlog = client.get("/api/sync/log?vault=default&limit=40", headers=HA(tok))
+    edit_log = next((x for x in (rlog.json() or {}).get("logs") or []
+                     if x.get("kind") == "edit" and "LWW" in (x.get("title") or "")), None)
+    check(f"[{engine}] 修改写入笔记级日志",
+          bool(edit_log) and edit_log.get("summary"), str(edit_log)[:160])
+
+    # ---------- 7y. 仓库级同步开关（令牌保留但不放行） ----------
+    print("-- 7y. 仓库级开关 --")
+    r = client.put("/api/sync/enabled", headers=HA(tok),
+                   json={"vault": "default", "enabled": False})
+    check(f"[{engine}] 关闭当前仓库同步", r.status_code == 200 and r.json().get("enabled") is False,
+          r.text[:80])
+    r = client.get("/api/sync/hello", headers=HK(key))
+    check(f"[{engine}] 关闭后令牌握手 403", r.status_code == 403, str(r.status_code) + r.text[:80])
+    r = client.get("/api/sync/apikey?vault=default", headers=HA(tok))
+    info = r.json() or {}
+    check(f"[{engine}] 关闭后令牌仍在且未吊销",
+          r.status_code == 200 and info.get("enabled") is True and info.get("vaultSync") is False,
+          str(info)[:120])
+    r = client.put("/api/sync/enabled", headers=HA(tok),
+                   json={"vault": "default", "enabled": True})
+    check(f"[{engine}] 重新开启当前仓库", r.status_code == 200 and r.json().get("enabled") is True,
+          r.text[:80])
+    r = client.get("/api/sync/hello", headers=HK(key))
+    check(f"[{engine}] 重开后原令牌可用", r.status_code == 200 and r.json().get("vault") == "default",
+          r.text[:80])
+    r = client.put("/api/sync/enabled", headers=HA(tok),
+                   json={"vault": "system", "enabled": True})
+    check(f"[{engine}] 系统仓不可开启", r.status_code == 400, str(r.status_code))
 
     # ---------- 7x. 同步附件 ----------
     print("-- 7x. sync assets --")
@@ -371,6 +412,11 @@ def run_suite(engine):
     r = client.post("/api/notes/vaults", headers=HA(tok), json={"name": "工区"})
     check(f"[{engine}] 自建仓库", r.status_code == 200 and bool(r.json().get("id")), r.text[:80])
     uv = r.json().get("id")
+    r = client.post("/api/sync/apikey", headers=HA(tok), json={"vault": uv})
+    check(f"[{engine}] 未开启时自建仓不能发令牌", r.status_code == 403, str(r.status_code) + r.text[:80])
+    r = client.put("/api/sync/enabled", headers=HA(tok), json={"vault": uv, "enabled": True})
+    check(f"[{engine}] 开启自建仓同步", r.status_code == 200 and r.json().get("enabled") is True,
+          r.text[:80])
     r = client.post("/api/sync/apikey", headers=HA(tok), json={"vault": uv})
     ukey = r.json().get("apiKey", "")
     check(f"[{engine}] 自建仓库可发令牌", r.status_code == 200 and ukey.startswith("ohs_"), ukey[:12])

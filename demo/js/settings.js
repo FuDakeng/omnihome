@@ -205,6 +205,25 @@
       const c = await API.get('/api/system/monitor-config');
       $('#monitorEnabled').classList.toggle('on', !!c.enabled);
     } catch (e) {}
+    try {
+      const pc = await API.get('/api/plugin/check');
+      const btn = $('#pluginDownload');
+      if (btn){
+        btn.dataset.available = pc.available ? '1' : '';
+        if (pc.available && pc.version && !btn.dataset.ver){
+          btn.dataset.ver = '1';
+          btn.append(' v' + pc.version);
+        }
+      }
+      const chip = $('#pluginDownloadChip');
+      if (chip){
+        chip.textContent = pc.available ? ('v' + (pc.version || '?')) : '未附带';
+        chip.classList.toggle('success', !!pc.available);
+      }
+    } catch (e) {
+      const chip = $('#pluginDownloadChip');
+      if (chip) chip.textContent = '检测失败';
+    }
   }
   $('#monitorEnabled').addEventListener('click', async () => {
     /* demo.js 通用绑定已先切换视觉状态，此处读取新状态提交 */
@@ -225,6 +244,13 @@
       return;
     }
     API.dl('/api/extension.zip');
+  });
+  $('#pluginDownload')?.addEventListener('click', () => {
+    if ($('#pluginDownload').dataset.available !== '1'){
+      showToast('当前部署未包含插件目录', 'err');
+      return;
+    }
+    API.dl('/api/plugin.zip');
   });
 
   async function loadUsers(){
