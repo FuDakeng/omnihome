@@ -198,20 +198,55 @@ window.LiveMD = (() => {
     if (b === a) return null;
     return { start: lineAbs(arr, a), end: lineAbs(arr, b) + arr[b].length };
   }
+  function isListish(l){
+    const mk = parseMarker(String(l || ''));
+    return !!(mk && (mk.type === 'li' || mk.type === 'oli' || mk.type === 'todo' || mk.type === 'quote'));
+  }
+  function listBounds(text, pos){
+    const arr = text.split('\n');
+    const li = lineIndexAt(arr, pos);
+    if (!isListish(arr[li])) return null;
+    let a = li, b = li;
+    while (a > 0 && isListish(arr[a - 1])) a--;
+    while (b + 1 < arr.length && isListish(arr[b + 1])) b++;
+    if (b === a) return null;
+    return { start: lineAbs(arr, a), end: lineAbs(arr, b) + arr[b].length };
+  }
   function paraBounds(text, pos){
     const arr = text.split('\n');
     const li = lineIndexAt(arr, pos);
     if (!String(arr[li] || '').trim()) return lineBounds(text, pos);
+    const mk = parseMarker(arr[li]);
+    if (mk && (mk.type === 'h' || mk.type === 'hr')) return lineBounds(text, pos);
     let a = li, b = li;
     const isBreak = l => {
       const s = String(l || '');
       if (!s.trim()) return true;
-      if (isFenceLine(s) || isPipeRow(s)) return true;
+      if (isFenceLine(s) || isPipeRow(s) || isListish(s)) return true;
+      const m = parseMarker(s);
+      if (m && (m.type === 'h' || m.type === 'hr')) return true;
       return false;
     };
     while (a > 0 && !isBreak(arr[a - 1])) a--;
     while (b + 1 < arr.length && !isBreak(arr[b + 1])) b++;
     return { start: lineAbs(arr, a), end: lineAbs(arr, b) + arr[b].length };
+  }
+  /* 实时渲染下列表标记（- / 1. / 复选框）不在可见选区内，只允许跳过行首语法标记 */
+  function prefixSlack(text, start){
+    const nl = text.indexOf('\n', start);
+    const line = text.slice(start, nl < 0 ? text.length : nl);
+    const mk = parseMarker(line);
+    return mk ? mk.raw.length : 0;
+  }
+  function coversRange(cur, target, text){
+    if (!cur || !target) return false;
+    if (cur.start === target.start && cur.end === target.end) return true;
+    if (!(cur.end > cur.start) || !(target.end > target.start)) return false;
+    if (cur.start < target.start || cur.end > target.end + 1) return false;
+    const slack = prefixSlack(text, target.start);
+    const startOk = cur.start - target.start <= slack;
+    const endOk = target.end - cur.end <= slack || cur.end === target.end + 1;
+    return startOk && endOk;
   }
   function nextExpandRange(text, selStart, selEnd){
     text = String(text == null ? '' : text);
@@ -221,13 +256,13 @@ window.LiveMD = (() => {
     if (a > b){ const t = a; a = b; b = t; }
     const all = { start: 0, end: len };
     const line = lineBounds(text, a);
-    const block = fenceBounds(text, a) || tableBounds(text, a) || paraBounds(text, a) || line;
-    const eq = (x, y) => x.start === y.start && x.end === y.end;
+    const block = fenceBounds(text, a) || tableBounds(text, a) || listBounds(text, a)
+      || paraBounds(text, a) || line;
     const cur = { start: a, end: b };
-    if (eq(cur, all)) return all;
-    if (eq(cur, block) && !eq(block, all)) return all;
-    if (eq(cur, line) && !eq(line, block)) return block;
-    if (eq(cur, line) && eq(line, block) && !eq(block, all)) return all;
+    if (coversRange(cur, all, text)) return all;
+    if (coversRange(cur, block, text) && !coversRange(block, all, text)) return all;
+    if (coversRange(cur, line, text) && !coversRange(line, block, text)) return block;
+    if (coversRange(cur, line, text) && coversRange(line, block, text) && !coversRange(block, all, text)) return all;
     return line;
   }
 
@@ -279,7 +314,7 @@ window.LiveMD = (() => {
       }
       return -1;
     }
-    /* 按原始文本偏移在行内定位 DOM 落点（跳过 BR，穿透各类 span） */
+    /* 按原始文本偏移在行内定位 DOM 落点（data-raw 标记按源码长度计，不按可见字形） */
     function pointAtRaw(line, off){
       if (line.dataset && line.dataset.tableRaw !== undefined) return null;   // 表格块不可编辑
       const walk = arr => {
@@ -289,12 +324,40 @@ window.LiveMD = (() => {
             off -= n.data.length; continue;
           }
           if (n.tagName === 'BR') continue;
+          if (n.dataset && n.dataset.raw !== undefined){
+            const len = n.dataset.raw.length;
+            if (off < len){
+              const parent = n.parentNode;
+              return { node: parent, offset: Array.from(parent.childNodes).indexOf(n) };
+            }
+            off -= len; continue;
+          }
+          if (n.dataset && n.dataset.pre !== undefined){
+            const pre = n.dataset.pre, post = n.dataset.post || '';
+            if (off < pre.length){
+              const parent = n.parentNode;
+              return { node: parent, offset: Array.from(parent.childNodes).indexOf(n) };
+            }
+            off -= pre.length;
+            const innerLen = Array.from(n.childNodes).map(rawOfNode).join('').length;
+            if (off <= innerLen){
+              const r = walk(Array.from(n.childNodes));
+              if (r) return r;
+              return { node: n, offset: n.childNodes.length };
+            }
+            off -= innerLen;
+            if (off <= post.length){
+              const parent = n.parentNode;
+              return { node: parent, offset: Array.from(parent.childNodes).indexOf(n) + 1 };
+            }
+            off -= post.length; continue;
+          }
           const r = walk(Array.from(n.childNodes));
           if (r) return r;
         }
         return null;
       };
-      return walk(Array.from(line.childNodes));
+      return walk(Array.from(line.childNodes)) || { node: line, offset: line.childNodes.length };
     }
     /* 全文原始偏移 → DOM 落点 */
     function domPointAt(gi){
@@ -738,29 +801,36 @@ window.LiveMD = (() => {
       }
       const p1 = domPointAt(start);
       const p2 = domPointAt(end);
+      const applyLineEls = () => {
+        const ls = lines();
+        let pos = 0, startLn = null, endLn = null;
+        for (const ln of ls){
+          const len = lineRaw(ln).length;
+          if (!startLn && start <= pos + len) startLn = ln;
+          if (end > pos) endLn = ln;
+          pos += len + 1;
+        }
+        if (startLn && endLn){
+          const r = document.createRange();
+          r.setStart(startLn, 0);
+          r.setEnd(endLn, endLn.childNodes.length);
+          sel.addRange(r);
+          return true;
+        }
+        return false;
+      };
       if (p1 && p2){
         try {
           const r = document.createRange();
           r.setStart(p1.node, p1.offset);
           r.setEnd(p2.node, p2.offset);
           sel.addRange(r);
-          return;
+          const got = selectionRawRange();
+          if (got && (got.end - got.start) + 2 >= (end - start)) return;
+          sel.removeAllRanges();
         } catch (_) {}
       }
-      const ls = lines();
-      let pos = 0, startLn = null, endLn = null;
-      for (const ln of ls){
-        const len = lineRaw(ln).length;
-        if (!startLn && start <= pos + len) startLn = ln;
-        if (end > pos) endLn = ln;
-        pos += len + 1;
-      }
-      if (startLn && endLn){
-        const r = document.createRange();
-        r.setStartBefore(startLn);
-        r.setEndAfter(endLn);
-        sel.addRange(r);
-      }
+      applyLineEls();
     }
     /* 在源码偏移区间上包一层纯视觉 span（无 data-raw，序列化仍走内部文本） */
     function markRange(start, end, cls){
