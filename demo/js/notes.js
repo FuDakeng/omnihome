@@ -1323,7 +1323,11 @@ const Notes = (() => {
       + '<button class="switch' + (_revDiffOn ? ' on' : '') + '" type="button" role="switch" id="kbRevDiffSw" title="差异视图"></button>'
       + (_revCanRestore ? '<button class="btn btn-primary btn-sm" type="button" id="kbRevRestore">恢复此版本</button>' : '')
       + '</div></div>' + body;
-    if (!_revDiffOn) hydrateImages(box.querySelector('.rev-full'));
+    if (!_revDiffOn){
+      const full = box.querySelector('.rev-full');
+      highlightPreviewCode(full);
+      hydrateImages(full);
+    }
   }
   async function restoreRev(){
     if (!_revCache || !_revCanRestore) return;
@@ -1680,15 +1684,81 @@ const Notes = (() => {
     el.innerHTML = html;
   }
 
-  function highlightPreviewCode(box){
-    if (!box || !window.LiveMD || !LiveMD.highlightCode) return;
-    const esc = (window.App && App.esc) ? App.esc : s => String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    box.querySelectorAll('pre code').forEach(el => {
-      if (el.dataset.hl === '1') return;
-      el.dataset.hl = '1';
-      el.innerHTML = LiveMD.highlightCode(esc(el.textContent || ''));
+  const previewFolded = new WeakMap();
+  function previewFoldSet(box){
+    if (!box) return new Set();
+    if (!previewFolded.has(box)) previewFolded.set(box, new Set());
+    return previewFolded.get(box);
+  }
+  function enhancePreviewFences(box){
+    if (!box) return;
+    const folded = previewFoldSet(box);
+    const pres = Array.from(box.querySelectorAll('pre'));
+    pres.forEach((pre, i) => {
+      if (pre.dataset.codeUi === '1') return;
+      pre.dataset.codeUi = '1';
+      pre.classList.add('md-code');
+      const code = pre.querySelector('code');
+      const lang = (code && code.getAttribute('data-lang')) || '';
+      const tools = document.createElement('div');
+      tools.className = 'md-code-tools';
+      tools.innerHTML =
+        (lang ? '<span class="md-code-lang">' + (window.App ? App.esc(lang) : lang) + '</span>' : '')
+        + '<button type="button" class="lm-code-btn" data-md-code-act="copy" title="复制">'
+        + '<svg class="ic"><use href="#i-copy"/></svg></button>'
+        + '<button type="button" class="lm-code-btn" data-md-code-act="fold" title="折叠">'
+        + '<svg class="ic"><use href="#i-chev-d"/></svg></button>';
+      pre.insertBefore(tools, pre.firstChild);
+      if (folded.has(i)){
+        pre.classList.add('is-folded');
+        const fb = tools.querySelector('[data-md-code-act="fold"]');
+        if (fb) fb.title = '展开';
+      }
     });
+  }
+  document.addEventListener('mousedown', e => {
+    if (e.target.closest && e.target.closest('.md-code-tools, [data-md-code-act]'))
+      e.preventDefault();
+  });
+  document.addEventListener('click', e => {
+    const btn = e.target.closest && e.target.closest('[data-md-code-act]');
+    if (!btn) return;
+    e.preventDefault();
+    const pre = btn.closest('pre');
+    if (!pre) return;
+    const act = btn.dataset.mdCodeAct;
+    if (act === 'copy'){
+      const code = pre.querySelector('code');
+      const text = code ? code.textContent : '';
+      const done = () => { if (typeof showToast === 'function') showToast('已复制'); };
+      if (navigator.clipboard && navigator.clipboard.writeText)
+        navigator.clipboard.writeText(text).then(done).catch(done);
+      else done();
+    } else if (act === 'fold'){
+      pre.classList.toggle('is-folded');
+      const on = pre.classList.contains('is-folded');
+      btn.title = on ? '展开' : '折叠';
+      const box = pre.closest('.md-preview');
+      if (box){
+        const set = previewFoldSet(box);
+        const idx = Array.from(box.querySelectorAll('pre')).indexOf(pre);
+        if (on) set.add(idx); else set.delete(idx);
+      }
+    }
+  });
+
+  function highlightPreviewCode(box){
+    if (!box) return;
+    if (window.LiveMD && LiveMD.highlightCode){
+      const esc = (window.App && App.esc) ? App.esc : s => String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      box.querySelectorAll('pre code').forEach(el => {
+        if (el.dataset.hl === '1') return;
+        el.dataset.hl = '1';
+        el.innerHTML = LiveMD.highlightCode(esc(el.textContent || ''));
+      });
+    }
+    enhancePreviewFences(box);
   }
 
   function renderPreview(){
@@ -3268,12 +3338,42 @@ const Notes = (() => {
 
     /* ---------- 查找 / 替换 ---------- */
     let findMatches = [], findIdx = -1;
+    let findScope = null, findScopePending = null;
+    function readEditorSelection(){
+      if (liveOn() && liveEd && typeof liveEd.selectionRange === 'function'){
+        const rng = liveEd.selectionRange();
+        if (rng && rng.end > rng.start) return { start: rng.start, end: rng.end };
+        return null;
+      }
+      const s = ta.selectionStart, e = ta.selectionEnd;
+      if (typeof s === 'number' && e > s) return { start: s, end: e };
+      return null;
+    }
+    function activeFindScope(){
+      if (!findScope || !(findScope.end > findScope.start)) return null;
+      const n = ta.value.length;
+      return { start: Math.max(0, Math.min(n, findScope.start)), end: Math.max(0, Math.min(n, findScope.end)) };
+    }
+    function updateFindScopeHint(){
+      const el = $('#mdFindScope');
+      if (!el) return;
+      const sc = activeFindScope();
+      el.hidden = !sc;
+    }
     function collectMatches(q){
       const v = ta.value, out = [];
       if (!q) return out;
+      const sc = activeFindScope();
+      const from = sc ? sc.start : 0;
+      const to = sc ? sc.end : v.length;
       const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+      re.lastIndex = from;
       let m;
-      while ((m = re.exec(v)) != null){ out.push(m.index); if (out.length >= 500) break; }
+      while ((m = re.exec(v)) != null){
+        if (m.index + q.length > to) break;
+        out.push(m.index);
+        if (out.length >= 500) break;
+      }
       return out;
     }
     function clearFindMark(){
@@ -3292,15 +3392,31 @@ const Notes = (() => {
       const boxes = [];
       if (liveOn()) boxes.push(liveEd.el);
       const pv = $('#edPreview');
-      if (pv && pv.style.display !== 'none') boxes.push(pv);
+      const sc = activeFindScope();
+      if (pv && pv.style.display !== 'none' && !sc) boxes.push(pv);
       const ql = q.toLowerCase();
+      const lineOffs = [];
+      let srcLines = null;
+      if (sc && liveOn()){
+        srcLines = ta.value.split('\n');
+        let p = 0;
+        for (let i = 0; i < srcLines.length; i++){ lineOffs[i] = p; p += srcLines[i].length + 1; }
+      }
       for (const box of boxes){
         const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT, {
           acceptNode(n){
             const v = n.nodeValue;
             if (!v || v.indexOf(ql) < 0 && v.toLowerCase().indexOf(ql) < 0) return NodeFilter.FILTER_REJECT;
             const p = n.parentElement;
-            if (!p || p.closest('button, .lm-find, .lm-tbar, .lm-sel, .lm-drag, .lm-hint, .lm-more, .lm-rowh, .lm-colh')) return NodeFilter.FILTER_REJECT;
+            if (!p || p.closest('button, .lm-find, .lm-tbar, .lm-sel, .lm-drag, .lm-hint, .lm-more, .lm-rowh, .lm-colh, .lm-code-tools, .md-code-tools')) return NodeFilter.FILTER_REJECT;
+            if (sc && liveOn() && srcLines){
+              const line = p.closest('.lm-line, .lm-table');
+              const si = line && line.dataset ? +line.dataset.srcI : NaN;
+              if (isFinite(si) && lineOffs[si] != null){
+                const ls = lineOffs[si], le = ls + (srcLines[si] || '').length;
+                if (le < sc.start || ls >= sc.end) return NodeFilter.FILTER_REJECT;
+              }
+            }
             return NodeFilter.FILTER_ACCEPT;
           },
         });
@@ -3326,11 +3442,14 @@ const Notes = (() => {
     /* 当前匹配突出：全文扫描算序号 → 按文档顺序取第 k 个高亮 */
     function markCurrent(pos, q){
       if (!liveOn()) return;
-      const v = ta.value, low = v.toLowerCase(), ql = q.toLowerCase();
-      let k = 0, i = 0, j;
-      while ((j = low.indexOf(ql, i)) >= 0 && j < pos){ k++; i = j + q.length; }
       const spans = liveEd.el.querySelectorAll('.lm-find');
       spans.forEach(s => s.classList.remove('lm-find-cur'));
+      let k = findIdx;
+      if (k < 0 || !activeFindScope()){
+        const v = ta.value, low = v.toLowerCase(), ql = q.toLowerCase();
+        k = 0; let i = 0, j;
+        while ((j = low.indexOf(ql, i)) >= 0 && j < pos){ k++; i = j + q.length; }
+      }
       const cur = spans[k];
       if (cur){
         cur.classList.add('lm-find-cur');
@@ -3361,12 +3480,15 @@ const Notes = (() => {
       markFindSpans(q);
       markCurrent(pos, q);
       cnt.textContent = (findIdx + 1) + ' / ' + findMatches.length;
+      updateFindScopeHint();
     }
     function doReplaceOne(){
       const q = $('#mdFindInput').value, rp = $('#mdReplaceInput').value;
       if (!q || findIdx < 0 || findIdx >= findMatches.length) return;
       const v = ta.value, pos = findMatches[findIdx];
       const next = v.slice(0, pos) + rp + v.slice(pos + q.length);
+      const delta = rp.length - q.length;
+      if (findScope && findScope.end > findScope.start) findScope.end += delta;
       ta.value = next;
       ta.dispatchEvent(new Event('input'));
       if (liveOn()) liveEd.setValue(next);
@@ -3377,21 +3499,38 @@ const Notes = (() => {
       const q = $('#mdFindInput').value, rp = $('#mdReplaceInput').value;
       if (!q) return;
       const v = ta.value;
-      const next = v.split(q).join(rp);
+      const sc = activeFindScope();
+      let next, n = 0;
+      if (sc){
+        const slice = v.slice(sc.start, sc.end);
+        const parts = slice.split(q);
+        n = Math.max(0, parts.length - 1);
+        const mid = parts.join(rp);
+        next = v.slice(0, sc.start) + mid + v.slice(sc.end);
+        findScope = { start: sc.start, end: sc.start + mid.length };
+      } else {
+        const parts = v.split(q);
+        n = Math.max(0, parts.length - 1);
+        next = parts.join(rp);
+      }
       if (next === v){ showToast('无匹配项'); return; }
       ta.value = next;
       ta.dispatchEvent(new Event('input'));
       if (liveOn()) liveEd.setValue(next);
       findMatches = []; findIdx = -1;
       $('#mdFindCount').textContent = '0 / 0';
-      showToast('已全部替换');
+      updateFindScopeHint();
+      showToast(sc ? `已替换选区内 ${n} 处` : '已全部替换');
     }
     function openFindBar(){
       const bar = $('#mdFindBar');
       if (!bar) return;
       if (bar.hidden){
+        findScope = findScopePending || readEditorSelection();
+        findScopePending = null;
         bar.hidden = false;
         $('#mdFindBtn')?.classList.add('on');
+        updateFindScopeHint();
         $('#mdFindInput').focus();
         doFind(0);
       } else closeFindBar();
@@ -3399,10 +3538,16 @@ const Notes = (() => {
     function closeFindBar(){
       $('#mdFindBar').hidden = true;
       $('#mdFindBtn')?.classList.remove('on');
+      findScope = null;
+      findScopePending = null;
+      updateFindScopeHint();
       clearFindMark();
       ta.focus();
     }
     /* 查找按钮由 ACT['find'] 统一分发，不在此单独绑定（避免一次点击开又关） */
+    $('#mdFindBtn')?.addEventListener('mousedown', () => {
+      findScopePending = readEditorSelection();
+    }, true);
     $('#mdFindClose')?.addEventListener('click', closeFindBar);
     $('#mdFindNext')?.addEventListener('click', () => doFind(1));
     $('#mdFindPrev')?.addEventListener('click', () => doFind(-1));
@@ -3450,9 +3595,20 @@ const Notes = (() => {
 
     /* ---------- 撤销 / 重做（实时渲染模式接管；源码模式交给 textarea 原生） ---------- */
     document.addEventListener('keydown', e => {
-      if (!liveOn()) return;
       const k = String(e.key || '').toLowerCase();
-      if (!(e.metaKey || e.ctrlKey)) return;
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      if (k === 'a' && !e.shiftKey){
+        const t = e.target;
+        if (t && t.tagName === 'TEXTAREA' && (t.id === 'edSrc' || t.id === 'kbShareSrc') && !t.readOnly){
+          e.preventDefault();
+          const next = window.LiveMD && LiveMD.nextExpandRange
+            ? LiveMD.nextExpandRange(t.value, t.selectionStart, t.selectionEnd)
+            : null;
+          if (next) t.setSelectionRange(next.start, next.end);
+        }
+        return;
+      }
+      if (!liveOn()) return;
       if (k === 'z'){
         if (e.shiftKey){ if (liveEd.redo()) e.preventDefault(); }
         else if (liveEd.undo()) e.preventDefault();

@@ -128,6 +128,109 @@ window.LiveMD = (() => {
       : `<span class="hl-kw">${m}</span>`);
   }
 
+  const CODE_TOOLS =
+    '<span class="lm-code-tools" data-raw="" contenteditable="false">'
+    + '<button type="button" class="lm-code-btn" data-lm-code-act="copy" title="复制">'
+    + '<svg class="ic"><use href="#i-copy"/></svg></button>'
+    + '<button type="button" class="lm-code-btn" data-lm-code-act="fold" title="折叠">'
+    + '<svg class="ic"><use href="#i-chev-d"/></svg></button></span>';
+
+  function copyText(s){
+    const t = String(s == null ? '' : s);
+    if (navigator.clipboard && navigator.clipboard.writeText)
+      return navigator.clipboard.writeText(t).catch(() => copyTextFallback(t));
+    return Promise.resolve(copyTextFallback(t));
+  }
+  function copyTextFallback(t){
+    const el = document.createElement('textarea');
+    el.value = t; el.setAttribute('readonly', '');
+    el.style.cssText = 'position:fixed;left:-9999px;top:0';
+    document.body.appendChild(el); el.select();
+    try { document.execCommand('copy'); } catch (_) {}
+    el.remove();
+  }
+
+  /* ---------- 阶梯全选：行 → 文本块/代码块 → 全文 ---------- */
+  function lineBounds(text, pos){
+    const start = text.lastIndexOf('\n', pos - 1) + 1;
+    let end = text.indexOf('\n', pos);
+    if (end < 0) end = text.length;
+    return { start, end };
+  }
+  function lineIndexAt(arr, pos){
+    let p = 0;
+    for (let i = 0; i < arr.length; i++){
+      const end = p + arr[i].length;
+      if (pos <= end) return i;
+      p = end + 1;
+    }
+    return Math.max(0, arr.length - 1);
+  }
+  function lineAbs(arr, i){
+    let p = 0;
+    for (let k = 0; k < i; k++) p += arr[k].length + 1;
+    return p;
+  }
+  function isFenceLine(l){ return /^(```|~~~)/.test(String(l || '').trim()); }
+  function isPipeRow(l){ return l.includes('|') && /^\s*\|.*\|\s*$/.test(String(l || '').trim()); }
+  function fenceBounds(text, pos){
+    const arr = text.split('\n');
+    const li = lineIndexAt(arr, pos);
+    let open = -1;
+    for (let i = 0; i < arr.length; i++){
+      if (!isFenceLine(arr[i])) continue;
+      if (open < 0){ open = i; continue; }
+      if (li >= open && li <= i)
+        return { start: lineAbs(arr, open), end: lineAbs(arr, i) + arr[i].length };
+      open = -1;
+    }
+    if (open >= 0 && li >= open)
+      return { start: lineAbs(arr, open), end: text.length };
+    return null;
+  }
+  function tableBounds(text, pos){
+    const arr = text.split('\n');
+    const li = lineIndexAt(arr, pos);
+    if (!isPipeRow(arr[li])) return null;
+    let a = li, b = li;
+    while (a > 0 && isPipeRow(arr[a - 1])) a--;
+    while (b + 1 < arr.length && isPipeRow(arr[b + 1])) b++;
+    if (b === a) return null;
+    return { start: lineAbs(arr, a), end: lineAbs(arr, b) + arr[b].length };
+  }
+  function paraBounds(text, pos){
+    const arr = text.split('\n');
+    const li = lineIndexAt(arr, pos);
+    if (!String(arr[li] || '').trim()) return lineBounds(text, pos);
+    let a = li, b = li;
+    const isBreak = l => {
+      const s = String(l || '');
+      if (!s.trim()) return true;
+      if (isFenceLine(s) || isPipeRow(s)) return true;
+      return false;
+    };
+    while (a > 0 && !isBreak(arr[a - 1])) a--;
+    while (b + 1 < arr.length && !isBreak(arr[b + 1])) b++;
+    return { start: lineAbs(arr, a), end: lineAbs(arr, b) + arr[b].length };
+  }
+  function nextExpandRange(text, selStart, selEnd){
+    text = String(text == null ? '' : text);
+    const len = text.length;
+    let a = Math.max(0, Math.min(len, selStart == null ? 0 : selStart));
+    let b = Math.max(0, Math.min(len, selEnd == null ? a : selEnd));
+    if (a > b){ const t = a; a = b; b = t; }
+    const all = { start: 0, end: len };
+    const line = lineBounds(text, a);
+    const block = fenceBounds(text, a) || tableBounds(text, a) || paraBounds(text, a) || line;
+    const eq = (x, y) => x.start === y.start && x.end === y.end;
+    const cur = { start: a, end: b };
+    if (eq(cur, all)) return all;
+    if (eq(cur, block) && !eq(block, all)) return all;
+    if (eq(cur, line) && !eq(line, block)) return block;
+    if (eq(cur, line) && eq(line, block) && !eq(block, all)) return all;
+    return line;
+  }
+
   function attach(ta, opts = {}){
     const root = E('<div class="livemd" contenteditable="true" spellcheck="false"></div>');
     ta.parentNode.insertBefore(root, ta.nextSibling);
@@ -416,9 +519,63 @@ window.LiveMD = (() => {
       }
     }
 
+    let foldedOrds = new Set();
+    function snapCodeFolds(){
+      foldedOrds = new Set();
+      let i = 0;
+      root.querySelectorAll('.lm-fence-open').forEach(el => {
+        if (el.classList.contains('is-folded')) foldedOrds.add(i);
+        i++;
+      });
+    }
+    function setCodeFold(openEl, on){
+      if (!openEl) return;
+      openEl.classList.toggle('is-folded', on);
+      const foldBtn = openEl.querySelector('[data-lm-code-act="fold"]');
+      if (foldBtn) foldBtn.title = on ? '展开' : '折叠';
+      let n = openEl.nextElementSibling;
+      while (n && n.classList.contains('lm-code')){
+        n.classList.toggle('is-folded', on);
+        n = n.nextElementSibling;
+      }
+      if (n && n.classList.contains('lm-fence-close')) n.classList.toggle('is-folded', on);
+    }
+    function applyCodeFolds(){
+      let i = 0;
+      root.querySelectorAll('.lm-fence-open').forEach(el => {
+        if (foldedOrds.has(i)) setCodeFold(el, true);
+        i++;
+      });
+    }
+    function codeBodyOf(openEl){
+      const parts = [];
+      let n = openEl.nextElementSibling;
+      while (n && n.classList.contains('lm-code')){
+        parts.push(lineRaw(n));
+        n = n.nextElementSibling;
+      }
+      return parts.join('\n');
+    }
+    function updateFencePairFocus(){
+      root.querySelectorAll('.lm-fence-pair-caret').forEach(n => n.classList.remove('lm-fence-pair-caret'));
+      if (root.getAttribute('contenteditable') === 'false') return;
+      const el = caretLineEl();
+      if (!el) return;
+      if (el.classList.contains('lm-fence-close')){
+        let n = el.previousElementSibling;
+        while (n && !n.classList.contains('lm-fence-open')) n = n.previousElementSibling;
+        if (n) n.classList.add('lm-fence-pair-caret');
+      } else if (el.classList.contains('lm-fence-open')){
+        let n = el.nextElementSibling;
+        while (n && n.classList.contains('lm-code')) n = n.nextElementSibling;
+        if (n && n.classList.contains('lm-fence-close')) n.classList.add('lm-fence-pair-caret');
+      }
+    }
+
     /* ---------- 全量重建（含代码围栏状态） ---------- */
     function rebuild(raw){
       clearBr();   // 重建前清除括号高亮包裹，避免残留节点
+      snapCodeFolds();
       const st = root.scrollTop;
       const srcLines = raw === '' ? [''] : raw.split('\n');
       let fence = false;
@@ -426,8 +583,13 @@ window.LiveMD = (() => {
       for (let i = 0; i < srcLines.length; i++){
         const line = srcLines[i], trim = line.trim();
         if (/^(```|~~~)/.test(trim)){
+          const opening = !fence;
           fence = !fence;
-          html.push(`<div class="lm-line lm-fence" data-src-i="${i}">${esc(line) || '<br>'}</div>`);
+          const lang = opening ? (trim.replace(/^(```|~~~)/, '').trim().split(/\s+/)[0] || '') : '';
+          const langAttr = opening && /^[\w+#.-]+$/.test(lang) ? ` data-lang="${escAttr(lang)}"` : '';
+          const role = opening ? 'lm-fence-open' : 'lm-fence-close';
+          const tools = opening ? CODE_TOOLS : '';
+          html.push(`<div class="lm-line lm-fence ${role}" data-src-i="${i}"${langAttr}>${esc(line) || '<br>'}${tools}</div>`);
           continue;
         }
         if (fence){ html.push(`<div class="lm-line lm-code" data-src-i="${i}">${highlightCode(esc(line)) || '<br>'}</div>`); continue; }
@@ -461,6 +623,7 @@ window.LiveMD = (() => {
         }
       }
       root.innerHTML = html.join('');
+      applyCodeFolds();
       updatePh();
       if (!histNo) histPush();          // 每次重建后记录新状态（供 Ctrl+Z 回退）
       root.scrollTop = st;
@@ -562,6 +725,42 @@ window.LiveMD = (() => {
       if (typeof b !== 'number') b = a;
       if (a > b){ const t = a; a = b; b = t; }
       return { start: a, end: b };
+    }
+    function selectRawRange(start, end){
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      const raw = serializeAll();
+      start = Math.max(0, Math.min(raw.length, start == null ? 0 : start));
+      end = Math.max(start, Math.min(raw.length, end == null ? start : end));
+      if (end <= start){
+        restoreCaret(start);
+        return;
+      }
+      const p1 = domPointAt(start);
+      const p2 = domPointAt(end);
+      if (p1 && p2){
+        try {
+          const r = document.createRange();
+          r.setStart(p1.node, p1.offset);
+          r.setEnd(p2.node, p2.offset);
+          sel.addRange(r);
+          return;
+        } catch (_) {}
+      }
+      const ls = lines();
+      let pos = 0, startLn = null, endLn = null;
+      for (const ln of ls){
+        const len = lineRaw(ln).length;
+        if (!startLn && start <= pos + len) startLn = ln;
+        if (end > pos) endLn = ln;
+        pos += len + 1;
+      }
+      if (startLn && endLn){
+        const r = document.createRange();
+        r.setStartBefore(startLn);
+        r.setEndAfter(endLn);
+        sel.addRange(r);
+      }
     }
     /* 拖拽落点 → 原始文本偏移（落在编辑器外则追加到文末） */
     function offsetFromPoint(x, y){
@@ -688,6 +887,18 @@ window.LiveMD = (() => {
     /* ---------- 按键：Enter 续行 / Backspace 还原与并段 ---------- */
     function onKeydown(e){
       if (composing || e.isComposing) return;
+
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey
+          && String(e.key || '').toLowerCase() === 'a'){
+        e.preventDefault();
+        const raw = serializeAll();
+        const rng = selectionRawRange();
+        const a = rng ? rng.start : (globalOffset() || 0);
+        const b = rng ? rng.end : a;
+        const next = nextExpandRange(raw, a, b);
+        selectRawRange(next.start, next.end);
+        return;
+      }
 
       /* 表格单元格内：Enter 下移 / Tab 右移；退格/删除交给原生，跳过下方标记还原逻辑 */
       const inCell = e.target.closest ? e.target.closest('.lm-table td, .lm-table th') : null;
@@ -881,6 +1092,23 @@ window.LiveMD = (() => {
 
     /* ---------- 任务列表点击勾选 / 表格行列选中与增删 ---------- */
     function onClick(e){
+      const codeAct = e.target.closest ? e.target.closest('[data-lm-code-act]') : null;
+      if (codeAct && root.contains(codeAct)){
+        e.preventDefault();
+        const open = codeAct.closest('.lm-fence-open');
+        if (!open) return;
+        const act = codeAct.dataset.lmCodeAct;
+        if (act === 'copy'){
+          copyText(codeBodyOf(open)).then(() => {
+            if (typeof showToast === 'function') showToast('已复制');
+          });
+        } else if (act === 'fold'){
+          const on = !open.classList.contains('is-folded');
+          setCodeFold(open, on);
+          snapCodeFolds();
+        }
+        return;
+      }
       /* 表格浮动工具条：按当前选中的行/列执行插入/删除 */
       const tAct = e.target.closest('[data-t-act]');
       if (tAct){
@@ -1085,6 +1313,7 @@ window.LiveMD = (() => {
         for (const x of root.querySelectorAll('.lm-caret'))
           if (x !== el) x.classList.remove('lm-caret');
         if (el) el.classList.add('lm-caret');
+        updateFencePairFocus();
         caretBrackets();
         /* 光标离开表格后，把刚才编辑过的表格刷新一次内联渲染（加粗/链接等） */
         if (tblDirty && (!el || !el.dataset || el.dataset.tableRaw === undefined)){
@@ -1103,6 +1332,10 @@ window.LiveMD = (() => {
     root.addEventListener('keydown', onKeydown);
     root.addEventListener('paste', onPaste);
     root.addEventListener('click', onClick);
+    root.addEventListener('mousedown', e => {
+      if (e.target.closest && e.target.closest('.lm-code-tools, [data-lm-code-act]'))
+        e.preventDefault();
+    });
     /* 本机图片拖入编辑区 → 上传并插入 */
     root.addEventListener('dragover', e => {
       if (opts.uploadImage && e.dataTransfer
@@ -1189,6 +1422,8 @@ window.LiveMD = (() => {
       redo(){ if (histIdx < hist.length - 1){ restoreHist(histIdx + 1); return true; } return false; },
       wrapSelection,
       lineInsert,
+      selectionRange: selectionRawRange,
+      selectRange: selectRawRange,
       setValue(s){ ta.value = s; rebuild(s); try { ta.dispatchEvent(new Event('input')); } catch (e) {} },
       insertText(text){
         const tl = selTableLine();
@@ -1224,5 +1459,5 @@ window.LiveMD = (() => {
     return inst;
   }
 
-  return { attach, highlightCode };
+  return { attach, highlightCode, nextExpandRange };
 })();

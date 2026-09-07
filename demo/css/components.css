@@ -1013,6 +1013,22 @@
   font-size: 10px; color: var(--om-text-3);
   text-transform: uppercase; letter-spacing: .5px;
 }
+.md-preview pre.md-code code[data-lang]::before{ display: none; }
+.md-preview pre.md-code{ padding-top: 32px; }
+.md-code-tools{
+  position: absolute; top: 4px; right: 6px;
+  display: flex; align-items: center; gap: 2px;
+  z-index: 1; user-select: none;
+}
+.md-code-lang{
+  font-size: 10px; color: var(--om-text-3);
+  text-transform: uppercase; letter-spacing: .5px;
+  margin-right: 4px;
+}
+.md-preview pre.md-code.is-folded{
+  padding-bottom: 6px; min-height: 32px;
+}
+.md-preview pre.md-code.is-folded > code{ display: none; }
 
 /* ---------- 查找 / 替换条 ---------- */
 .md-findbar{
@@ -1031,6 +1047,11 @@
 }
 .md-findbar input:focus{ border-color: var(--om-primary); }
 .md-findbar .md-find-count{ font-size: 11px; color: var(--om-text-3); white-space: nowrap; }
+.md-findbar .md-find-scope{
+  font-size: 11px; color: var(--om-primary);
+  background: var(--om-primary-ghost);
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+}
 .md-findbar .md-find-nav{ padding: 4px 9px; font-size: 11.5px; white-space: nowrap; }
 .md-findbar .ed-div{ margin: 0 4px; }
 
@@ -2295,6 +2316,44 @@ body[data-view="notes"] .kb-editor{ gap: 0; }
   background: var(--om-bg); padding-left: 12px;
 }
 .lm-fence{ color: var(--om-text-3); }
+.lm-fence-open{ position: relative; padding-right: 64px; min-height: 28px; }
+.lm-code-tools{
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  display: none; align-items: center; gap: 2px;
+  z-index: 2; user-select: none;
+}
+.lm-fence-open .lm-code-tools{ display: flex; }
+.livemd:not([contenteditable="false"]) .lm-fence-open.lm-caret .lm-code-tools,
+.livemd:not([contenteditable="false"]) .lm-fence-open.lm-fence-pair-caret .lm-code-tools{
+  display: none;
+}
+.lm-code-btn{
+  width: 24px; height: 24px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--om-text-3);
+  display: grid; place-items: center; cursor: pointer; padding: 0;
+}
+.lm-code-btn:hover{ background: var(--om-surface-3); color: var(--om-text-1); }
+.lm-code-btn .ic{ width: 13px; height: 13px; pointer-events: none; }
+.lm-fence-open.is-folded [data-lm-code-act="fold"],
+pre.md-code.is-folded [data-md-code-act="fold"]{ transform: rotate(-90deg); }
+.lm-code.is-folded, .lm-fence-close.is-folded{ display: none; }
+/* 光标不在围栏标记上时隐藏 ``` 原文，改显示语言标签与操作按钮 */
+.livemd:not([contenteditable="false"]) .lm-fence-open:not(.lm-caret):not(.lm-fence-pair-caret),
+.livemd[contenteditable="false"] .lm-fence-open{
+  color: transparent;
+}
+.livemd:not([contenteditable="false"]) .lm-fence-open:not(.lm-caret):not(.lm-fence-pair-caret)::before,
+.livemd[contenteditable="false"] .lm-fence-open::before{
+  content: attr(data-lang);
+  color: var(--om-text-3);
+  font-size: 10px; letter-spacing: .5px; text-transform: uppercase;
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  pointer-events: none;
+}
+.livemd:not([contenteditable="false"]) .lm-fence-open:not([data-lang]):not(.lm-caret):not(.lm-fence-pair-caret)::before,
+.livemd[contenteditable="false"] .lm-fence-open:not([data-lang])::before{ content: 'code'; }
+.livemd:not([contenteditable="false"]) .lm-fence-close:not(.lm-caret):not(.lm-fence-pair-caret),
+.livemd[contenteditable="false"] .lm-fence-close{ display: none; }
 /* 代码块语法高亮（纯视觉，不影响回写原文；颜色适配暗色主题） */
 .lm-code .hl-kw{ color: #c792ea; font-weight: 600; }
 .lm-code .hl-str{ color: #a5d6a7; }
