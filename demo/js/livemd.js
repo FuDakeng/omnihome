@@ -762,6 +762,42 @@ window.LiveMD = (() => {
         sel.addRange(r);
       }
     }
+    /* 在源码偏移区间上包一层纯视觉 span（无 data-raw，序列化仍走内部文本） */
+    function markRange(start, end, cls){
+      if (!(end > start) || !cls) return;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(n){
+          if (!n.data) return NodeFilter.FILTER_REJECT;
+          const p = n.parentElement;
+          if (!p || p.closest('button, .lm-code-tools, .lm-tbar, .lm-rowh, .lm-colh, .lm-find, .' + cls))
+            return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
+      const hits = [];
+      while (walker.nextNode()){
+        const n = walker.currentNode;
+        let a;
+        try { a = rawOffset(n, 0); } catch (_) { continue; }
+        if (typeof a !== 'number') continue;
+        const b = a + n.data.length;
+        if (b <= start || a >= end) continue;
+        hits.push({ n, from: Math.max(0, start - a), to: Math.min(n.data.length, end - a) });
+      }
+      for (let i = hits.length - 1; i >= 0; i--){
+        const h = hits[i];
+        if (h.to <= h.from) continue;
+        let node = h.n;
+        try {
+          if (h.from > 0) node = node.splitText(h.from);
+          if (h.to - h.from < node.data.length) node.splitText(h.to - h.from);
+          const span = document.createElement('span');
+          span.className = cls;
+          node.parentNode.replaceChild(span, node);
+          span.appendChild(node);
+        } catch (_) {}
+      }
+    }
     /* 拖拽落点 → 原始文本偏移（落在编辑器外则追加到文末） */
     function offsetFromPoint(x, y){
       const r = document.caretRangeFromPoint
@@ -1424,6 +1460,7 @@ window.LiveMD = (() => {
       lineInsert,
       selectionRange: selectionRawRange,
       selectRange: selectRawRange,
+      markRange,
       setValue(s){ ta.value = s; rebuild(s); try { ta.dispatchEvent(new Event('input')); } catch (e) {} },
       insertText(text){
         const tl = selTableLine();

@@ -2677,6 +2677,9 @@ const Notes = (() => {
     $$('#kbShareModeSeg .seg-btn').forEach(b =>
       b.addEventListener('click', () => setShareMode(b.dataset.shMode)));
     $('#kbShareSrc')?.addEventListener('input', onShareSrcInput);
+    $('#kbShareEdBar')?.addEventListener('mousedown', e => {
+      if (e.target.closest && e.target.closest('button, .seg-btn, [data-sh-act]')) e.preventDefault();
+    });
     $('#kbShareEdBar')?.addEventListener('click', e => {
       const btn = e.target.closest('[data-sh-act]');
       if (!btn || !shareView.canEdit) return;
@@ -3385,6 +3388,29 @@ const Notes = (() => {
         try { p.normalize(); } catch (_) {}
       });
     }
+    function clearScopeMark(){
+      document.querySelectorAll('.lm-find-scope').forEach(s => {
+        const p = s.parentNode;
+        if (!p) return;
+        while (s.firstChild) p.insertBefore(s.firstChild, s);
+        s.remove();
+        try { p.normalize(); } catch (_) {}
+      });
+    }
+    function markScopeSpans(){
+      clearFindMark();
+      clearScopeMark();
+      const sc = activeFindScope();
+      if (!sc) return;
+      if (liveOn() && liveEd && typeof liveEd.markRange === 'function')
+        liveEd.markRange(sc.start, sc.end, 'lm-find-scope');
+    }
+    function keepEditorSelection(e){
+      const t = e.target;
+      if (!t || !t.closest) return;
+      if (t.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (t.closest('.ed-btn, .seg-btn, .md-findbar, #mdFindBtn')) e.preventDefault();
+    }
     /* 全部匹配高亮：逐个文本节点内包裹 .lm-find（无 dataset，不影响序列化） */
     function markFindSpans(q){
       clearFindMark();
@@ -3460,23 +3486,32 @@ const Notes = (() => {
     function scheduleMark(){   // 输入过程中防抖重标，避免每键一次全量包裹
       clearTimeout(markTimer);
       markTimer = setTimeout(() => {
-        if ($('#mdFindBar') && !$('#mdFindBar').hidden) markFindSpans($('#mdFindInput').value);
+        if ($('#mdFindBar') && !$('#mdFindBar').hidden){
+          markScopeSpans();
+          markFindSpans($('#mdFindInput').value);
+        }
       }, 160);
     }
     function doFind(dir){   // 0=重新定位第一个 1=下一个 -1=上一个（循环跳转）
       const q = $('#mdFindInput').value;
       findMatches = collectMatches(q);
       const cnt = $('#mdFindCount');
-      if (!findMatches.length){
+      markScopeSpans();
+      if (!q || !findMatches.length){
         findIdx = -1;
         cnt.textContent = '0 / 0';
         clearFindMark();
+        updateFindScopeHint();
         return;
       }
       if (dir === 0) findIdx = 0;
       else findIdx = (((findIdx < 0 ? 0 : findIdx + dir) % findMatches.length) + findMatches.length) % findMatches.length;
       const pos = findMatches[findIdx];
-      ta.setSelectionRange(pos, pos + q.length);
+      const sc = activeFindScope();
+      if (!liveOn()){
+        if (sc) ta.setSelectionRange(sc.start, sc.end);
+        else ta.setSelectionRange(pos, pos + q.length);
+      }
       markFindSpans(q);
       markCurrent(pos, q);
       cnt.textContent = (findIdx + 1) + ' / ' + findMatches.length;
@@ -3531,23 +3566,43 @@ const Notes = (() => {
         bar.hidden = false;
         $('#mdFindBtn')?.classList.add('on');
         updateFindScopeHint();
+        markScopeSpans();
         $('#mdFindInput').focus();
         doFind(0);
       } else closeFindBar();
     }
     function closeFindBar(){
+      const sc = activeFindScope();
       $('#mdFindBar').hidden = true;
       $('#mdFindBtn')?.classList.remove('on');
-      findScope = null;
       findScopePending = null;
-      updateFindScopeHint();
       clearFindMark();
-      ta.focus();
+      clearScopeMark();
+      findScope = null;
+      updateFindScopeHint();
+      if (liveOn()){
+        liveEd.focus();
+        if (sc && typeof liveEd.selectRange === 'function') liveEd.selectRange(sc.start, sc.end);
+      } else {
+        ta.focus();
+        if (sc) ta.setSelectionRange(sc.start, sc.end);
+      }
     }
     /* 查找按钮由 ACT['find'] 统一分发，不在此单独绑定（避免一次点击开又关） */
-    $('#mdFindBtn')?.addEventListener('mousedown', () => {
-      findScopePending = readEditorSelection();
-    }, true);
+    $('.ed-bar')?.addEventListener('mousedown', e => {
+      if (e.target.closest && e.target.closest('#mdFindBtn'))
+        findScopePending = readEditorSelection();
+      keepEditorSelection(e);
+    });
+    $('#mdFindBar')?.addEventListener('mousedown', e => {
+      const rng = readEditorSelection();
+      if (rng) findScope = rng;
+      keepEditorSelection(e);
+      if (rng){
+        updateFindScopeHint();
+        requestAnimationFrame(markScopeSpans);
+      }
+    });
     $('#mdFindClose')?.addEventListener('click', closeFindBar);
     $('#mdFindNext')?.addEventListener('click', () => doFind(1));
     $('#mdFindPrev')?.addEventListener('click', () => doFind(-1));
@@ -3563,7 +3618,10 @@ const Notes = (() => {
     });
     /* 预览重渲染后同样重打 */
     document.addEventListener('omni:preview-rendered', () => {
-      if ($('#mdFindBar') && !$('#mdFindBar').hidden) markFindSpans($('#mdFindInput').value);
+      if ($('#mdFindBar') && !$('#mdFindBar').hidden){
+        markScopeSpans();
+        markFindSpans($('#mdFindInput').value);
+      }
     });
     $('#mdReplaceOne')?.addEventListener('click', doReplaceOne);
     $('#mdReplaceAll')?.addEventListener('click', doReplaceAll);

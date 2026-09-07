@@ -1106,6 +1106,10 @@
   background: color-mix(in oklab, #f5b942 42%, transparent);
   border-radius: 3px; padding: 0 1px;
 }
+.livemd .lm-find-scope{
+  background: color-mix(in oklab, var(--om-primary) 22%, transparent);
+  border-radius: 3px;
+}
 .livemd .lm-find-cur, .md-preview .lm-find-cur{
   background: var(--om-primary); color: #fff;
   box-shadow: 0 0 0 2px color-mix(in oklab, var(--om-primary) 35%, transparent);
