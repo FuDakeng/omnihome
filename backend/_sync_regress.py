@@ -742,6 +742,48 @@ def run_suite(engine):
     r = client.get("/api/sync/list", headers=HK(mkey))
     check(f"[{engine}] 转回后成员钥吊销", r.status_code == 401, str(r.status_code))
 
+    print("-- 14. 笔记版本 --")
+    r = client.post("/api/notes", headers=HA(tok), json={"title": "版本笔记", "vault": "default"})
+    rnid = (r.json() or {}).get("id")
+    check(f"[{engine}] 新建版本测试笔记", r.status_code == 200 and bool(rnid), r.text[:80])
+    r = client.put(f"/api/notes/{rnid}", headers=HA(tok), json={"content": "# A\n第一版"})
+    check(f"[{engine}] 写入第一版", r.status_code == 200, str(r.status_code))
+    r = client.put(f"/api/notes/{rnid}", headers=HA(tok), json={"content": "# B\n第二版"})
+    check(f"[{engine}] 写入第二版", r.status_code == 200, str(r.status_code))
+    r = client.get(f"/api/notes/{rnid}/revisions", headers=HA(tok))
+    revs = (r.json() or {}).get("revisions") or []
+    check(f"[{engine}] 第二次保存产生历史版本",
+          r.status_code == 200 and len(revs) >= 1 and revs[0].get("source") == "web",
+          str(revs)[:160])
+    old_rev = revs[0]["rev"]
+    r = client.get(f"/api/notes/{rnid}/revisions/{old_rev}", headers=HA(tok))
+    detail = r.json() or {}
+    check(f"[{engine}] 版本详情含历史与当前正文",
+          r.status_code == 200 and "第一版" in (detail.get("content") or "")
+          and "第二版" in (detail.get("current") or ""), str(detail)[:120])
+    r = client.post(f"/api/notes/{rnid}/revisions/{old_rev}/restore", headers=HA(tok))
+    check(f"[{engine}] 恢复历史版本", r.status_code == 200, r.text[:80])
+    r = client.get(f"/api/notes/{rnid}", headers=HA(tok))
+    check(f"[{engine}] 恢复后当前正文是历史版",
+          r.status_code == 200 and "第一版" in (r.json() or {}).get("content", ""),
+          (r.json() or {}).get("content", "")[:40])
+    r = client.get(f"/api/notes/{rnid}/revisions", headers=HA(tok))
+    revs2 = (r.json() or {}).get("revisions") or []
+    check(f"[{engine}] 恢复会把被覆盖内容存为新版本",
+          len(revs2) >= 2, str(len(revs2)))
+    r = client.put("/api/sync/enabled", headers=HA(tok), json={"vault": "default", "enabled": True})
+    r = client.post("/api/sync/apikey", headers=HA(tok), json={"vault": "default"})
+    skey = (r.json() or {}).get("apiKey") or ""
+    r = client.post("/api/sync/file", headers=HK(skey),
+                    json={"path": "版本笔记.md", "content": "# C\n客户端改",
+                          "clientMtime": int(time.time()) * 1000 + 8000})
+    check(f"[{engine}] 客户端覆盖版本笔记",
+          r.status_code == 200 and (r.json() or {}).get("applied") is True, r.text[:120])
+    r = client.get(f"/api/notes/{rnid}/revisions", headers=HA(tok))
+    srcs = [x.get("source") for x in ((r.json() or {}).get("revisions") or [])]
+    check(f"[{engine}] 历史含客户端来源",
+          "obsidian" in srcs, str(srcs))
+
     st = sessions.create_session("t")
     sessions._sessions.clear()
     sessions.load_sessions()

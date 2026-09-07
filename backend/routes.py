@@ -2994,6 +2994,9 @@ def share_put_note(token: str, nid: str, body: ShareNoteIn,
     if hit.get("readonly") or hit.get("pinned"):
         raise HTTPException(403, "该笔记不可编辑")
     if body.content is not None:
+        old = storage.note_read(username, nid, "")
+        if old != body.content:
+            storage.note_rev_snapshot(username, nid, old, hit.get("title") or "", "web")
         storage.note_write(username, nid, body.content)
     idx = storage.notes_index(username)
     for item in idx:
@@ -3089,6 +3092,9 @@ def save_note(nid: str, body: NoteContentIn,
         raise HTTPException(404, "笔记不存在")
     _require_vault_edit(username, _infer_note_vault(hit))
     if body.content is not None:
+        old = storage.note_read(store, nid, "")
+        if old != body.content:
+            storage.note_rev_snapshot(store, nid, old, hit.get("title") or "", "web")
         storage.note_write(store, nid, body.content)
     for item in idx:
         if item["id"] == nid:
@@ -3135,6 +3141,67 @@ def delete_note(nid: str, authorization: Optional[str] = Header(None)):
     hit["deleted_title"] = hit.get("title") or ""
     storage.save_notes_index(store, idx)
     return {"ok": True, "softDeleted": True}
+
+
+@router.get("/api/notes/{nid}/revisions")
+def note_revisions_list(nid: str, authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    if not storage.note_key(username, nid):
+        raise HTTPException(400, "非法笔记 ID")
+    store, hit, _idx = _find_note(username, nid)
+    if not hit:
+        raise HTTPException(404, "笔记不存在")
+    return {"ok": True, "id": nid, "revisions": storage.note_revs_meta(store, nid)}
+
+
+@router.get("/api/notes/{nid}/revisions/{rev}")
+def note_revision_get(nid: str, rev: int,
+                      authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    if not storage.note_key(username, nid):
+        raise HTTPException(400, "非法笔记 ID")
+    store, hit, _idx = _find_note(username, nid)
+    if not hit:
+        raise HTTPException(404, "笔记不存在")
+    rec = storage.note_rev_get(store, nid, rev)
+    if not rec:
+        raise HTTPException(404, "该版本不存在")
+    current = storage.note_read(store, nid, "")
+    return {"ok": True, "id": nid, "current": current,
+            "rev": rec.get("rev"), "ts": rec.get("ts"),
+            "source": rec.get("source") or "web",
+            "title": rec.get("title") or "",
+            "content": rec.get("content") or ""}
+
+
+@router.post("/api/notes/{nid}/revisions/{rev}/restore")
+def note_revision_restore(nid: str, rev: int,
+                          authorization: Optional[str] = Header(None)):
+    username = require_user(authorization)
+    if not storage.note_key(username, nid):
+        raise HTTPException(400, "非法笔记 ID")
+    store, hit, idx = _find_note(username, nid)
+    if not hit:
+        raise HTTPException(404, "笔记不存在")
+    _require_vault_edit(username, _infer_note_vault(hit))
+    rec = storage.note_rev_get(store, nid, rev)
+    if not rec:
+        raise HTTPException(404, "该版本不存在")
+    cur = storage.note_read(store, nid, "")
+    body = rec.get("content") or ""
+    if cur != body:
+        storage.note_rev_snapshot(store, nid, cur, hit.get("title") or "", "web",
+                                  force=True)
+        storage.note_write(store, nid, body)
+    now = int(time.time())
+    for item in idx:
+        if item["id"] == nid:
+            item["updated"] = now
+            break
+    idx.sort(key=lambda x: x["updated"], reverse=True)
+    storage.save_notes_index(store, idx)
+    return {"ok": True, "id": nid, "rev": rec.get("rev"), "content": body,
+            "updated": now}
 
 
 # ============================================================
@@ -3608,6 +3675,8 @@ def _sync_apply_note(username, nid, folder, title, body_md, site_mtime, norm, va
     vault_same = (not vault_id) or old_vault == vault_id
     if old_body == body_md and new_title == old_title and folder == old_folder and vault_same:
         return {"path": norm, "mtime": site_mtime, "id": nid, "applied": True, "unchanged": True}
+    if old_body != body_md:
+        storage.note_rev_snapshot(username, nid, old_body, old_title, "obsidian")
     storage.note_write(username, nid, body_md)
     now = int(time.time())
     if hit is not None:

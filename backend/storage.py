@@ -1434,6 +1434,77 @@ def note_delete(username: str, note_id: str):
     key = note_key(username, note_id)
     if key:
         _kv_delete(username, key)
+    _kv_delete(username, _note_revs_key(note_id))
+
+
+NOTE_REV_MAX = 80
+NOTE_REV_COALESCE = 120
+
+
+def _note_revs_key(note_id: str) -> str:
+    return "notes/revs/" + (note_id or "") + ".json"
+
+
+def note_revs_load(username: str, note_id: str) -> list:
+    data = user_json(username, _note_revs_key(note_id), [])
+    return data if isinstance(data, list) else []
+
+
+def note_revs_save(username: str, note_id: str, items: list):
+    save_user_json(username, _note_revs_key(note_id), (items or [])[:NOTE_REV_MAX])
+
+
+def note_rev_snapshot(username: str, note_id: str, content: str,
+                      title: str = "", source: str = "web",
+                      force: bool = False):
+    """在覆盖正文前把旧内容记入历史。同来源 2 分钟内合并为一次会话，避免自动保存刷屏。"""
+    if not note_key(username, note_id):
+        return None
+    body = content if content is not None else ""
+    items = note_revs_load(username, note_id)
+    if not force and not str(body).strip() and not items:
+        return None
+    now = int(time.time())
+    src = "obsidian" if source == "obsidian" else "web"
+    if items:
+        last = items[0] if isinstance(items[0], dict) else {}
+        if last.get("content") == body:
+            return None
+        if (not force and last.get("source") == src
+                and (now - int(last.get("ts") or 0)) < NOTE_REV_COALESCE):
+            return None
+    rev = int((items[0] or {}).get("rev") or 0) + 1 if items else 1
+    rec = {"rev": rev, "ts": now, "source": src,
+           "title": str(title or "")[:120], "content": body}
+    items.insert(0, rec)
+    note_revs_save(username, note_id, items)
+    return rec
+
+
+def note_rev_get(username: str, note_id: str, rev: int):
+    try:
+        want = int(rev)
+    except (TypeError, ValueError):
+        return None
+    for x in note_revs_load(username, note_id):
+        if isinstance(x, dict) and int(x.get("rev") or 0) == want:
+            return x
+    return None
+
+
+def note_revs_meta(username: str, note_id: str) -> list:
+    out = []
+    for x in note_revs_load(username, note_id):
+        if not isinstance(x, dict):
+            continue
+        out.append({
+            "rev": int(x.get("rev") or 0),
+            "ts": int(x.get("ts") or 0),
+            "source": x.get("source") or "web",
+            "title": x.get("title") or "",
+            "chars": len(x.get("content") or ""),
+        })
+    return out
 
 
 # ---------- 笔记附件（图片等：KV 存 base64 载荷，天然随备份/迁移/清空走） ----------

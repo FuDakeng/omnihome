@@ -215,7 +215,7 @@ window.LiveMD = (() => {
       return /-/.test(core.replace(/[\s|:]/g, ''));
     }
     const splitRow = r => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
-    function renderTable(rows){
+    function renderTable(rows, srcI){
       const cells = rows.map(splitRow);
       const head = cells[0] || [];
       const align = (cells[1] || []).map(c =>
@@ -242,7 +242,7 @@ window.LiveMD = (() => {
       });
       b += '</tbody>';
       const raw = escAttr(rows.join('\n'));
-      return '<div class="lm-table" data-table-raw="' + raw + '">'
+      return '<div class="lm-table" data-src-i="' + srcI + '" data-table-raw="' + raw + '">'
         + '<div class="lm-tbar" hidden>'
         + '<span class="lm-tname">表格</span>'
         + '<span class="lm-tsel-hint" data-t-hint></span>'
@@ -427,22 +427,23 @@ window.LiveMD = (() => {
         const line = srcLines[i], trim = line.trim();
         if (/^(```|~~~)/.test(trim)){
           fence = !fence;
-          html.push(`<div class="lm-line lm-fence">${esc(line) || '<br>'}</div>`);
+          html.push(`<div class="lm-line lm-fence" data-src-i="${i}">${esc(line) || '<br>'}</div>`);
           continue;
         }
-        if (fence){ html.push(`<div class="lm-line lm-code">${highlightCode(esc(line)) || '<br>'}</div>`); continue; }
+        if (fence){ html.push(`<div class="lm-line lm-code" data-src-i="${i}">${highlightCode(esc(line)) || '<br>'}</div>`); continue; }
         /* 表格：本行是管道行 且 下一行是对齐分隔行 */
         if (isTableRow(line) && srcLines[i + 1] && isTableSep(srcLines[i + 1])){
+          const t0 = i;
           const rows = [line, srcLines[i + 1]];   // 表头 + 对齐分隔行
           i += 2;
           while (srcLines[i] && srcLines[i].trim() && isTableRow(srcLines[i])){ rows.push(srcLines[i]); i++; }
-          html.push(renderTable(rows));
+          html.push(renderTable(rows, t0));
           continue;
         }
         const mk = parseMarker(line);
         if (mk){
           if (mk.type === 'hr'){
-            html.push(`<div class="lm-line lm-hrline"><hr class="lm-hr" data-raw="${esc(mk.raw)}" contenteditable="false"></div>`);
+            html.push(`<div class="lm-line lm-hrline" data-src-i="${i}"><hr class="lm-hr" data-raw="${esc(mk.raw)}" contenteditable="false"></div>`);
             continue;
           }
           const rest = line.slice(mk.raw.length);
@@ -454,9 +455,9 @@ window.LiveMD = (() => {
                         : mk.type === 'quote' ? '&gt;' : esc(mk.raw.trim());
             inner = `<span class="lm-mk" data-raw="${esc(mk.raw)}" contenteditable="false">${glyph}</span>`;
           }
-          html.push(`<div class="lm-line lm-${mk.type}${mk.type === 'h' ? ' lm-h lm-h' + mk.level : ''}">${inner}${inlineHtml(rest) || '<br>'}</div>`);
+          html.push(`<div class="lm-line lm-${mk.type}${mk.type === 'h' ? ' lm-h lm-h' + mk.level : ''}" data-src-i="${i}">${inner}${inlineHtml(rest) || '<br>'}</div>`);
         } else {
-          html.push(`<div class="lm-line">${inlineHtml(line) || '<br>'}</div>`);
+          html.push(`<div class="lm-line" data-src-i="${i}">${inlineHtml(line) || '<br>'}</div>`);
         }
       }
       root.innerHTML = html.join('');
@@ -1195,6 +1196,19 @@ window.LiveMD = (() => {
         const rng = selectionRawRange();
         if (!rng){ insertRawAt(serializeAll().length, text); return; }
         insertRawAt(rng.start, text, rng.end);
+      },
+      scrollToLine(i){
+        i = +i;
+        if (!isFinite(i) || i < 0) return;
+        let el = root.querySelector('[data-src-i="' + i + '"]');
+        if (!el){
+          const all = Array.from(root.querySelectorAll('[data-src-i]'));
+          for (let k = all.length - 1; k >= 0; k--){
+            if (+all[k].dataset.srcI <= i){ el = all[k]; break; }
+          }
+          el = el || all[0];
+        }
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       },
       show(){ root.style.display = ''; ta.style.removeProperty('display'); ta.style.setProperty('display', 'none', 'important'); rebuild(ta.value); },
       hide(){ root.style.display = 'none'; ta.style.removeProperty('display'); },

@@ -380,6 +380,113 @@ const Notes = (() => {
     });
     return out;
   }
+  function outlineItemHtml(h, targetKey){
+    return '<button class="md-outline-item lv' + h.level + '" ' + (targetKey || 'data-target') + '="' +
+      App.esc(h.id) + '" data-line="' + h.line + '" title="跳到「' +
+      App.esc(h.text) + '」">' + App.esc(h.text) + '</button>';
+  }
+  function outlineBodyHtml(src, targetKey){
+    const items = mdOutline(src);
+    return items.length
+      ? items.map(h => outlineItemHtml(h, targetKey)).join('')
+      : '<div class="md-outline-empty">当前笔记没有标题</div>';
+  }
+  function jumpToHeading(id, line, live, root){
+    line = line === '' || line == null ? NaN : +line;
+    if (live && live.isShown && live.isShown() && typeof live.scrollToLine === 'function' && isFinite(line)){
+      live.scrollToLine(line);
+      return;
+    }
+    const el = id
+      ? (root ? root.querySelector('[id="' + String(id).replace(/"/g, '') + '"]') : document.getElementById(id))
+      : null;
+    if (el){ el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    const ta = $('#edSrc');
+    if (ta && currentMode !== 'preview' && isFinite(line)){
+      const lines = ta.value.split('\n');
+      let pos = 0;
+      for (let i = 0; i < line && i < lines.length; i++) pos += lines[i].length + 1;
+      try {
+        ta.focus();
+        ta.setSelectionRange(pos, pos);
+        const lh = parseFloat(getComputedStyle(ta).lineHeight) || 22;
+        ta.scrollTop = Math.max(0, line * lh - 48);
+      } catch (_) {}
+    }
+  }
+  function mdLineDiff(oldT, newT){
+    const a = String(oldT || '').split('\n');
+    const b = String(newT || '').split('\n');
+    const n = a.length, m = b.length;
+    if (!n && !m) return [];
+    if (n * m > 900000){
+      if (oldT === newT) return [{ type: 'eq', text: oldT }];
+      return [{ type: 'del', text: oldT }, { type: 'add', text: newT }];
+    }
+    const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+    for (let i = 1; i <= n; i++){
+      for (let j = 1; j <= m; j++){
+        dp[i][j] = a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1] + 1
+          : (dp[i - 1][j] >= dp[i][j - 1] ? dp[i - 1][j] : dp[i][j - 1]);
+      }
+    }
+    const raw = [];
+    let i = n, j = m;
+    while (i > 0 && j > 0){
+      if (a[i - 1] === b[j - 1]){ raw.push({ type: 'eq', text: a[i - 1] }); i--; j--; }
+      else if (dp[i - 1][j] >= dp[i][j - 1]){ raw.push({ type: 'del', text: a[--i] }); }
+      else raw.push({ type: 'add', text: b[--j] });
+    }
+    while (i > 0) raw.push({ type: 'del', text: a[--i] });
+    while (j > 0) raw.push({ type: 'add', text: b[--j] });
+    raw.reverse();
+    const out = [];
+    for (let k = 0; k < raw.length; k++){
+      if (raw[k].type === 'del' && raw[k + 1] && raw[k + 1].type === 'add'){
+        out.push({ type: 'mod', old: raw[k].text, text: raw[k + 1].text });
+        k++;
+      } else out.push(raw[k]);
+    }
+    return out;
+  }
+  function renderRevDiffHtml(oldT, newT){
+    const rows = mdLineDiff(oldT, newT);
+    if (!rows.length) return '<div class="kb-empty">两份内容均为空</div>';
+    const kindLabel = { add: '新增', del: '删除', mod: '修改' };
+    const kindChip = { add: 'success', del: 'danger', mod: 'info' };
+    const parts = [];
+    let eqRun = [];
+    const flushEq = () => {
+      if (!eqRun.length) return;
+      const n = eqRun.length;
+      const show = (s) => '<div class="rev-line eq">' + App.esc(s) + '</div>';
+      if (n <= 6) eqRun.forEach(s => parts.push(show(s)));
+      else {
+        parts.push(show(eqRun[0]), show(eqRun[1]));
+        parts.push('<div class="rev-skip">··· 省略 ' + (n - 4) + ' 行未改 ···</div>');
+        parts.push(show(eqRun[n - 2]), show(eqRun[n - 1]));
+      }
+      eqRun = [];
+    };
+    rows.forEach(r => {
+      if (r.type === 'eq'){ eqRun.push(r.text); return; }
+      flushEq();
+      const chip = '<span class="chip ' + (kindChip[r.type] || '') + ' no-dot">' + (kindLabel[r.type] || r.type) + '</span>';
+      if (r.type === 'mod'){
+        parts.push('<div class="rev-hunk">' + chip
+          + '<div class="rev-line del">' + App.esc(r.old) + '</div>'
+          + '<div class="rev-line add">' + App.esc(r.text) + '</div></div>');
+      } else {
+        parts.push('<div class="rev-hunk">' + chip
+          + '<div class="rev-line ' + r.type + '">' + App.esc(r.text) + '</div></div>');
+      }
+    });
+    flushEq();
+    const changed = rows.some(r => r.type !== 'eq');
+    if (!changed) return '<div class="kb-empty">该版本与当前内容相同</div>' + parts.join('');
+    return parts.join('');
+  }
 
   /* ---------- 附件分区 ---------- */
   async function loadAssets(){
@@ -1080,6 +1187,7 @@ const Notes = (() => {
     if (!meta) return;
     kbMenu(anchor, [
       ['查看详细', 'i-search', () => showNoteInfo(id)],
+      ['版本管理', 'i-clock', () => openRevModal(id)],
       ['分享笔记', 'i-link', () => openShareModal({ kind: 'note', noteId: id, name: meta.title })],
       ['在新标签页打开', 'i-note', () => open(id)],
       ['导出为 .md', 'i-download', () => API.dl('/api/notes/' + id + '/export')],
@@ -1146,6 +1254,97 @@ const Notes = (() => {
     }
   }
 
+  /* ---------- 笔记版本管理 ---------- */
+  let _revNoteId = '';
+  let _revCanRestore = false;
+  let _revDiffOn = true;
+  let _revCache = null;
+  function fmtRevTs(ts){
+    if (!ts) return '—';
+    return new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false });
+  }
+  function revSourceLabel(src){
+    return src === 'obsidian' ? '客户端' : '服务端';
+  }
+  async function openRevModal(id){
+    const meta = idx.find(n => n.id === id);
+    if (!meta) return;
+    _revNoteId = id;
+    _revCanRestore = vaultCanEdit() && !meta.readonly && !meta.pinned;
+    _revDiffOn = true;
+    _revCache = null;
+    $('#kbRevTitle').textContent = '版本管理 · ' + (meta.title || '未命名笔记');
+    $('#kbRevList').innerHTML = '<div class="kb-empty">加载中…</div>';
+    $('#kbRevDetail').innerHTML = '<div class="kb-empty">选择一个历史版本查看差异</div>';
+    App.openModal('kbRevMask');
+    try {
+      if (id === currentId && dirty) await save();
+      const d = await API.get('/api/notes/' + encodeURIComponent(id) + '/revisions');
+      const rows = d.revisions || [];
+      if (!rows.length){
+        $('#kbRevList').innerHTML = '<div class="kb-empty">还没有历史版本。保存或同步产生变更后会出现在这里。</div>';
+        return;
+      }
+      $('#kbRevList').innerHTML = rows.map(x =>
+        '<button class="rev-item" type="button" data-rev="' + x.rev + '">'
+        + '<span class="rev-no">v' + x.rev + '</span>'
+        + '<span class="chip no-dot">' + revSourceLabel(x.source) + '</span>'
+        + '<span class="rev-ts">' + fmtRevTs(x.ts) + '</span></button>'
+      ).join('');
+    } catch (e) {
+      $('#kbRevList').innerHTML = '<div class="kb-empty">' + App.esc(e.message || '加载失败') + '</div>';
+    }
+  }
+  async function showRevDetail(rev){
+    const list = $('#kbRevList');
+    list?.querySelectorAll('.rev-item').forEach(b => b.classList.toggle('on', +b.dataset.rev === +rev));
+    const box = $('#kbRevDetail');
+    box.innerHTML = '<div class="kb-empty">加载中…</div>';
+    try {
+      const d = await API.get('/api/notes/' + encodeURIComponent(_revNoteId) + '/revisions/' + encodeURIComponent(rev));
+      _revCache = d;
+      paintRevDetail();
+    } catch (e) {
+      box.innerHTML = '<div class="kb-empty">' + App.esc(e.message || '加载失败') + '</div>';
+    }
+  }
+  function paintRevDetail(){
+    const d = _revCache;
+    const box = $('#kbRevDetail');
+    if (!d || !box) return;
+    const body = _revDiffOn
+      ? ('<div class="rev-diff">' + renderRevDiffHtml(d.content || '', d.current || '') + '</div>')
+      : ('<div class="rev-full md-preview">' + (mdRender(d.content || '') || '<p style="color:var(--om-text-3)">空笔记</p>') + '</div>');
+    box.innerHTML = '<div class="rev-detail-bar">'
+      + '<div class="rev-detail-meta">v' + d.rev + ' · ' + revSourceLabel(d.source)
+      + ' · ' + fmtRevTs(d.ts) + '</div>'
+      + '<div class="rev-detail-actions">'
+      + '<span class="set-row-label" style="margin:0">差异视图</span>'
+      + '<button class="switch' + (_revDiffOn ? ' on' : '') + '" type="button" role="switch" id="kbRevDiffSw" title="差异视图"></button>'
+      + (_revCanRestore ? '<button class="btn btn-primary btn-sm" type="button" id="kbRevRestore">恢复此版本</button>' : '')
+      + '</div></div>' + body;
+    if (!_revDiffOn) hydrateImages(box.querySelector('.rev-full'));
+  }
+  async function restoreRev(){
+    if (!_revCache || !_revCanRestore) return;
+    if (!await App.confirmModal({
+      title: '恢复此版本？', danger: true, okText: '恢复',
+      sub: '当前笔记将被 v' + _revCache.rev + ' 覆盖。恢复前会把现在的内容存为新的历史版本。',
+    })) return;
+    try {
+      const r = await API.post('/api/notes/' + encodeURIComponent(_revNoteId)
+        + '/revisions/' + encodeURIComponent(_revCache.rev) + '/restore');
+      showToast('已恢复为 v' + _revCache.rev);
+      const meta = idx.find(n => n.id === _revNoteId);
+      if (meta) meta.updated = r.updated || Math.floor(Date.now() / 1000);
+      if (currentId === _revNoteId){
+        dirty = false;
+        await open(_revNoteId);
+      } else renderTree();
+      await openRevModal(_revNoteId);
+    } catch (e) { showToast(e.message, 'err'); }
+  }
+
   /* ---------- 打开 / 保存 ---------- */
   async function open(id){
     if (!idx.find(n => n.id === id)) return;
@@ -1177,14 +1376,7 @@ const Notes = (() => {
       /* 打开笔记后自动渲染右侧大纲（用户可点大纲按钮隐藏）。
          renderOutline/openOutline 定义在 init() 内部，此处不可见，故内联渲染。 */
       const ob = $('#mdOutlineBody');
-      if (ob){
-        const items = mdOutline($('#edSrc').value);
-        ob.innerHTML = items.length
-          ? items.map(h =>
-              '<button class="md-outline-item lv' + h.level + '" data-target="' + h.id + '" title="跳到「' +
-              App.esc(h.text) + '」">' + App.esc(h.text) + '</button>').join('')
-          : '<div class="md-outline-empty">当前笔记没有标题</div>';
-      }
+      if (ob) ob.innerHTML = outlineBodyHtml($('#edSrc').value);
       const op = $('#mdOutlinePanel');
       /* 面板收起态不再用 hidden 判断（改由宽度动画控制），这里只在首次打开时滑出 */
       if (op && op.hidden){
@@ -1743,12 +1935,7 @@ const Notes = (() => {
   function renderShareOutline(){
     const body = $('#kbShareOutlineBody');
     if (!body) return;
-    const items = mdOutline($('#kbShareSrc')?.value || '');
-    body.innerHTML = items.length
-      ? items.map(h =>
-          '<button class="md-outline-item lv' + h.level + '" type="button" data-sh-target="' +
-          App.esc(h.id) + '">' + App.esc(h.text) + '</button>').join('')
-      : '<div class="md-outline-empty">当前笔记没有标题</div>';
+    body.innerHTML = outlineBodyHtml($('#kbShareSrc')?.value || '', 'data-sh-target');
   }
   function setShareOutline(on){
     const p = $('#kbShareOutline');
@@ -2415,11 +2602,7 @@ const Notes = (() => {
     $('#kbShareOutlineBody')?.addEventListener('click', e => {
       const it = e.target.closest('[data-sh-target]');
       if (!it) return;
-      if (shareView.canEdit && shareView.mode === 'edit') setShareMode('split');
-      setTimeout(() => {
-        const el = document.getElementById(it.dataset.shTarget);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 60);
+      jumpToHeading(it.dataset.shTarget, it.dataset.line, shareLiveEd, $('#kbSharePreview'));
     });
     $$('#kbShareModeSeg .seg-btn').forEach(b =>
       b.addEventListener('click', () => setShareMode(b.dataset.shMode)));
@@ -2501,6 +2684,14 @@ const Notes = (() => {
     /* 笔记详情弹层 */
     $('#kbInfoClose')?.addEventListener('click', () => App.closeModal('kbInfoMask'));
     $('#kbInfoMask')?.addEventListener('click', e => { if (e.target === $('#kbInfoMask')) App.closeModal('kbInfoMask'); });
+    $('#kbRevClose')?.addEventListener('click', () => App.closeModal('kbRevMask'));
+    $('#kbRevMask')?.addEventListener('click', e => {
+      if (e.target === $('#kbRevMask')){ App.closeModal('kbRevMask'); return; }
+      const item = e.target.closest('#kbRevList [data-rev]');
+      if (item){ showRevDetail(item.dataset.rev); return; }
+      if (e.target.closest('#kbRevDiffSw')){ _revDiffOn = !_revDiffOn; paintRevDetail(); return; }
+      if (e.target.closest('#kbRevRestore')) restoreRev();
+    });
     /* 编辑区顶栏由全局 .topbar 承载（#globalSearch 等 demo.js 已绑）；
        此处不再绑定 kbBack / kbEditorSearch / kbAvatar / kbDate */
     /* 单篇导出/删除已随 0.2.18 顶栏移除，入口收进笔记悬浮 ⋯ 菜单（openNoteMenu） */
@@ -3045,12 +3236,7 @@ const Notes = (() => {
     function renderOutline(){
       const body = $('#mdOutlineBody');
       if (!body) return;
-      const items = mdOutline(ta.value);
-      body.innerHTML = items.length
-        ? items.map(h =>
-            '<button class="md-outline-item lv' + h.level + '" data-target="' + h.id + '" title="跳到「' +
-            App.esc(h.text) + '」">' + App.esc(h.text) + '</button>').join('')
-        : '<div class="md-outline-empty">当前笔记没有标题</div>';
+      body.innerHTML = outlineBodyHtml(ta.value);
     }
     function openOutline(){
       const p = $('#mdOutlinePanel');
@@ -3077,13 +3263,7 @@ const Notes = (() => {
     $('#mdOutlineBody')?.addEventListener('click', e => {
       const it = e.target.closest('[data-target]');
       if (!it) return;
-      const id = it.dataset.target;
-      if (currentMode !== 'split' && currentMode !== 'preview') setMode('split');
-      setTimeout(() => {
-        const el = document.getElementById(id);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        else showToast('该标题刚编辑过，预览尚未刷新', 'err');
-      }, 80);
+      jumpToHeading(it.dataset.target, it.dataset.line, liveEd);
     });
 
     /* ---------- 查找 / 替换 ---------- */

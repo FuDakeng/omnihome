@@ -2706,6 +2706,60 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 
 /* ---------- 知识库回收站弹层（v0.2.23） ---------- */
 .modal-trash{ width: min(520px, 94vw); }
+.modal-revs{
+  width: min(920px, 96vw);
+  max-height: min(88vh, 780px);
+  display: flex; flex-direction: column;
+}
+.modal-revs .m-body{ max-height: none; overflow: hidden; padding: 0; }
+.kb-rev-layout{
+  display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+  min-height: min(58vh, 520px); max-height: min(64vh, 560px);
+}
+.kb-rev-list{
+  overflow: auto; padding: 8px;
+  border-right: 1px solid var(--om-border);
+  background: var(--om-surface-2);
+}
+.rev-item{
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  width: 100%; text-align: left;
+  padding: 10px 10px; margin-bottom: 4px;
+  border: 1px solid transparent; border-radius: 10px;
+  background: transparent; color: var(--om-text-1); cursor: pointer;
+}
+.rev-item:hover{ background: var(--om-surface); }
+.rev-item.on{ border-color: var(--om-primary-border); background: var(--om-primary-ghost); }
+.rev-item .rev-no{ font-weight: 700; font-variant-numeric: tabular-nums; }
+.rev-item .rev-ts{ width: 100%; font-size: 11px; color: var(--om-text-3); }
+.kb-rev-detail{
+  overflow: auto; padding: 12px 14px 16px;
+  min-width: 0;
+}
+.rev-detail-bar{
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  flex-wrap: wrap; margin-bottom: 12px;
+}
+.rev-detail-meta{ font-size: 12px; color: var(--om-text-2); }
+.rev-detail-actions{ display: flex; align-items: center; gap: 10px; }
+.rev-diff{ font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.55; }
+.rev-hunk{ margin: 8px 0; }
+.rev-hunk .chip{ margin-bottom: 4px; }
+.rev-line{
+  padding: 3px 8px; border-radius: 6px; white-space: pre-wrap; word-break: break-word;
+}
+.rev-line.eq{ color: var(--om-text-3); }
+.rev-line.add{ background: color-mix(in oklab, var(--om-success, #22c55e) 16%, transparent); }
+.rev-line.del{
+  background: color-mix(in oklab, var(--om-danger) 14%, transparent);
+  text-decoration: line-through; color: var(--om-text-2);
+}
+.rev-skip{ padding: 6px 8px; font-size: 11px; color: var(--om-text-3); }
+.rev-full.md-preview{ padding: 0; }
+@media (max-width: 720px){
+  .kb-rev-layout{ grid-template-columns: 1fr; max-height: min(70vh, 640px); }
+  .kb-rev-list{ border-right: 0; border-bottom: 1px solid var(--om-border); max-height: 28vh; }
+}
 .kb-trash-row{ cursor: default; }
 .kb-trash-row .icon-btn-xs{ opacity: .6; transition: opacity var(--om-t-fast); }
 .kb-trash-row:hover .icon-btn-xs{ opacity: 1; }
