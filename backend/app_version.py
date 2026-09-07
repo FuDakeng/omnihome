@@ -2,11 +2,18 @@
 版本号唯一来源：打包、镜像构建、/api/about 均读取这里的 VERSION。
 每次发版请同步更新 VERSION 与 CHANGELOG（新版本置顶）。
 """
-VERSION = "0.2.44"
-STAGE = "团队仓同步与菜单"
+VERSION = "0.2.45"
+STAGE = "选区粘贴覆盖"
 
 # 更新日志（最新版本置顶）
 CHANGELOG = [
+    {
+        "version": "0.2.45",
+        "date": "2026-09-07",
+        "items": [
+            "修复：知识库实时 Markdown 编辑器选中文本后粘贴，会插到选区前面而不是覆盖选中内容",
+        ],
+    },
     {
         "version": "0.2.44",
         "date": "2026-09-06",

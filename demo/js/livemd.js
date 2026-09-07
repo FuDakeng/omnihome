@@ -549,6 +549,19 @@ window.LiveMD = (() => {
       if (!sel.rangeCount) return null;
       return offsetOfRange(sel.getRangeAt(0));
     }
+    /* 选区在原始 Markdown 中的 [start, end)；折叠选区时 start === end */
+    function selectionRawRange(){
+      const sel = window.getSelection();
+      if (!sel.rangeCount) return null;
+      const r = sel.getRangeAt(0);
+      if (r.startContainer !== root && !root.contains(r.startContainer)) return null;
+      let a = rawOffset(r.startContainer, r.startOffset);
+      let b = r.collapsed ? a : rawOffset(r.endContainer, r.endOffset);
+      if (typeof a !== 'number') return null;
+      if (typeof b !== 'number') b = a;
+      if (a > b){ const t = a; a = b; b = t; }
+      return { start: a, end: b };
+    }
     /* 拖拽落点 → 原始文本偏移（落在编辑器外则追加到文末） */
     function offsetFromPoint(x, y){
       const r = document.caretRangeFromPoint
@@ -819,29 +832,18 @@ window.LiveMD = (() => {
       return Math.min(p, serializeAll().length);
     }
 
-    /* ---------- 在指定偏移插入原始文本（粘贴 / 插图共用） ---------- */
-    function insertRawAt(pos, text){
-      const arr = serializeAll().split('\n');
-      let p = 0, li = 0;
-      for (li = 0; li < arr.length; li++){
-        if (pos <= p + arr[li].length) break;
-        p += arr[li].length + 1;
-      }
-      const local = pos - p, cur = arr[li] || '';
-      if (text.indexOf('\n') < 0){
-        /* 单行文本：直接拼进当前行，绝不拆行（否则 "# " 会被拆成两行，出现多余标题标记） */
-        arr[li] = cur.slice(0, local) + text + cur.slice(local);
-      } else {
-        const parts = text.split('\n');
-        const newLines = [cur.slice(0, local) + parts[0]]
-          .concat(parts.slice(1, -1), [parts[parts.length - 1] + cur.slice(local)]);
-        arr.splice(li, 1, ...newLines);
-      }
-      const nraw = arr.join('\n');
+    /* ---------- 在指定偏移插入原始文本（粘贴 / 插图共用）；endPos 有值时覆盖 [pos, endPos) ---------- */
+    function insertRawAt(pos, text, endPos){
+      const raw = serializeAll();
+      let start = pos == null ? raw.length : pos;
+      start = Math.max(0, Math.min(start, raw.length));
+      let end = endPos == null ? start : endPos;
+      end = Math.max(start, Math.min(end, raw.length));
+      const nraw = raw.slice(0, start) + text + raw.slice(end);
       ta.value = nraw;
       try { ta.dispatchEvent(new Event('input')); } catch (e) {}
       rebuild(nraw);
-      restoreCaret(pos + text.length);
+      restoreCaret(start + text.length);
     }
 
     /* ---------- 图片插入：上传后以 Markdown 图片语法写入（逐个追加） ---------- */
@@ -872,8 +874,8 @@ window.LiveMD = (() => {
       e.preventDefault();
       const text = (e.clipboardData || window.clipboardData).getData('text/plain');
       if (!text) return;
-      const off = globalOffset(); if (off == null) return;
-      insertRawAt(off, text.replace(/\r/g, ''));
+      const rng = selectionRawRange(); if (!rng) return;
+      insertRawAt(rng.start, text.replace(/\r/g, ''), rng.end);
     }
 
     /* ---------- 任务列表点击勾选 / 表格行列选中与增删 ---------- */
@@ -1188,10 +1190,11 @@ window.LiveMD = (() => {
       lineInsert,
       setValue(s){ ta.value = s; rebuild(s); try { ta.dispatchEvent(new Event('input')); } catch (e) {} },
       insertText(text){
-        let off = globalOffset();
         const tl = selTableLine();
-        if (tl) off = tableEndOffset(tl);   // 块级内容不插进表格内部，落在表格之后
-        insertRawAt(off == null ? serializeAll().length : off, text);
+        if (tl){ insertRawAt(tableEndOffset(tl), text); return; }  // 块级内容不插进表格内部，落在表格之后
+        const rng = selectionRawRange();
+        if (!rng){ insertRawAt(serializeAll().length, text); return; }
+        insertRawAt(rng.start, text, rng.end);
       },
       show(){ root.style.display = ''; ta.style.removeProperty('display'); ta.style.setProperty('display', 'none', 'important'); rebuild(ta.value); },
       hide(){ root.style.display = 'none'; ta.style.removeProperty('display'); },
