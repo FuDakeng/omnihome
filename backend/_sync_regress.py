@@ -14,15 +14,18 @@ storage 重定向到临时目录，file + sqlite 双引擎各跑一遍，结束�
   · /file DELETE -> 软删进回收站（正文保留、可恢复）
   · LWW（客户端更旧 / 2 秒内 / 明显更新）
   · 路径遍历（.. / 绝对路径 / 空段）被拒
-  · 隐藏段（.obsidian/.git）与资源垃圾被拒 / 被过滤
+  · 创建人 overwrite 审批 200 skipped；创建人无票可强制覆盖
+  · /api/about/logs 诊断 zip（未登录 401；成员看不到其他用户 http 行）
 运行：cd backend && python3 _sync_regress.py
 """
 import json
 import base64
+import io
 import shutil
 import tempfile
 import time
 import uuid
+import zipfile
 from pathlib import Path
 
 TMP = Path(tempfile.mkdtemp(prefix="omnihome-sync-test-"))
@@ -615,6 +618,11 @@ def run_suite(engine):
     check(f"[{engine}] 成员钥 hello 指向创建人仓",
           r.status_code == 200 and r.json().get("vault") == tvid
           and r.json().get("pluginMin") == "0.0.6", r.text[:80])
+    check(f"[{engine}] 成员 hello isOwner=false",
+          r.json().get("isOwner") is False, str(r.json()))
+    r = client.get("/api/sync/hello", headers=HK(okey))
+    check(f"[{engine}] 创建人 hello isOwner=true",
+          r.status_code == 200 and r.json().get("isOwner") is True, r.text[:80])
     check(f"[{engine}] 创建人与成员团队仓令牌不同",
           okey != mkey and okey.startswith("ohs_") and mkey.startswith("ohs_"),
           (okey[:12], mkey[:12]))
@@ -727,7 +735,14 @@ def run_suite(engine):
     check(f"[{engine}] 有覆盖票可强制写", r.status_code == 200 and r.json().get("applied") is True,
           r.text[:80])
     r = client.post("/api/sync/approvals", headers=HK(okey), json={"kind": "overwrite"})
-    check(f"[{engine}] 创建人无需提交审批", r.status_code == 400, str(r.status_code))
+    check(f"[{engine}] 创建人无需提交审批",
+          r.status_code == 200 and (r.json() or {}).get("skipped") is True
+          and (r.json() or {}).get("pending") is False, r.text[:80])
+    r = client.post("/api/sync/file", headers=HK(okey),
+                    json={"path": "团队笔记.md", "content": "# 团队笔记\n\nowner overwrite",
+                          "clientMtime": far})
+    check(f"[{engine}] 创建人无票可强制覆盖",
+          r.status_code == 200 and (r.json() or {}).get("applied") is True, r.text[:80])
     r = client.delete(f"/api/notes/vaults/{tvid}", headers=HA(tok2))
     check(f"[{engine}] 成员不能删团队仓", r.status_code == 403, str(r.status_code))
     r = client.post("/api/notes/vaults", headers=HA(tok), json={"name": "可删仓"})
@@ -783,6 +798,57 @@ def run_suite(engine):
     srcs = [x.get("source") for x in ((r.json() or {}).get("revisions") or [])]
     check(f"[{engine}] 历史含客户端来源",
           "obsidian" in srcs, str(srcs))
+
+    print("-- 15. 运行日志导出 --")
+    r = client.get("/api/about/logs")
+    check(f"[{engine}] 未登录导出日志 401", r.status_code == 401, str(r.status_code))
+    client.get("/api/about", headers=HA(tok))
+    cfg = storage.get_config()
+    cfg["users"]["logmember"] = {
+        "password": sessions.hash_password("pw123456"),
+        "nickname": "logmember", "role": "member", "createdAt": "", "email": "",
+    }
+    storage.save_config(cfg)
+    tok_m = sessions.create_session("logmember")
+    client.get("/api/about", headers=HA(tok_m))
+    r = client.get("/api/about/logs", headers=HA(tok))
+    check(f"[{engine}] 管理员导出日志 200", r.status_code == 200, str(r.status_code))
+    ctype = (r.headers.get("content-type") or "")
+    check(f"[{engine}] 导出 Content-Type 为 zip",
+          "zip" in ctype or (r.content[:2] == b"PK"), ctype)
+    names = []
+    http_admin = ""
+    sysj = {}
+    try:
+        z = zipfile.ZipFile(io.BytesIO(r.content))
+        names = z.namelist()
+        sysj = json.loads(z.read("system.json"))
+        http_admin = z.read("http.log").decode("utf-8", "replace")
+    except Exception as e:
+        check(f"[{engine}] 管理端 zip 可解析", False, str(e))
+    check(f"[{engine}] zip 含 system.json/http.log/README",
+          "system.json" in names and "http.log" in names and "README.txt" in names
+          and "sync-log.json" in names and "exceptions.log" in names, str(names))
+    check(f"[{engine}] system.json 含版本与引擎",
+          sysj.get("version") and sysj.get("engine") == engine
+          and sysj.get("exportedBy") == USER, str(sysj)[:160])
+    check(f"[{engine}] 管理员 http.log 含本人与成员",
+          ("user=" + USER) in http_admin and "user=logmember" in http_admin,
+          http_admin[-400:])
+    r = client.get("/api/about/logs", headers=HA(tok_m))
+    http_m = ""
+    try:
+        z2 = zipfile.ZipFile(io.BytesIO(r.content))
+        http_m = z2.read("http.log").decode("utf-8", "replace")
+        sys_m = json.loads(z2.read("system.json"))
+        check(f"[{engine}] 成员导出角色为 member",
+              sys_m.get("role") == "member" and sys_m.get("exportedBy") == "logmember",
+              str(sys_m)[:120])
+    except Exception as e:
+        check(f"[{engine}] 成员 zip 可解析", False, str(e))
+    check(f"[{engine}] 成员 http.log 含本人", "user=logmember" in http_m, http_m[-300:])
+    check(f"[{engine}] 成员 http.log 不含其他用户",
+          ("user=" + USER) not in http_m, http_m[-400:])
 
     st = sessions.create_session("t")
     sessions._sessions.clear()

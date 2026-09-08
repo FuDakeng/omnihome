@@ -3458,9 +3458,11 @@ def sync_hello(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
     ctx = require_sync_ctx(x_api_key)
     username, vault_id = ctx["u"], ctx["vault"]
     vmeta = _vault_by_id(username, vault_id) or {}
+    actor = ctx.get("actor") or ctx["u"]
     return {"ok": True, "name": "万事屋", "version": app_version.VERSION,
             "stage": app_version.STAGE, "vault": vault_id,
-            "vaultName": vmeta.get("name") or "", "pluginMin": "0.0.6"}
+            "vaultName": vmeta.get("name") or "", "pluginMin": "0.0.6",
+            "isOwner": actor == username}
 
 
 @router.get("/api/sync/log")
@@ -3553,10 +3555,10 @@ def sync_approval_create(body: SyncApprovalIn,
     owner = ctx["u"]
     vid = body.vault or ctx["vault"]
     if actor == owner:
-        raise HTTPException(400, "创建人无需提交审批")
+        return {"ok": True, "pending": False, "skipped": True, "reason": "owner"}
     rec = _vault_by_id(owner, vid)
     if not rec or rec.get("kind") != "team":
-        raise HTTPException(400, "仅团队仓库的高危同步需要审批")
+        return {"ok": True, "pending": False, "skipped": True, "reason": "not-team"}
     kind = (body.kind or "").strip()
     if kind not in ("bulk-delete", "overwrite"):
         raise HTTPException(400, "审批类型无效")

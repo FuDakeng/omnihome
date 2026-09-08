@@ -695,6 +695,9 @@
     if (aboutCache) App.showChangelog(aboutCache);
     else loadAbout().then(() => aboutCache && App.showChangelog(aboutCache));
   });
+  $('#aboutLogsBtn') && $('#aboutLogsBtn').addEventListener('click', () => {
+    API.dl('/api/about/logs');
+  });
   $('#aboutCheckBtn').addEventListener('click', async () => {
     try {
       const a = await API.get('/api/about');

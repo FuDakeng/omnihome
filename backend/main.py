@@ -6,8 +6,8 @@ import threading
 import time
 from typing import Optional
 
-from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Header, HTTPException, Request, Query
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -25,6 +25,8 @@ LINK_EXPIRE_DAYS = 30
 # ---------- 口令与会话（独立模块，避免 main ↔ routes 循环导入） ----------
 from sessions import (hash_password, verify_password, create_session, drop_session,
                        get_session_user, require_user, current_user_optional)  # noqa: E402
+import applog  # noqa: E402
+applog.set_start(START_TIME)
 
 
 # ---------- 数据模型 ----------
@@ -455,6 +457,31 @@ from routes import router  # noqa: E402
 app.include_router(router)
 
 
+@app.middleware("http")
+async def _applog_http(request: Request, call_next):
+    path = request.url.path or ""
+    if not path.startswith("/api/"):
+        return await call_next(request)
+    t0 = time.time()
+    user = applog.user_from_headers(
+        request.headers.get("authorization") or "",
+        request.headers.get("x-api-key") or "",
+        request.query_params.get("token") or "",
+    )
+    safe = applog._safe_path(path, request.url.query or "")
+    try:
+        response = await call_next(request)
+        ms = int((time.time() - t0) * 1000)
+        applog.record_http(request.method, safe, response.status_code, ms, user)
+        return response
+    except Exception:
+        ms = int((time.time() - t0) * 1000)
+        import traceback as _tb
+        applog.record_exception(request.method, safe, user, _tb.format_exc())
+        applog.record_http(request.method, safe, 500, ms, user)
+        raise
+
+
 # ---------- 定时备份守护线程 ----------
 # 每 10 分钟扫一遍全部用户的备份配置：开启自动备份且到期则执行，
 # 并按保留份数淘汰最旧的备份。
@@ -504,6 +531,20 @@ def about():
         "changelog": app_version.CHANGELOG,
         "developer": "JeanLaw",
     }
+
+
+@app.get("/api/about/logs")
+def about_logs(authorization: Optional[str] = Header(None),
+               token: Optional[str] = Query(None)):
+    """导出运行诊断 zip：系统信息 + 本人同步日志 + API 访问/异常（密钥已打码）。"""
+    username = require_user(authorization, token)
+    is_admin = storage.get_config().get("users", {}).get(username, {}).get("role") == "admin"
+    data = applog.build_zip(username, is_admin, extra_system={"build": BUILD_TIME})
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="omnihome-logs.zip"'},
+    )
 
 
 if __name__ == "__main__":

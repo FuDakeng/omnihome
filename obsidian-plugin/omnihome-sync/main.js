@@ -27,7 +27,7 @@ const SELF_WRITE_MS = 4000;         // 自写抑制窗口（避免回环触发�
 
 /* 插件独立版本线（与服务端 app 版本解耦；须与 manifest.json 的 version 保持一致）。
    打进启动日志与设置页，用户反馈报错时可一眼确认所装插件版本。 */
-const PLUGIN_VERSION = '0.0.8';
+const PLUGIN_VERSION = '0.0.9';
 
 const ASSET_MAX = 5 * 1024 * 1024;   // 与服务端 ASSET_MAX 一致
 const ASSET_DIR = 'OmniHome-assets';  // 从站点拉取、本地无原路径的附件落点
@@ -177,6 +177,51 @@ function diagnoseJsonError(e, text, resp, method, urlPath) {
     '｜status=' + (resp && resp.status) +
     ' 收到长度=' + (text ? text.length : 0) +
     ' 响应头=' + String(hdump).slice(0, 300) + where);
+}
+
+function formatApiDetail(detail) {
+  if (detail == null || detail === '') return '';
+  if (typeof detail === 'string') return detail.trim();
+  if (Array.isArray(detail)) {
+    return detail.map(function (x) {
+      if (x && typeof x === 'object') return String(x.msg || x.message || '');
+      return String(x || '');
+    }).filter(Boolean).join(' ').trim();
+  }
+  if (typeof detail === 'object') return String(detail.msg || detail.message || '').trim();
+  return String(detail).trim();
+}
+
+function extractHttpDetail(src) {
+  if (!src) return '';
+  const tryParse = function (raw) {
+    if (!raw) return '';
+    if (typeof raw === 'object') return formatApiDetail(raw.detail != null ? raw.detail : raw);
+    try {
+      const j = JSON.parse(String(raw));
+      return formatApiDetail(j && j.detail != null ? j.detail : '');
+    } catch (e) { return ''; }
+  };
+  if (src.json && typeof src.json === 'object') {
+    const d = tryParse(src.json);
+    if (d) return d;
+  }
+  const text = src.text != null ? src.text : '';
+  const d2 = tryParse(text);
+  if (d2) return d2;
+  const msg = String((src && src.message) || '');
+  const brace = msg.indexOf('{');
+  if (brace >= 0) {
+    const d3 = tryParse(msg.slice(brace));
+    if (d3) return d3;
+  }
+  return '';
+}
+
+function approvalNotRequired(msg) {
+  const s = String(msg || '');
+  return s.indexOf('创建人无需') >= 0 || s.indexOf('仅团队仓库') >= 0
+    || s.indexOf('无需提交') >= 0 || s.indexOf('skipped') >= 0;
 }
 
 /* ---------- 确认弹窗（Obsidian 无内置 confirm，返回 Promise<bool>） ---------- */
@@ -339,14 +384,7 @@ class OmniHomeSyncPlugin extends Plugin {
         const st = Number((e && (e.status || e.statusCode)) || 0)
           || Number((msg.match(/status\s+(\d+)/i) || [])[1] || 0);
         if (st >= 400) {
-          let detail = '';
-          const raw = (e && e.text) || '';
-          try {
-            const j = (e && e.json && typeof e.json === 'object') ? e.json
-              : (raw ? JSON.parse(raw) : null);
-            detail = (j && j.detail) || '';
-          } catch (ex) { /* 错误体可能非 JSON */ }
-          lastErr = this.syncApiError(detail, st);
+          lastErr = this.syncApiError(extractHttpDetail(e), st);
           throw lastErr;
         }
         lastErr = new Error('无法连接服务端：' + msg);
@@ -356,9 +394,7 @@ class OmniHomeSyncPlugin extends Plugin {
       if (resp.status === 401) throw new Error('API Key 无效或已吊销（401）');
       const text = resp.text != null ? resp.text : '';
       if (resp.status >= 400) {
-        let detail = '';
-        try { detail = (JSON.parse(text) || {}).detail || ''; } catch (e) { /* 错误体可能非 JSON */ }
-        throw this.syncApiError(detail, resp.status);
+        throw this.syncApiError(extractHttpDetail(resp), resp.status);
       }
       this.vaultSyncClosed = false;
       try {
@@ -374,7 +410,7 @@ class OmniHomeSyncPlugin extends Plugin {
     throw lastErr || new Error('请求失败');
   }
   syncApiError(detail, status) {
-    const raw = Array.isArray(detail) ? detail.map(function (x) { return String(x); }).join(' ') : String(detail || '').trim();
+    const raw = formatApiDetail(detail);
     if (isVaultSyncClosed(raw)) {
       this.vaultSyncClosed = true;
       return new Error(VAULT_CLOSED_HINT);
@@ -426,7 +462,7 @@ class OmniHomeSyncPlugin extends Plugin {
       throw new Error('等待审批超时，请稍后重试');
     } catch (e) {
       const msg = String((e && e.message) || e);
-      if (msg.indexOf('创建人无需') >= 0 || msg.indexOf('仅团队仓库') >= 0) return '';
+      if (approvalNotRequired(msg)) return '';
       throw e;
     }
   }
@@ -542,7 +578,14 @@ class OmniHomeSyncPlugin extends Plugin {
     let n = 0;
     try {
       if (push) {
-        await this.requestApproval('overwrite', []);
+        let skip = false;
+        try {
+          const h = (this.remote && this.remote.ok) ? this.remote
+            : await this.api('GET', '/api/sync/hello');
+          this.remote = h;
+          if (h && h.isOwner === true) skip = true;
+        } catch (e) { /* 仍走审批；旧服务端会 200 skipped 或被 catch 忽略 */ }
+        if (!skip) await this.requestApproval('overwrite', []);
       }
       const localFiles = this.scanVault();
       const localByPath = {};
