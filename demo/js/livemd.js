@@ -1195,6 +1195,24 @@ window.LiveMD = (() => {
       const rng = selectionRawRange(); if (!rng) return;
       insertRawAt(rng.start, text.replace(/\r/g, ''), rng.end);
     }
+    /* 复制/剪切：写入 Markdown 源码，而不是渲染后的 · / ☑ 等可见符号 */
+    function onCopy(e){
+      const rng = selectionRawRange();
+      if (!rng || rng.end <= rng.start) return;
+      const md = serializeAll().slice(rng.start, rng.end);
+      e.preventDefault();
+      try { e.clipboardData.setData('text/plain', md); }
+      catch (_) { copyText(md); }
+    }
+    function onCut(e){
+      const rng = selectionRawRange();
+      if (!rng || rng.end <= rng.start) return;
+      const md = serializeAll().slice(rng.start, rng.end);
+      e.preventDefault();
+      try { e.clipboardData.setData('text/plain', md); }
+      catch (_) { copyText(md); }
+      insertRawAt(rng.start, '', rng.end);
+    }
 
     /* ---------- 任务列表点击勾选 / 表格行列选中与增删 ---------- */
     function onClick(e){
@@ -1437,6 +1455,8 @@ window.LiveMD = (() => {
     });
     root.addEventListener('keydown', onKeydown);
     root.addEventListener('paste', onPaste);
+    root.addEventListener('copy', onCopy);
+    root.addEventListener('cut', onCut);
     root.addEventListener('click', onClick);
     root.addEventListener('mousedown', e => {
       if (e.target.closest && e.target.closest('.lm-code-tools, [data-lm-code-act]'))

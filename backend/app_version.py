@@ -2,11 +2,18 @@
 版本号唯一来源：打包、镜像构建、/api/about 均读取这里的 VERSION。
 每次发版请同步更新 VERSION 与 CHANGELOG（新版本置顶）。
 """
-VERSION = "0.2.49"
-STAGE = "列表阶梯全选"
+VERSION = "0.2.50"
+STAGE = "复制为 Markdown 源码"
 
 # 更新日志（最新版本置顶）
 CHANGELOG = [
+    {
+        "version": "0.2.50",
+        "date": "2026-09-08",
+        "items": [
+            "优化：实时 Markdown 编辑器复制/剪切写入源码（如 - 123），粘到其它编辑器不再变成渲染符号（如 · 123）",
+        ],
+    },
     {
         "version": "0.2.49",
         "date": "2026-09-07",
