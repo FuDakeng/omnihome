@@ -62,6 +62,7 @@
 #quickNavCard .bm-name{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- 快捷导航页：分类纵向排版（左栏 + 右主区） ---------- */
+.bm-search-wrap{ width: 200px; }
 .bm-layout{ display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: var(--om-space-5); align-items: start; }
 .bm-cat-list{ flex-direction: column; align-items: stretch; width: auto; position: sticky; top: var(--om-space-5); }
 .bm-cat-list .tab{

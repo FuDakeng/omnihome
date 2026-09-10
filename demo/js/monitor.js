@@ -30,6 +30,7 @@
     allowed = !!(App.user && App.user.role === 'admin' && App.user.monitorEnabled);
     const nav = $('.nav-item[data-nav="monitor"]');
     if (nav) nav.hidden = !allowed;
+    if (typeof window.syncPhoneMoreMonitor === 'function') syncPhoneMoreMonitor();
     const widget = $('[data-widget="monitor"]');
     if (widget) widget.style.display = allowed ? '' : 'none';
     return allowed;

@@ -336,7 +336,10 @@ import { S } from './state.js';
         title.textContent = n.title || d.name || '分享';
         if (S.shareView.canEdit) S.attachShareLive();
         else S.destroyShareLive();
-        S.setShareMode(S.shareView.canEdit ? 'split' : 'preview');
+        S.setShareMode(S.shareView.canEdit
+          ? ((window.isPhone && isPhone()) ? 'edit' : 'split')
+          : 'preview');
+        if (window.isPhone && isPhone()) document.body.classList.add('share-phone-editor');
         if (d.canEdit && !n.canEdit)
           sub.textContent = '此分享允许编辑，但该笔记为只读或常驻，无法改写';
       };
@@ -355,7 +358,7 @@ import { S } from './state.js';
         const b = e.target.closest('[data-share-nid]');
         if (b) loadOne(b.dataset.shareNid);
       };
-      if (notes[0]) loadOne(notes[0].id);
+      if (notes[0] && (!(window.isPhone && isPhone()) || notes.length === 1)) loadOne(notes[0].id);
       App.setShareNeedLogin(false);
       if (!API.getToken()) App.lock(false);
     } catch (e) {
@@ -376,6 +379,7 @@ import { S } from './state.js';
     S.destroyShareLive();
     S.setShareOutline(false);
     $('#kbShareViewMask')?.classList.remove('open');
+    document.body.classList.remove('share-phone-editor');
     const dlNote = $('#kbShareDlNote');
     const dlAll = $('#kbShareDlAll');
     if (dlNote) dlNote.hidden = true;

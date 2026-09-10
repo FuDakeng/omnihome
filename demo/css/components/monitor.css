@@ -194,6 +194,7 @@
 }
 
 /* ---------- 数据表格 ---------- */
+.tbl-wrap{ overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .tbl{ width: 100%; border-collapse: collapse; font-size: var(--om-fs-sm); }
 .tbl th{
   text-align: left;

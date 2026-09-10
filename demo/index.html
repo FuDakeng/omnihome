@@ -2,7 +2,8 @@
 <html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0c0f15">
 <title>万事屋 · 个人门户</title>
 <link rel="stylesheet" href="css/theme.css?v=__VER__">
 <link rel="stylesheet" href="css/layout.css?v=__VER__">
@@ -15,6 +16,7 @@
 <link rel="stylesheet" href="css/components/overlays.css?v=__VER__">
 <link rel="stylesheet" href="css/components/kb.css?v=__VER__">
 <link rel="stylesheet" href="css/components/pages.css?v=__VER__">
+<link rel="stylesheet" href="css/mobile.css?v=__VER__">
 <script src="js/theme-boot.js?v=__VER__"></script>
 </head>
 <body>
@@ -84,7 +86,10 @@
   <div class="main">
     <header class="topbar">
       <div class="tb-left">
-        <button class="icon-btn" id="collapseBtn" title="折叠侧边栏"><svg class="ic"><use href="#i-chevs-l"/></svg></button>
+        <button class="icon-btn" id="collapseBtn" title="折叠侧边栏">
+          <svg class="ic collapse-desktop"><use href="#i-chevs-l"/></svg>
+          <svg class="ic collapse-phone"><use href="#i-menu"/></svg>
+        </button>
         <span class="crumb-title" id="crumbTitle">仪表盘</span>
         <span class="crumb-date num" id="crumbDate">…</span>
       </div>
@@ -93,9 +98,10 @@
       <div class="searchbar">
         <div class="search-field">
           <svg class="ic"><use href="#i-search"/></svg>
-          <input type="text" id="globalSearch" placeholder="全局搜索：网址 / 笔记 / 密码 / 网页…" autocomplete="off">
+          <input type="text" id="globalSearch" placeholder="全局搜索：网址 / 笔记 / 密码 / 网页…" autocomplete="off" enterkeyhint="search">
           <span class="kbd">⌘ K</span>
         </div>
+        <button type="button" class="search-cancel" id="searchCancel">取消</button>
         <div class="search-pop">
           <div class="sp-label">搜索引擎跳转</div>
           <div class="sp-row">
@@ -121,6 +127,7 @@
       </div>
 
       <div class="tb-right">
+        <button class="icon-btn" id="searchToggle" title="搜索"><svg class="ic"><use href="#i-search"/></svg></button>
         <button class="icon-btn" id="themeToggle" title="切换明暗模式">
           <svg class="ic" data-ic="light" style="display:none"><use href="#i-sun"/></svg>
           <svg class="ic" data-ic="dark"><use href="#i-moon"/></svg>
@@ -156,6 +163,43 @@
     <main class="content">
       <!--VIEWS-->
     </main>
+  </div>
+
+  <button type="button" class="nav-scrim" id="navScrim" aria-label="关闭菜单"></button>
+  <nav class="phone-nav" id="phoneNav" aria-label="手机导航">
+    <button type="button" class="phone-nav-item active" data-nav="dashboard">
+      <svg class="ic"><use href="#i-home"/></svg>首页
+    </button>
+    <button type="button" class="phone-nav-item" data-nav="bookmarks">
+      <svg class="ic"><use href="#i-bookmark"/></svg>导航
+    </button>
+    <button type="button" class="phone-nav-item" data-nav="notes">
+      <svg class="ic"><use href="#i-book"/></svg>知识库
+    </button>
+    <button type="button" class="phone-nav-item" data-nav="vault">
+      <svg class="ic"><use href="#i-shield"/></svg>保险库
+    </button>
+    <button type="button" class="phone-nav-item" id="phoneMoreBtn">
+      <svg class="ic"><use href="#i-more"/></svg>更多
+    </button>
+  </nav>
+  <div class="phone-more" id="phoneMoreSheet" hidden>
+    <button type="button" class="phone-more-item" data-nav="monitor" id="phoneMoreMonitor">
+      <svg class="ic"><use href="#i-activity"/></svg>系统监控
+    </button>
+    <button type="button" class="phone-more-item" data-nav="toolbox">
+      <svg class="ic"><use href="#i-wrench"/></svg>实用工具箱
+    </button>
+    <button type="button" class="phone-more-item" data-open-settings>
+      <svg class="ic"><use href="#i-gear"/></svg>设置中心
+    </button>
+    <button type="button" class="phone-more-item" id="phoneThemeBtn">
+      <svg class="ic"><use href="#i-moon"/></svg>切换明暗
+    </button>
+    <button type="button" class="phone-more-item danger" id="phoneLogoutBtn">
+      <svg class="ic"><use href="#i-logout"/></svg>退出登录
+    </button>
+    <button type="button" class="phone-more-cancel" id="phoneMoreClose">取消</button>
   </div>
 </div>
 

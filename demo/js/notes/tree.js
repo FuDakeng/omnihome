@@ -371,7 +371,13 @@ import { S } from './state.js';
   S.setSelMode = function(on){
     S.selMode = on;
     $('.kb-tree')?.classList.toggle('sel-mode', on);
+    const selBtn = $('#kbPhoneSel');
+    if (selBtn){
+      selBtn.classList.toggle('on', on);
+      selBtn.textContent = on ? '完成' : '选择';
+    }
     if (!on) S.clearAllSel();
     else S.renderTree();
   };
+  window.__kbSetSelMode = S.setSelMode;
 

@@ -21,7 +21,7 @@ S.folderVault = {};    // folderPath -> vaultId;
 
 S.currentId = null;
 
-S.currentMode = 'split';
+S.currentMode = 'edit';
 
 S.currentFolder = '';  // 新建笔记的默认文件夹（最近点选的）;
 
@@ -96,7 +96,7 @@ S.previewFolded = new WeakMap();
 
 S.shareTarget = null;
 
-S.shareView = { token: '', canEdit: false, nid: '', mode: 'split' };
+S.shareView = { token: '', canEdit: false, nid: '', mode: 'edit' };
 
 S.shareSaveTimer = 0;
 
