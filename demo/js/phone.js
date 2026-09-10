@@ -62,6 +62,9 @@ function bindPhoneShell(){
   else if (mq.addListener) mq.addListener(onMq);
 
   document.getElementById('navScrim')?.addEventListener('click', closePhoneChrome);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closePhoneChrome();
+  });
 
   document.getElementById('searchToggle')?.addEventListener('click', () => {
     document.body.classList.add('search-open');

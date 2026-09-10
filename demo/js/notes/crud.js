@@ -61,7 +61,7 @@ import { S } from './state.js';
       S.idx.unshift(meta);
       S.renderTree();
       await S.open(meta.id);
-      goView('notes');
+      if (document.body.dataset.view !== 'notes') goView('notes');
       $('#edTitle').focus();
       $('#edTitle').select();
     } catch (e) { showToast(e.message, 'err'); }
@@ -297,7 +297,7 @@ import { S } from './state.js';
           if (f === o || f.startsWith(o + '/')){ noteMoves.push([n, repath(f, o, nw)]); break; }
         }
       }
-      await API.put('/api/notes/folders', { S.folders: fl });
+      await API.put('/api/notes/folders', { folders: fl });
       for (const [n, nf] of noteMoves){
         await API.put('/api/notes/' + n.id, { folder: nf });
         n.folder = nf;

@@ -109,6 +109,34 @@
   .vh-actions{ width: 100%; }
   .vh-actions .btn{ min-height: 40px; }
 
+  .card-head{ flex-wrap: wrap; }
+  .card-head .tabs{
+    flex: 1 1 100%;
+    margin-left: 0 !important;
+    max-width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .set-layout{
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .set-menu{
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+  .set-item{ white-space: nowrap; flex: none; }
+  .set-row{ flex-wrap: wrap; }
+  .ms-body{ padding: 12px; }
+  #changelogMask .modal{ width: min(520px, calc(100vw - 16px)); max-height: calc(var(--om-app-h) - 80px); }
+
+  .kb-menu{ z-index: 120; }
+
   /* 知识库：列表 / 编辑器两级 */
   .kb-layout{
     display: flex; flex-direction: column;
@@ -204,11 +232,6 @@
   .ct-search input{ width: 100%; font-size: 16px; }
   .tbl-wrap, .card:has(> .tbl){ overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
-  .modal-settings{
-    width: 100vw; max-width: none;
-    height: var(--om-app-h); max-height: none;
-    border-radius: 0;
-  }
   .set-item{ min-height: 44px; padding: 10px 14px; }
   .sync-log .lg{ grid-template-columns: 1fr; gap: 2px; }
   .team-member-head, .team-member{
@@ -220,6 +243,7 @@
   }
   .cal-day{ min-height: 44px; aspect-ratio: auto; }
 
+  .auth-page{ overflow: auto; min-height: var(--om-app-h); }
   .auth-card{ padding: 22px 18px 18px; }
   .auth-card .input, .auth-card .btn{ font-size: 16px; }
   .auth-card .btn{ width: 100%; }
@@ -231,6 +255,11 @@
   button, .nav-item, .phone-nav-item, .icon-btn{ touch-action: manipulation; }
   .auth-deco-1, .auth-deco-2{ opacity: .4; }
   .modal{ max-height: calc(var(--om-app-h) - 24px); }
+  .modal.kb-share-view, .modal-settings{
+    width: 100vw; max-width: none;
+    height: var(--om-app-h); max-height: none;
+    border-radius: 0;
+  }
 }
 
 body.kb-hide .phone-nav{ display: none; }

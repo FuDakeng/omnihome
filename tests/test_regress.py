@@ -40,6 +40,26 @@ def test_render_index_injects_version():
     assert "<!--OVERLAYS-->" not in html
 
 
+def test_demo_js_modules_parse():
+    """node --check 不按 ESM 解析，会漏掉 `{ S.folders: fl }` 这类模块语法错误。"""
+    js_root = ROOT / "demo" / "js"
+    bad = []
+    for path in sorted(js_root.rglob("*.js")):
+        if "vendor" in path.parts:
+            continue
+        r = subprocess.run(
+            ["node", "--input-type=module", "--check"],
+            input=path.read_text(encoding="utf-8"),
+            capture_output=True,
+            text=True,
+        )
+        if r.returncode != 0:
+            bad.append(f"{path.relative_to(ROOT)}: {(r.stderr or r.stdout).strip()}")
+    if bad:
+        pytest.fail("JS 模块无法解析:\n" + "\n".join(bad[:20]))
+
+
+
 def test_sync_regress_file_and_sqlite():
     r = subprocess.run(
         [sys.executable, str(BACKEND / "_sync_regress.py")],

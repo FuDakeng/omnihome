@@ -216,14 +216,19 @@
 
   /* 悬浮：按 X 坐标吸附最近采样点 */
   function bindHover(canvas, wrap, getLen, setHover){
-    canvas.addEventListener('mousemove', e => {
+    const onPoint = e => {
       const len = getLen();
       if (len < 2) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX != null ? e.clientX : (e.touches && e.touches[0].clientX)) - rect.left;
       const plotW = wrap.clientWidth - PAD_L - PAD_R;
-      const idx = Math.round((e.offsetX - PAD_L) / Math.max(plotW, 1) * (len - 1));
+      const idx = Math.round((x - PAD_L) / Math.max(plotW, 1) * (len - 1));
       setHover(Math.max(0, Math.min(len - 1, idx)));
-    });
+    };
+    canvas.addEventListener('mousemove', onPoint);
+    canvas.addEventListener('pointermove', onPoint);
     canvas.addEventListener('mouseleave', () => setHover(null));
+    canvas.addEventListener('pointerleave', () => setHover(null));
   }
 
   /* ---------- 系统监控区：主机资源曲线 ---------- */

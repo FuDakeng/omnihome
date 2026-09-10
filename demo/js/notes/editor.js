@@ -125,7 +125,7 @@ import { S } from './state.js';
        旧块会抢焦点/选区并破坏分屏布局） */
     if (S.liveEd){ try { S.liveEd.destroy(); } catch (_) {} S.liveEd = null; }
     S.liveEd = LiveMD.attach(ta, {
-      S.uploadImage,
+      uploadImage: f => S.uploadImage(f),
       onImageError: e => showToast('图片上传失败：' + (e.message || e), 'err'),
       afterRebuild: el => S.hydrateImages(el),
     });

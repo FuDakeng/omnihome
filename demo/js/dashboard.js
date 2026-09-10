@@ -377,6 +377,7 @@ const Dash = (() => {
     });
 
     App.onEnter(load);
+    setEditing(false);
   }
 
   init();
