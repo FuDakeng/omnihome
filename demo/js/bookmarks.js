@@ -97,9 +97,18 @@ const Bookmarks = (() => {
     }
     if (bm.url){
       /* 默认自动获取网站图标；加载失败时移除 <img>，退回首字母头像 */
-      return `<span class="bm-fav" style="--fav:${hue}"><img src="${favFor(bm.url)}" data-bm-url="${App.esc(bm.url)}" alt="" loading="lazy" onload="__omniFavOk(this)" onerror="__omniFavErr(this)">${letter}</span>`;
+      return `<span class="bm-fav" style="--fav:${hue}"><img src="${favFor(bm.url)}" data-bm-url="${App.esc(bm.url)}" alt="" loading="lazy">${letter}</span>`;
     }
     return `<span class="bm-fav" style="--fav:${hue}">${letter}</span>`;
+  }
+
+  function bindFavImgs(root){
+    (root || document).querySelectorAll('img[data-bm-url]').forEach(img => {
+      if (img.dataset.favBound) return;
+      img.dataset.favBound = '1';
+      img.addEventListener('load', () => window.__omniFavOk(img));
+      img.addEventListener('error', () => window.__omniFavErr(img));
+    });
   }
 
   function hostOf(url){
@@ -216,6 +225,7 @@ const Bookmarks = (() => {
     });
     $('#bmCount').textContent =
       `共 ${bms.length} 个书签 · ${visibleCats().length} 个分类 · ⌘+1~9 打开当前分类前 9 个 · ⌘+点击多选，拖到左侧分类快速归类`;
+    bindFavImgs();
   }
 
   /* ---------- 仪表盘快捷导航卡（简化展示，只读，悬浮切换分类 + 点击锁定） ---------- */
@@ -256,6 +266,7 @@ const Bookmarks = (() => {
       g.innerHTML = list.length
         ? list.map((b, i) => dashTileHtml(b, i + 1)).join('') : emptyHint();
     });
+    bindFavImgs();
   }
   function emptyHint(){
     return '<div style="grid-column:1/-1;font-size:12px;color:var(--om-text-3);padding:10px">该分类暂无书签</div>';
@@ -542,7 +553,8 @@ const Bookmarks = (() => {
     }
     const letter = App.esc(name.charAt(0).toUpperCase());
     if (url){
-      el.innerHTML = `<img src="${favUrl(/^https?:\/\//.test(url) ? url : 'https://' + url)}" alt="" onerror="this.remove()">${letter}`;
+      el.innerHTML = `<img src="${favUrl(/^https?:\/\//.test(url) ? url : 'https://' + url)}" alt="">${letter}`;
+      el.querySelector('img')?.addEventListener('error', ev => ev.target.remove());
     } else {
       el.textContent = letter;
     }
@@ -1015,3 +1027,6 @@ const Bookmarks = (() => {
 })();
 Bookmarks.init();
 App.onEnter(() => Bookmarks.load());
+
+export { Bookmarks };
+window.Bookmarks = Bookmarks;

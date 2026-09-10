@@ -82,3 +82,6 @@ Auth.init();
 
 /* 退出登录入口（头像菜单） */
 $('#logoutBtn').addEventListener('click', () => App.logout());
+
+export { Auth };
+window.Auth = Auth;

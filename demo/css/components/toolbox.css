@@ -1,0 +1,171 @@
+/* ---------- 实用工具箱 ---------- */
+.tool-grid{ display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--om-space-3); }
+.tool-tile{
+  display: flex; flex-direction: column; gap: 8px;
+  padding: var(--om-space-4);
+  border-radius: var(--om-radius-md);
+  border: 1px solid var(--om-border);
+  background: var(--om-surface);
+  text-align: left;
+  transition: all var(--om-t-fast);
+  position: relative;
+}
+.tool-tile:hover{ transform: translateY(-2px); border-color: var(--om-primary-border); box-shadow: var(--om-shadow-md); }
+.tool-tile.soon{ opacity: .55; }
+.tool-tile.soon:hover{ transform: none; box-shadow: none; border-color: var(--om-border); }
+.tt-ic{
+  width: 38px; height: 38px;
+  display: grid; place-items: center;
+  border-radius: var(--om-radius-sm);
+  background: var(--om-primary-ghost); color: var(--om-primary);
+}
+.tt-ic .ic{ width: 18px; height: 18px; }
+.tt-name{ font-weight: 600; font-size: var(--om-fs-sm); }
+.tt-desc{ font-size: 11px; color: var(--om-text-3); line-height: 1.4; }
+.flag-soon{
+  position: absolute; top: 10px; right: 10px;
+  padding: 2px 8px; border-radius: var(--om-radius-pill);
+  background: var(--om-surface-3); color: var(--om-text-3);
+  font-size: 10px; font-weight: 600;
+}
+
+/* 翻译面板 */
+.trans-lang{ display: flex; align-items: center; gap: var(--om-space-3); }
+.lang-select{
+  height: 34px; padding: 0 12px;
+  border-radius: var(--om-radius-sm);
+  border: 1px solid var(--om-border-strong);
+  background: var(--om-surface);
+  color: var(--om-text-1);
+  font-size: var(--om-fs-sm);
+  outline: none;
+}
+.t-panes{ display: grid; grid-template-columns: 1fr 1fr; gap: var(--om-space-3); margin-top: var(--om-space-3); }
+@media (max-width: 800px){ .t-panes{ grid-template-columns: 1fr; } }
+.t-pane{
+  min-height: 130px;
+  padding: var(--om-space-3) var(--om-space-4);
+  border-radius: var(--om-radius-md);
+  border: 1px solid var(--om-border);
+  background: var(--om-surface-2);
+  font-size: var(--om-fs-sm);
+  line-height: 1.8;
+}
+.t-pane textarea{
+  width: 100%; min-height: 100px;
+  border: 0; outline: none; resize: none;
+  background: transparent;
+  color: var(--om-text-1);
+  line-height: 1.8;
+}
+.t-pane.result{ border-color: var(--om-primary-border); background: var(--om-primary-soft); }
+
+/* 密码生成器 */
+.pg-out{
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--om-radius-md);
+  background: var(--om-bg);
+  border: 1px solid var(--om-border);
+  font-family: var(--om-font-mono);
+  font-size: 15px;
+  letter-spacing: 1px;
+  word-break: break-all;
+}
+.pg-out span{ flex: 1; }
+.pg-row{ display: flex; align-items: center; justify-content: space-between; font-size: var(--om-fs-sm); padding: 8px 0; }
+.pg-checks{ display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin-top: var(--om-space-2); }
+
+/* 滑块 & 开关 & 复选 */
+input[type="range"].range{
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(to right, var(--om-primary) 60%, var(--om-surface-3) 60%);
+  outline: none;
+}
+input[type="range"].range::-webkit-slider-thumb{
+  -webkit-appearance: none;
+  width: 17px; height: 17px;
+  border-radius: 50%;
+  background: var(--om-surface);
+  border: 2px solid var(--om-primary);
+  box-shadow: var(--om-shadow-sm);
+  cursor: pointer;
+  transition: transform var(--om-t-fast);
+}
+input[type="range"].range::-webkit-slider-thumb:hover{ transform: scale(1.15); }
+
+.switch{
+  position: relative;
+  width: 40px; height: 23px;
+  border-radius: var(--om-radius-pill);
+  border: 0;
+  background: var(--om-surface-3);
+  transition: background var(--om-t-fast);
+  flex: none;
+  cursor: pointer;
+}
+.switch::after{
+  content: "";
+  position: absolute; top: 3px; left: 3px;
+  width: 17px; height: 17px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--om-shadow-sm);
+  transition: transform var(--om-t-fast);
+}
+.switch.on{ background: var(--om-primary); }
+.switch.on::after{ transform: translateX(17px); }
+.switch:disabled{ opacity: .45; cursor: not-allowed; }
+.switch-hit{ display: inline-flex; align-items: center; }
+.switch-hit.locked{ cursor: not-allowed; }
+.switch-hit.locked .switch{ pointer-events: none; }
+
+.checkbox{ display: flex; align-items: center; gap: 8px; font-size: var(--om-fs-sm); color: var(--om-text-2); cursor: pointer; padding: 4px 0; }
+.checkbox input{ display: none; }
+.checkbox .box{
+  width: 17px; height: 17px;
+  border-radius: 5px;
+  border: 1.5px solid var(--om-border-strong);
+  display: grid; place-items: center;
+  transition: all var(--om-t-fast);
+  flex: none;
+}
+.checkbox .box::after{ content: ""; width: 9px; height: 5px; border-left: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(-45deg) translateY(-1px); opacity: 0; }
+.checkbox input:checked + .box{ background: var(--om-primary); border-color: var(--om-primary); }
+.checkbox input:checked + .box::after{ opacity: 1; }
+
+/* 分段控件 */
+.seg{ display: inline-flex; padding: 3px; background: var(--om-surface-2); border-radius: var(--om-radius-sm); gap: 2px; }
+.seg-btn{
+  padding: 6px 14px;
+  border: 0; border-radius: 7px;
+  background: transparent;
+  color: var(--om-text-2);
+  font-size: var(--om-fs-xs); font-weight: 600;
+  display: flex; align-items: center; gap: 6px;
+  transition: all var(--om-t-fast);
+  white-space: nowrap;
+}
+.seg-btn .ic{ width: 13px; height: 13px; }
+.seg-btn:hover{ color: var(--om-text-1); }
+.seg-btn.active{ background: var(--om-surface); color: var(--om-text-1); box-shadow: var(--om-shadow-sm); }
+
+/* 主题色板 */
+.swatches{ display: flex; gap: 10px; flex-wrap: wrap; }
+.swatch{
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  display: grid; place-items: center;
+  color: #fff;
+  transition: all var(--om-t-fast);
+  position: relative;
+}
+.swatch:hover{ transform: scale(1.1); }
+.swatch.on{ border-color: var(--om-text-1); box-shadow: 0 0 0 3px var(--om-surface), 0 0 0 5px currentColor; }
+.swatch.on::after{ content: "✓"; font-size: 13px; font-weight: 800; }
+.swatch.custom{ background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); overflow: hidden; }
+.swatch.custom input{ position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+

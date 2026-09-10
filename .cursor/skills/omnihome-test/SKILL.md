@@ -19,8 +19,16 @@ description: >-
 cd backend && python3 _sync_regress.py
 ```
 
+仓库根目录也可用（安装 pytest 后）：
+
+```bash
+pip install -r requirements.lock.txt pytest
+pytest
+```
+
 - FastAPI TestClient，数据写临时目录，**不碰** 真实 `data/`，无需已启动的服务。
 - file + sqlite 双引擎。退出码非 0 即失败。
+- `pytest` 会再跑一遍 `_sync_regress.py` 与密钥箱脚本，并检查 VERSION / 前端组装。
 
 本轮若改了同步、审批、关于页日志导出、Obsidian 插件协议，必须等这套全绿。
 
@@ -41,4 +49,4 @@ cd backend && python3 _sync_regress.py
 
 1. 看脚本打印的 `FAIL` 行，修代码或补断言（不要为了绿灯改宽本应失败的行为）。
 2. 再跑同一命令直到 `全部通过`。
-3. 然后才允许改 `backend/app_version.py`、commit、`git push origin main`。
+3. 然后才允许改 `backend/app_version.py` / `CHANGELOG.md`、commit、`git push origin main`。

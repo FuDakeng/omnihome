@@ -228,3 +228,4 @@ const Plan = (() => {
 })();
 /* const 顶层声明不挂 window，显式导出供 calendar.js 的 window.Plan 守卫使用 */
 window.Plan = Plan;
+export { Plan };

@@ -9,7 +9,7 @@ services:
     volumes:
       # 用户数据空间（笔记 / 书签 / 偏好 / 备份）持久化（后端按相对路径解析到 /app/data）
       - ./data:/app/data
-      # 读取宿主机 Docker 容器状态（只读）
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # 如需「系统监控」页读取宿主机 Docker 容器状态，取消下面一行注释后重建容器：
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - TZ=Asia/Shanghai

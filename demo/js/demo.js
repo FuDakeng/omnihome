@@ -9,19 +9,31 @@ const $$ = (s, c = document) => [...c.querySelectorAll(s)];
 const root = document.documentElement;
 
 /* ---------- 视图切换 ---------- */
-function goView(name){
+function viewFromHash(){
+  return (location.hash.replace(/^#\/?/, '') || '').split('?')[0];
+}
+function goView(name, fromHash){
+  if (!name || !document.querySelector('.view[data-view="'+name+'"]')) name = 'dashboard';
   $$('.view').forEach(v => v.classList.toggle('active', v.dataset.view === name));
   $$('.nav-item[data-nav]').forEach(b => b.classList.toggle('active', b.dataset.nav === name));
   const nav = $(`.nav-item[data-nav="${name}"]`);
   if (nav) $('#crumbTitle').textContent = nav.dataset.title;
-  document.body.dataset.view = name;        // CSS 用此区分视图，给全局顶栏/.kb-layout 套样式
+  document.body.dataset.view = name;
   $('#collapseBtn')?.classList.remove('kb-mode');
   $('#collapseBtn')?.setAttribute('title', '折叠 / 展开侧边栏');
   $('#userMenu').classList.remove('open');
   window.scrollTo({ top: 0 });
+  if (!fromHash){
+    const next = '#/' + name;
+    if (location.hash !== next) history.replaceState(null, '', location.pathname + location.search + next);
+  }
   document.dispatchEvent(new CustomEvent('view-change', { detail: name }));
 }
 $$('[data-nav]').forEach(el => el.addEventListener('click', () => goView(el.dataset.nav)));
+window.addEventListener('hashchange', () => {
+  const n = viewFromHash();
+  if (n) goView(n, true);
+});
 
 /* ---------- 折叠按钮：始终折叠左侧导航栏（知识库目录不由此按钮控制） ---------- */
 $('#collapseBtn').addEventListener('click', () => {
@@ -228,3 +240,9 @@ function tickClock(){
 }
 tickClock();
 setInterval(tickClock, 1000);
+
+const bootHash = viewFromHash();
+if (bootHash) goView(bootHash, true);
+
+export { $, $$, goView, setMode, setAccent, showToast, openSettings, hexToHsl };
+Object.assign(window, { $, $$, goView, setMode, setAccent, showToast, openSettings, hexToHsl });

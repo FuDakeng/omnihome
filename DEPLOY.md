@@ -17,7 +17,11 @@ tar -xzf omnihome-deploy.tar.gz -C /opt/omnihome
 ```
 omnihome/
 ├── Dockerfile
-├── docker-compose.yml        # 通用：从源码构建
+├── docker-compose.yml        # 通用：从源码构建（默认不挂 docker.sock）
+├── docker-compose.tls.yml    # 可选：Caddy HTTPS 反代
+├── Caddyfile
+├── requirements.txt / requirements.lock.txt
+├── CHANGELOG.md
 ├── docker-compose.nas.yml    # NAS：可用镜像，也可构建
 ├── build-image.sh            # 构建并导出 amd64 / arm64 镜像（需 Docker Desktop）
 ├── requirements.txt
@@ -49,9 +53,17 @@ docker build -t omnihome:latest .
 docker run -d --name omnihome --restart unless-stopped \
   -p 8000:8000 \
   -v $(pwd)/data:/app/data \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
   -e TZ=Asia/Shanghai \
   omnihome:latest
+```
+
+需要容器监控时再加 `-v /var/run/docker.sock:/var/run/docker.sock:ro`。
+
+公网或 Obsidian 同步请走 HTTPS：
+
+```bash
+# 先改 Caddyfile 里的域名，再：
+docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
 ```
 
 ## 三、数据与备份
@@ -79,8 +91,8 @@ docker run -d --name omnihome --restart unless-stopped \
 | 现象 | 处理 |
 |---|---|
 | 系统监控入口不显示 | 该功能仅管理员可见且默认关闭：管理员在「设置 → 功能设置」中开启 |
-| 监控页提示"无法连接 Docker" | 确认 `/var/run/docker.sock` 已挂载且存在；无 socket 时容器监控自动降级，其余功能不受影响 |
+| 监控页提示"无法连接 Docker" | 默认不挂 docker.sock。需要时在 compose 里取消注释后重建；无 socket 时容器监控自动降级，其余功能不受影响 |
 | 忘记管理员密码 | 停止容器后删除 `data/config.json` 与对应用户目录，重新注册（会清空全部数据，请先备份） |
 | 天气城市修改 | 仪表盘天气横条 → 位置设置 → 手动搜索城市；或一键定位（需 HTTPS / localhost） |
-| 会话全部失效 | 会话存于内存，服务重启后需重新登录，属预期行为 |
+| 会话全部失效 | 会话在 `data/sessions.sqlite`，随数据卷持久化；若整卷丢失才需重新登录 |
 | 浏览器扩展下载提示未找到 | 部署包根目录需保留 `omnihome-extension.zip`；扩展安装方式见包内 README |

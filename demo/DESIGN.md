@@ -1,7 +1,7 @@
-# 万事屋（OmniDesk）个人门户 · UI/UX 设计规范
+# 万事屋个人门户 · UI/UX 设计规范
 
-> 本目录为纯静态高保真 Demo（仅样式，无功能实现），可直接用浏览器打开 `index.html` 预览。
-> 建议后续以 Vue 3 / React + 本套 CSS 变量体系进行工程化实现，并打包为 Docker 镜像部署到 NAS。
+> 本目录是**生产前端**：原生 HTML/CSS/JS，无打包器。服务端组装 `views/*.html` 写入壳层，静态 URL 的 `?v=` 由 `app_version.VERSION` 注入。
+> 入口为 ESM `js/boot.js`；主视图走 hash 路由（`#/notes`）。不引入 Vue/React。
 
 ---
 
@@ -224,10 +224,10 @@ demo/
 ## 七、v3 功能实现记录（UI Demo → 可运行应用）
 
 ### 7.1 技术选型（最终落地）
-- **前端**：保留本目录原生 JS + CSS 变量体系，不引入构建工具；模块化拆分为 14 个顺序加载的脚本（api/app/auth/weather/monitor/word/calendar/bookmarks/globalsearch/vault/notes/plan/toolbox/settings），第三方库走 CDN（marked / DOMPurify / qrcodejs，均有离线降级）。
-- **后端**：FastAPI（Python 3.9+）：`backend/main.py`（认证 + 静态资源）+ `routes.py`（功能 API）+ `sessions.py`（口令/会话）+ `storage.py`（文件存储）。
-- **持久化**：无数据库，按用户分目录存 JSON / Markdown 文件（`data/users/{username}/`：prefs.json / bookmarks.json / notes/*.md + index.json / plan.md / calendar.json / vault.json / backups/*.zip），全局账号在 `data/config.json`。
-- **认证**：PBKDF2-SHA256 口令哈希 + 内存会话（7 天）+ Bearer token；首个注册用户为管理员。
+- **前端**：本目录即生产 UI。原生 ESM（`js/boot.js`），无打包器；主视图 hash 路由（`#/notes`）；`?v=` 由 `app_version.VERSION` 注入。第三方库 vendored 在 `js/vendor/`（marked / DOMPurify / qrcodejs）。
+- **后端**：FastAPI（Python 3.11）：`backend/main.py` 应用工厂 + `backend/routers/` 按域拆分 + `sessions.py`（SQLite 会话）+ `storage.py`（三引擎，内部 `store/`）。
+- **持久化**：默认文件引擎，可切 SQLite / MySQL / PostgreSQL 并自动迁移。全局账号仍在 `data/config.json`；登录会话在 `data/sessions.sqlite`。
+- **认证**：PBKDF2-SHA256 口令哈希 + SQLite 会话（7 天滑动续期）+ Bearer token；Obsidian 用 `X-API-Key`。首个注册用户为管理员。
 
 ### 7.2 关键设计决策
 - **密码保险库零知识加密**：主密码经 PBKDF2（31 万次）派生密钥，AES-256-GCM 在浏览器端加密全部凭据；服务端仅存盐值与校验串，无法解密。
@@ -238,4 +238,4 @@ demo/
 ```bash
 docker compose up -d --build   # 端口 8000，数据卷 ./data → /app/data
 ```
-`docker-compose.yml` 额外以只读方式挂载 `/var/run/docker.sock` 用于容器监控；时区 `Asia/Shanghai`。本地开发直接 `python3 backend/main.py`（依赖见 `requirements.txt`）。
+`docker-compose.yml` **默认不**挂载 `docker.sock`（需要容器监控时取消注释）；时区 `Asia/Shanghai`。公网 HTTPS 见 `docker-compose.tls.yml`。本地开发 `pip install -r requirements.lock.txt && python3 backend/main.py`。

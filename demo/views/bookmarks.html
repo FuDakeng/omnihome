@@ -1,0 +1,43 @@
+      <!-- ==================== 视图：快捷导航 ==================== -->
+      <section class="view" data-view="bookmarks" id="bookmarksView">
+        <div class="view-head">
+          <div>
+            <h2 class="vh-title">快捷导航</h2>
+            <div class="vh-sub" id="bmCount">书签加载中…</div>
+          </div>
+          <div class="vh-actions">
+            <div class="input-wrap" style="width:200px">
+              <svg class="ic"><use href="#i-search"/></svg>
+              <input class="input" id="bmSearch" placeholder="搜索书签…" style="height:34px">
+            </div>
+            <div class="dropdown">
+              <button class="btn btn-ghost btn-sm" id="bmTagBtn" title="按标签多选筛选"><svg class="ic"><use href="#i-pin"/></svg>标签<span class="drop-count num" id="bmTagCount" hidden>0</span><svg class="ic chev"><use href="#i-chev-d"/></svg></button>
+              <div class="drop-panel" id="bmTagPanel" hidden></div>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="bmImportBtn" title="从 HTML 书签文件导入"><svg class="ic"><use href="#i-upload"/></svg>导入</button>
+            <button class="btn btn-ghost btn-sm" id="bmExportBtn" title="导出为 HTML 书签文件"><svg class="ic"><use href="#i-download"/></svg>导出</button>
+            <input type="file" id="bmImportFile" accept=".html,.htm" hidden>
+            <button class="btn btn-primary btn-sm" id="bmNew"><svg class="ic"><use href="#i-plus"/></svg>新建书签</button>
+          </div>
+        </div>
+
+        <div class="bm-layout">
+          <div class="tabs bm-cat-list" id="bmTabs">
+            <button class="tab">分类加载中…</button>
+          </div>
+          <div class="bm-main">
+            <div id="bmPanels"></div>
+            <div class="bm-grid" style="margin-top:var(--om-space-3)">
+              <button class="bm-tile add js-bm-add"><svg class="ic" style="width:20px;height:20px"><use href="#i-plus"/></svg>添加新书签</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 多选批量操作条（选中书签后出现，拖动任一选中卡片到左侧分类可快速归类） -->
+        <div class="bm-batch" id="bmBatch" hidden>
+          <span class="bm-batch-n num" id="bmBatchN">已选 0 个</span>
+          <span class="bm-batch-hint" id="bmBatchHint">拖动选中卡片到左侧分类可快速归类</span>
+          <button class="btn btn-sm danger" id="bmBatchDel"><svg class="ic"><use href="#i-trash"/></svg>删除</button>
+          <button class="btn btn-ghost btn-sm" id="bmBatchClear">取消选择</button>
+        </div>
+      </section>

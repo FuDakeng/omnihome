@@ -1,0 +1,7 @@
+omni.example.com {
+	encode gzip
+	reverse_proxy omnihome:8000
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+}

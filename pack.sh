@@ -19,16 +19,15 @@ PY
 )
 echo ">> 版本 v${VERSION}"
 
-# 后端源码自动收集 backend/*.py（排除 _ 前缀的开发测试脚本）＋ 每日单词词库。
+# 后端源码自动收集 backend 下全部非测试 .py（含子包 routers/ store/）＋ 词库。
 # 不要改回手工罗列：v0.2.3 就是因手写清单漏了 secretbox.py，
 # 导致容器启动即 ModuleNotFoundError 陷入崩溃循环。
-SRC=($(find backend -maxdepth 1 -name '*.py' ! -name '_*' | sort) backend/data/words.json)
-# 前端源码
-DEMO=(
-  demo/index.html
-  demo/css/theme.css demo/css/layout.css demo/css/components.css
+SRC=($(find backend -name '*.py' ! -name '_*' | sort) backend/data/words.json)
+# 前端源码：壳层 + CSS 拆分 + ESM + views 片段
+DEMO=()
+while IFS= read -r f; do DEMO+=("$f"); done < <(
+  find demo -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.md' \) | sort
 )
-while IFS= read -r f; do DEMO+=("$f"); done < <(find demo/js -name '*.js' | sort)
 
 # 打包：先 staging 再归档，确保包内没有 .DS_Store / __pycache__ / 用户数据
 # $1 = 输出包名，其余 = 待打包文件
@@ -51,16 +50,16 @@ rm -f omnihome-deploy.tar.gz omnihome-nas-deploy.tar.gz
 
 echo ">> 打包通用源码包 omnihome-deploy.tar.gz"
 pack omnihome-deploy.tar.gz \
-  Dockerfile requirements.txt .dockerignore \
-  docker-compose.yml docker-compose.nas.yml \
+  Dockerfile requirements.txt requirements.lock.txt CHANGELOG.md .dockerignore \
+  docker-compose.yml docker-compose.nas.yml docker-compose.tls.yml Caddyfile \
   build-image.sh \
   omnihome-extension.zip \
   DEPLOY.md DEPLOY-NAS.md \
-  "${SRC[@]}" "${DEMO[@]}" demo/DESIGN.md
+  "${SRC[@]}" "${DEMO[@]}"
 
 echo ">> 打包 NAS 精简包 omnihome-nas-deploy.tar.gz"
 pack omnihome-nas-deploy.tar.gz \
-  Dockerfile requirements.txt .dockerignore \
+  Dockerfile requirements.txt requirements.lock.txt CHANGELOG.md .dockerignore \
   docker-compose.nas.yml \
   omnihome-extension.zip \
   DEPLOY-NAS.md \

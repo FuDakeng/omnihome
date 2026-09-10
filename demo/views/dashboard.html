@@ -1,0 +1,229 @@
+      <!-- ==================== 视图：仪表盘 ==================== -->
+      <section class="view active" data-view="dashboard">
+        <div class="view-head">
+          <!-- 天气横条：信息区（点按看详情） + 操作区（显示内容 / 位置 / 刷新） -->
+          <div class="wx-strip" id="wxStrip">
+            <button class="wxs-info" id="wxStripInfo" title="点击查看天气详情">
+              <svg class="ic wxs-ic" id="wxSIc"><use href="#i-cloud-sun"/></svg>
+              <span class="wxs-city" id="wxSCity">定位中</span>
+              <b class="wxs-temp num" id="wxSTemp">--°</b>
+              <span class="wxs-extra num" id="wxSExtra"></span>
+              <svg class="ic wxs-more"><use href="#i-chev-d"/></svg>
+            </button>
+            <div class="wxs-ops">
+              <button class="wxs-op" id="wxSFieldsBtn" title="横条显示内容"><svg class="ic"><use href="#i-sliders"/></svg></button>
+              <button class="wxs-op" id="wxSLocBtn" title="位置设置"><svg class="ic"><use href="#i-pin"/></svg></button>
+              <button class="wxs-op" id="wxSRefresh" title="刷新天气"><svg class="ic"><use href="#i-refresh"/></svg></button>
+            </div>
+            <!-- 显示内容选择 -->
+            <div class="wxs-pop" id="wxFieldsPop" hidden>
+              <div class="sp-label">横条显示内容</div>
+              <div id="wxFieldsList"></div>
+            </div>
+            <!-- 位置设置：定位 / 手动搜索城市 -->
+            <div class="wxs-pop wxs-pop-loc" id="wxLocPop" hidden>
+              <div class="sp-label">位置设置</div>
+              <button class="btn btn-outline btn-sm" id="wxLocateBtn" style="width:100%"><svg class="ic"><use href="#i-pin"/></svg>定位当前位置（精确到区县）</button>
+              <div class="input-wrap" style="margin-top:8px">
+                <svg class="ic"><use href="#i-search"/></svg>
+                <input class="input" id="wxCitySearch" placeholder="搜索城市 / 区县…" style="height:32px">
+              </div>
+              <div id="wxCityResults" style="margin-top:6px"></div>
+            </div>
+          </div>
+          <div class="vh-actions">
+            <button class="btn btn-primary btn-sm" id="dashAddBtn" hidden><svg class="ic"><use href="#i-plus"/></svg>添加组件</button>
+            <button class="btn btn-outline btn-sm" id="dashEditBtn"><svg class="ic"><use href="#i-sliders"/></svg>编辑布局</button>
+          </div>
+        </div>
+        <div class="grid12" id="dashGrid">
+
+          <!-- 系统监控摘要 -->
+          <article class="card lift col-8" data-widget="monitor">
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-activity"/></svg>系统监控</h3>
+              <span class="chip success">运行正常</span>
+              <span class="chip no-dot primary" id="dashContainerChip">… 容器运行中</span>
+              <button class="card-link" data-nav="monitor">查看详情 <svg class="ic"><use href="#i-chev-d"/></svg></button>
+            </div>
+            <div class="card-pad">
+              <div class="gauge-wrap">
+                <div>
+                  <div class="gauge">
+                    <svg viewBox="0 0 60 60"><circle class="g-ring" cx="30" cy="30" r="26"/><circle class="g-val ok" id="dashCpuGauge" cx="30" cy="30" r="26" stroke-dasharray="52 164"/></svg>
+                    <div class="g-center"><div class="g-num num" id="dashCpuNum">--%</div></div>
+                  </div>
+                  <div class="g-label" id="dashCpuLbl">CPU</div>
+                </div>
+                <div>
+                  <div class="gauge">
+                    <svg viewBox="0 0 60 60"><circle class="g-ring" cx="30" cy="30" r="26"/><circle class="g-val warn" id="dashMemGauge" cx="30" cy="30" r="26" stroke-dasharray="100 164"/></svg>
+                    <div class="g-center"><div class="g-num num" id="dashMemNum">--%</div></div>
+                  </div>
+                  <div class="g-label" id="dashMemLbl">内存</div>
+                </div>
+                <div>
+                  <div class="gauge">
+                    <svg viewBox="0 0 60 60"><circle class="g-ring" cx="30" cy="30" r="26"/><circle class="g-val" id="dashDiskGauge" cx="30" cy="30" r="26" stroke-dasharray="79 164"/></svg>
+                    <div class="g-center"><div class="g-num num" id="dashDiskNum">--%</div></div>
+                  </div>
+                  <div class="g-label" id="dashDiskLbl">存储</div>
+                </div>
+                <div style="flex:1;min-width:220px;align-self:center">
+                  <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--om-text-3);margin-bottom:6px"><span>网络 · 实时</span><span class="num" id="dashNet">-- · -- MB/s</span></div>
+                  <svg class="chart" viewBox="0 0 400 90" preserveAspectRatio="none" style="height:90px">
+                    <defs><linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="var(--om-primary)" stop-opacity=".35"/>
+                      <stop offset="100%" stop-color="var(--om-primary)" stop-opacity="0"/>
+                    </linearGradient></defs>
+                    <path fill="url(#sparkGrad)" d="M0,70 L40,58 L80,64 L120,40 L160,52 L200,30 L240,44 L280,22 L320,36 L360,18 L400,28 L400,90 L0,90 Z"/>
+                    <polyline fill="none" stroke="var(--om-primary)" stroke-width="2" points="0,70 40,58 80,64 120,40 160,52 200,30 240,44 280,22 320,36 360,18 400,28"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="qk-containers">
+                <div id="qkContainers">
+                  <div class="qk-row"><span class="qk-name text-faint">容器状态加载中…</span></div>
+                </div>
+                <button class="card-link" data-nav="monitor" style="align-self:flex-start;margin-top:6px">全部容器 <svg class="ic"><use href="#i-chev-d"/></svg></button>
+              </div>
+            </div>
+          </article>
+
+          <!-- 快捷导航（大版面 · 悬浮切分类 · 突出快） -->
+          <article class="card lift col-12" id="quickNavCard" data-widget="quicknav">
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-bookmark"/></svg>快捷导航</h3>
+              <span class="chip no-dot primary"><svg class="ic" style="width:11px;height:11px"><use href="#i-zap"/></svg>极速直达</span>
+              <div class="tabs" data-hover-tabs id="dashBmTabs" style="margin-left:auto"></div>
+              <button class="card-link" data-nav="bookmarks">管理 <svg class="ic"><use href="#i-chev-d"/></svg></button>
+            </div>
+            <div class="card-pad">
+              <div id="quickNavPanels"></div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:11px;color:var(--om-text-3);flex-wrap:wrap">
+                <svg class="ic" style="width:13px;height:13px"><use href="#i-zap"/></svg>
+                <span>悬浮分类即可切换</span><span>·</span>
+                <span>点击分类锁定，再点解锁</span><span>·</span>
+                <span>⌘+1～9 打开当前分类前 9 个</span><span>·</span>
+                <span>编辑书签请前往快捷导航页</span>
+              </div>
+            </div>
+          </article>
+
+          <!-- 日历 -->
+          <article class="card lift col-4" data-widget="calendar">
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-clock"/></svg>日历</h3>
+              <div style="margin-left:auto;display:flex;align-items:center;gap:2px">
+                <button class="icon-btn-xs" id="calPrev" title="上一月"><svg class="ic" style="transform:rotate(90deg)"><use href="#i-chev-d"/></svg></button>
+                <span class="num" id="calLabel" style="font-size:12px;font-weight:600;padding:0 6px">…</span>
+                <button class="icon-btn-xs" id="calNext" title="下一月"><svg class="ic" style="transform:rotate(-90deg)"><use href="#i-chev-d"/></svg></button>
+              </div>
+            </div>
+            <div class="card-pad">
+              <div class="cal-grid" id="calGrid"></div>
+              <div style="margin-top:12px;font-size:12px;color:var(--om-text-3);display:flex;align-items:center;gap:6px">
+                <svg class="ic" style="width:13px;height:13px"><use href="#i-check"/></svg>
+                点击日期查看 / 编辑当日计划（未来日期自动填充空模板）
+              </div>
+            </div>
+          </article>
+
+          <!-- 每日单词 -->
+          <article class="card lift col-4" data-widget="word">
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-note"/></svg>每日单词</h3>
+              <span class="chip no-dot" id="wordDateChip">…</span>
+            </div>
+            <div class="card-pad">
+              <div class="word-head">
+                <span class="word" id="wordText">serendipity</span>
+                <button class="icon-btn-xs" id="wordSpeak" title="发音"><svg class="ic"><use href="#i-volume"/></svg></button>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+                <span class="phon num" id="wordPhon">/ˌserənˈdɪpəti/</span>
+                <span class="pos" id="wordPos">noun</span>
+              </div>
+              <p class="sense" id="wordSense"><b>n.</b> 意外发现珍宝的运气；机缘巧合</p>
+              <p style="font-size:12.5px;color:var(--om-text-2);margin-top:4px" id="wordTrans">机缘巧合，不期而遇的美好</p>
+              <div class="ex">
+                <div class="ex-en" id="wordExEn">“Meeting you was pure serendipity.”</div>
+              </div>
+              <div class="word-actions">
+                <button class="btn btn-outline btn-sm" id="wordStar"><svg class="ic"><use href="#i-star"/></svg>加入生词本</button>
+                <button class="btn btn-ghost btn-sm" id="wordShuffle"><svg class="ic"><use href="#i-refresh"/></svg>换一个</button>
+              </div>
+            </div>
+          </article>
+
+          <!-- 密码管家摘要 -->
+          <article class="card lift col-4" data-widget="vault">
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-shield"/></svg>密码保险库</h3>
+              <span class="chip success">已加密</span>
+            </div>
+            <div class="card-pad">
+              <div style="display:flex;align-items:center;gap:14px">
+                <div class="lock-ic" style="width:52px;height:52px;border-radius:16px"><svg class="ic" style="width:22px;height:22px"><use href="#i-lock"/></svg></div>
+                <div>
+                  <div style="font-size:20px;font-weight:700" class="num"><span id="dashVaultNum">0</span> <small style="font-size:12px;color:var(--om-text-3);font-weight:400">条凭据</small></div>
+                  <div style="font-size:11px;color:var(--om-text-3)">零知识加密 · 密文仅存于你的数据空间</div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:14px 0">
+                <div class="wx-meta-item"><b class="num">AES</b><span>256-GCM</span></div>
+                <div class="wx-meta-item"><b class="num">PBKDF2</b><span>31 万次迭代</span></div>
+                <div class="wx-meta-item"><b class="num">0</b><span>服务端明文</span></div>
+              </div>
+              <button class="btn btn-primary" style="width:100%" data-nav="vault"><svg class="ic"><use href="#i-key"/></svg>打开保险库</button>
+            </div>
+          </article>
+
+          <!-- 灵感速记（内嵌编辑器 · 默认打开上次笔记） -->
+          <article class="card lift col-8 editor editor-inline" data-widget="quicknote">
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-pen"/></svg>灵感速记</h3>
+              <span class="chip no-dot" id="quickNoteChip" title="当前笔记">加载中…</span>
+              <button class="card-link" id="quickNoteNew" title="在「灵感速记」文件夹新建一篇空白笔记"><svg class="ic"><use href="#i-plus"/></svg>新建笔记</button>
+              <button class="card-link" data-nav="notes">全部笔记 <svg class="ic"><use href="#i-chev-d"/></svg></button>
+            </div>
+            <textarea class="md-src" id="quickNoteSrc" spellcheck="false" placeholder="随手记下灵感，自动保存到知识库…"></textarea>
+            <div class="ed-foot">
+              <span class="num" id="quickNoteStat">0 字</span><span>·</span><span id="quickNoteTime">加载中…</span>
+              <span style="margin-left:auto;display:flex;gap:6px"><span class="chip no-dot" title="保存于知识库「灵感速记」文件夹（系统内置）">#灵感速记</span></span>
+            </div>
+          </article>
+
+          <!-- 今日计划（知识库「每日计划」文件夹 · 按月归档） -->
+          <article class="card lift col-4 editor editor-inline" data-widget="plan">
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-check"/></svg>今日计划</h3>
+              <span class="chip no-dot primary">每日计划 · 按月归档</span>
+            </div>
+            <textarea class="md-src" id="planSrc" spellcheck="false" placeholder="今日计划加载中…"></textarea>
+            <div class="ed-foot">
+              <span class="num" id="planStat">0 / 0</span><span>已完成</span>
+              <div class="bar" style="flex:1;margin-left:10px"><div class="bar-fill ok" id="planBar" style="width:0%"></div></div>
+              <span id="planTime" style="font-size:11px;color:var(--om-text-3)"></span>
+            </div>
+          </article>
+
+          <!-- 实用工具箱 -->
+          <article class="card lift col-12" data-widget="toolbox">
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-wrench"/></svg>实用工具箱</h3>
+              <button class="card-link" data-nav="toolbox">全部工具 <svg class="ic"><use href="#i-chev-d"/></svg></button>
+            </div>
+            <div class="card-pad">
+              <div class="tool-grid" style="grid-template-columns:repeat(6,1fr)">
+                <button class="tool-tile" id="tool-trans"><span class="tt-ic"><svg class="ic"><use href="#i-globe"/></svg></span><span class="tt-name">翻译</span><span class="tt-sub">多语互译</span></button>
+                <button class="tool-tile" id="tool-pass"><span class="tt-ic"><svg class="ic"><use href="#i-key"/></svg></span><span class="tt-name">密码生成</span><span class="tt-sub">高强度随机</span></button>
+                <button class="tool-tile" id="tool-ts"><span class="tt-ic"><svg class="ic"><use href="#i-clock"/></svg></span><span class="tt-name">时间戳转换</span><span class="tt-sub">Unix ⇄ 日期</span></button>
+                <button class="tool-tile" id="tool-qr"><span class="tt-ic"><svg class="ic"><use href="#i-qr"/></svg></span><span class="tt-name">二维码</span><span class="tt-sub">生成与解析</span></button>
+                <button class="tool-tile" id="tool-unit"><span class="tt-ic"><svg class="ic"><use href="#i-swap"/></svg></span><span class="tt-name">单位换算</span><span class="tt-sub">容量 · 速率</span></button>
+                <button class="tool-tile" id="tool-json"><span class="tt-ic"><svg class="ic"><use href="#i-code"/></svg></span><span class="tt-name">JSON 格式化</span><span class="tt-sub">校验 · 压缩</span></button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>

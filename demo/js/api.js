@@ -85,3 +85,6 @@ const API = (() => {
     },
   };
 })();
+
+export { API };
+window.API = API;

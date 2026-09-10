@@ -48,10 +48,11 @@
 | 层 | 技术 |
 |---|---|
 | 后端 | Python 3.11 · FastAPI · SQLAlchemy |
-| 前端 | 原生 HTML/CSS/JS（无构建步骤，单文件架构）|
+| 前端 | 原生 HTML/CSS/JS（无打包器；ESM + hash 路由）|
 | 存储 | 文件引擎 / SQLite / MySQL / PostgreSQL（可切换，自动迁移）|
+| 会话 | `data/sessions.sqlite`（WAL，可多 worker 共享）|
 | 加密 | cryptography (Fernet) |
-| 部署 | Docker（官方镜像 python:3.11-slim）|
+| 部署 | Docker（官方镜像 python:3.11-slim）；公网用 `docker-compose.tls.yml` |
 
 ---
 
@@ -67,12 +68,11 @@ docker build -t omnihome:latest .
 docker run -d --name omnihome --restart unless-stopped \
   -p 8000:8000 \
   -v /path/to/data:/app/data \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
   -e TZ=Asia/Shanghai \
   omnihome:latest
 ```
 
-> `docker.sock` 只读挂载用于容器监控（**需要容器监控则挂载，不需要可去掉**）。
+> 默认**不**挂载 `docker.sock`。需要容器监控时再加上 `-v /var/run/docker.sock:/var/run/docker.sock:ro`。
 
 ### 方式二：Docker Compose
 
@@ -83,7 +83,7 @@ docker compose up -d
 ### 方式三：本地运行（开发）
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.lock.txt
 python3 backend/main.py
 # 或 uvicorn backend.main:app --port 8000
 ```
@@ -135,21 +135,24 @@ python3 backend/main.py
 
 ```
 ├── backend/                 # FastAPI 后端
-│   ├── main.py              # 入口（认证 + 静态资源 + 路由）
-│   ├── routes.py            # 全部 API 路由
-│   ├── storage.py           # 存储引擎（文件/SQLite/MySQL/PostgreSQL）
-│   ├── sessions.py          # 会话与口令
+│   ├── main.py              # 应用工厂、静态资源、CSP
+│   ├── routers/             # 按域拆分的 API
+│   ├── store/               # 存储引擎内部（file/db 迁移）
+│   ├── sessions.py          # 口令 + SQLite 会话
 │   ├── secretbox.py         # AI 密钥加密（Fernet）
-│   ├── app_version.py       # 版本号唯一来源（打包/构建/API 均读取）
+│   ├── app_version.py       # VERSION；CHANGELOG.md 由它读取
 │   └── data/                # 内置数据（词库等）
-├── demo/                    # 前端（原生 JS 单页）
-│   ├── index.html
-│   ├── css/components.css
-│   └── js/                  # 模块化 JS（notes/bookmarks/plan/monitor…）
+├── demo/                    # 生产前端（原生 ESM，无打包器）
+│   ├── index.html           # 壳层；views 由服务端注入
+│   ├── views/               # 主视图与弹层片段
+│   ├── css/                 # theme + 按功能拆分的 components
+│   └── js/                  # boot.js 入口 + notes/ 子模块 + vendor
+├── CHANGELOG.md
 ├── Dockerfile
-├── docker-compose.yml       # 通用部署
-├── docker-compose.nas.yml   # NAS 部署（含数据卷示例）
-├── requirements.txt
+├── docker-compose.yml       # 通用部署（默认不挂 docker.sock）
+├── docker-compose.tls.yml   # Caddy HTTPS 示例
+├── Caddyfile
+├── requirements.lock.txt
 └── omnihome-extension.zip   # 浏览器扩展安装包（可选，随包分发）
 ```
 
@@ -157,9 +160,10 @@ python3 backend/main.py
 
 ## 🔄 版本管理
 
-- 版本号唯一来源：`backend/app_version.py`（`VERSION` / `STAGE`）
+- 版本号唯一来源：`backend/app_version.py`（`VERSION` / `STAGE`），更新日志在仓库根 `CHANGELOG.md`
 - 镜像同时打 `omnihome:<版本>` 与 `omnihome:latest` 双标签
 - 应用内「设置 → 关于」查看完整更新日志
+- 静态资源 `?v=` 由服务端按 VERSION 注入，不要手改 HTML 里的版本戳
 
 ## 📄 子项目
 
@@ -173,7 +177,7 @@ python3 backend/main.py
 
 - **扩展打包**：每次发版需将最新 `omnihome-extension.zip` 放构建目录根再构建镜像，否则容器内仍是旧版
 - **密钥安全**：AI 接口密钥加密落库；`*.pem`（扩展签名私钥）**切勿提交到代码仓库**
-- 容器监控依赖 `docker.sock`，只读挂载即可
+- 容器监控需要时再挂 `docker.sock`（compose 里取消注释）；公网务必 HTTPS（见 `docker-compose.tls.yml`）
 
 ## 📜 许可证
 
