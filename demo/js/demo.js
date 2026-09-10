@@ -14,14 +14,30 @@ function viewFromHash(){
 }
 function goView(name, fromHash){
   if (!name || !document.querySelector('.view[data-view="'+name+'"]')) name = 'dashboard';
+  if (name === 'notes' && document.body.dataset.view === 'notes'
+      && document.body.classList.contains('kb-phone-editor') && (window.isPhone && isPhone())){
+    if (typeof window.exitKbEditor === 'function') exitKbEditor(false);
+    if (typeof window.closePhoneChrome === 'function') closePhoneChrome();
+    return;
+  }
   $$('.view').forEach(v => v.classList.toggle('active', v.dataset.view === name));
   $$('.nav-item[data-nav]').forEach(b => b.classList.toggle('active', b.dataset.nav === name));
   const nav = $(`.nav-item[data-nav="${name}"]`);
   if (nav) $('#crumbTitle').textContent = nav.dataset.title;
   document.body.dataset.view = name;
   $('#collapseBtn')?.classList.remove('kb-mode');
-  $('#collapseBtn')?.setAttribute('title', '折叠 / 展开侧边栏');
+  $('#collapseBtn')?.setAttribute('title', (window.isPhone && isPhone()) ? '打开菜单' : '折叠 / 展开侧边栏');
   $('#userMenu').classList.remove('open');
+  if (typeof window.closePhoneChrome === 'function') closePhoneChrome();
+  $$('#phoneNav [data-nav]').forEach(b => b.classList.toggle('active', b.dataset.nav === name));
+  $('#phoneMoreBtn')?.classList.toggle('active', name === 'monitor' || name === 'toolbox');
+  if (name !== 'notes'){
+    document.body.classList.remove('kb-phone-editor', 'kb-phone-list');
+    if (history.state && history.state.kbEditor)
+      history.replaceState(null, '', location.pathname + location.search + location.hash);
+  } else if (window.isPhone && isPhone() && !document.body.classList.contains('kb-phone-editor')){
+    document.body.classList.add('kb-phone-list');
+  }
   window.scrollTo({ top: 0 });
   if (!fromHash){
     const next = '#/' + name;
@@ -37,6 +53,10 @@ window.addEventListener('hashchange', () => {
 
 /* ---------- 折叠按钮：始终折叠左侧导航栏（知识库目录不由此按钮控制） ---------- */
 $('#collapseBtn').addEventListener('click', () => {
+  if (window.isPhone && isPhone()){
+    document.body.classList.toggle('nav-open');
+    return;
+  }
   document.body.classList.toggle('sidebar-collapsed');
 });
 
@@ -121,6 +141,7 @@ function openSettings(open){
 }
 $$('[data-open-settings]').forEach(el => el.addEventListener('click', () => {
   $('#userMenu').classList.remove('open');
+  if (typeof window.closePhoneChrome === 'function') closePhoneChrome();
   openSettings(true);
 }));
 $('#settingsClose').addEventListener('click', () => openSettings(false));
@@ -158,7 +179,10 @@ $$('[data-hover-tabs]').forEach(group => {
     panels.forEach(p => p.hidden = p.dataset.qpanel !== tab.dataset.cat);
   };
   tabs.forEach(tab => {
-    tab.addEventListener('mouseenter', () => activate(tab));
+    tab.addEventListener('mouseenter', () => {
+      if (window.isPhone && isPhone()) return;
+      activate(tab);
+    });
     tab.addEventListener('click', () => activate(tab));
   });
 });
@@ -216,7 +240,10 @@ document.addEventListener('keydown', e => {
     e.preventDefault();
     $('#globalSearch').focus();
   }
-  if (key === 'Escape') openSettings(false);
+  if (key === 'Escape'){
+    if (typeof window.closePhoneChrome === 'function') closePhoneChrome();
+    openSettings(false);
+  }
 });
 
 /* ---------- 顶栏实时时钟（精确到秒；按天气定位城市时区，未定位用本机时区） ---------- */

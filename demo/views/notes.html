@@ -13,6 +13,7 @@
                 </button>
                 <div class="kb-tree-meta" id="notesCount">加载中…</div>
               </div>
+              <button class="kb-tree-sel kb-phone-sel" id="kbPhoneSel" title="多选">选择</button>
               <button class="kb-tree-overflow" id="notesOverflowBtn" title="更多操作">
                 <svg class="ic"><use href="#i-more"/></svg>
               </button>
@@ -35,6 +36,12 @@
           <!-- 右：编辑区（顶栏由全局 .topbar 承载，跨视图一致） -->
           <div class="kb-editor">
             <article class="card editor" id="edCard">
+              <div class="ed-phone-head" id="kbPhoneHead">
+                <button type="button" class="kb-editor-back" id="kbPhoneBack" title="返回目录">
+                  <svg class="ic"><use href="#i-chev-l"/></svg>
+                </button>
+                <span class="kb-editor-page">笔记</span>
+              </div>
               <!-- 标签页直接置顶（原 Markdown 标识/导出/删除区已移除，导出与删除入口收进笔记悬浮 ⋯ 菜单；面包屑在底部状态栏） -->
               <!-- 多笔记标签页：点击切换，× 关闭；支持多开对照编辑 -->
               <div class="ed-tabs" id="edTabs" hidden></div>
@@ -62,8 +69,8 @@
                 <button class="ed-btn" data-act="outline" id="mdOutlineBtn" title="文档大纲"><svg class="ic"><use href="#i-list"/></svg></button>
                 <button class="ed-btn" data-act="find" id="mdFindBtn" title="查找 / 替换"><svg class="ic"><use href="#i-search"/></svg></button>
                 <div class="seg" style="margin-left:auto" id="edModeSeg">
-                  <button class="seg-btn" data-ed-mode="edit">实时</button>
-                  <button class="seg-btn active" data-ed-mode="split">分屏</button>
+                  <button class="seg-btn active" data-ed-mode="edit">实时</button>
+                  <button class="seg-btn" data-ed-mode="split">分屏</button>
                   <button class="seg-btn" data-ed-mode="preview">预览</button>
                 </div>
               </div>

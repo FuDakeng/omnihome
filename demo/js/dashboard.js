@@ -193,7 +193,9 @@ const Dash = (() => {
     grid.classList.toggle('editing', on);
     $('#dashEditBtn').innerHTML = on
       ? '<svg class="ic"><use href="#i-check"/></svg>完成'
-      : '<svg class="ic"><use href="#i-sliders"/></svg>编辑布局';
+      : (window.isPhone && isPhone()
+        ? '<svg class="ic"><use href="#i-sliders"/></svg>显示组件'
+        : '<svg class="ic"><use href="#i-sliders"/></svg>编辑布局');
     $('#dashAddBtn').hidden = !on;
     cards().forEach(toggleCardTools);
     if (!on){
@@ -268,6 +270,7 @@ const Dash = (() => {
   /* 只有按住把手才允许拖动，避免编辑态误触卡片内的输入 */
   function onGripDown(e){
     if (!editing) return;
+    if (window.isPhone && isPhone()) return;
     const grip = e.target.closest('.dash-grip');
     if (!grip) return;
     const card = grip.closest('[data-widget]');
@@ -374,6 +377,7 @@ const Dash = (() => {
     });
 
     App.onEnter(load);
+    setEditing(false);
   }
 
   init();

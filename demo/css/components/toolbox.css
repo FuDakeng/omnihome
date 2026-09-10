@@ -1,5 +1,6 @@
 /* ---------- 实用工具箱 ---------- */
 .tool-grid{ display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--om-space-3); }
+[data-widget="toolbox"] .tool-grid{ grid-template-columns: repeat(6, 1fr); }
 .tool-tile{
   display: flex; flex-direction: column; gap: 8px;
   padding: var(--om-space-4);

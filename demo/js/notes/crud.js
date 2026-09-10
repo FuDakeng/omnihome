@@ -27,17 +27,15 @@ import { S } from './state.js';
       S.hydrateNow();   // 附件图片水合（鉴权取图 → data URL）
       S.renderTree();
       S.renderTabs();
-            S.updateCrumb();
+      S.updateCrumb();
       S.updateStat();
-      /* 打开笔记后自动渲染右侧大纲（用户可点大纲按钮隐藏）。
-         renderOutline/openOutline 定义在 init() 内部，此处不可见，故内联渲染。 */
+      if (typeof window.enterKbEditor === 'function') enterKbEditor(true);
+      if (window.isPhone && isPhone() && S.currentMode === 'split') S.setMode('edit');
       const ob = $('#mdOutlineBody');
       if (ob) ob.innerHTML = outlineBodyHtml($('#edSrc').value);
       const op = $('#mdOutlinePanel');
-      /* 面板收起态不再用 hidden 判断（改由宽度动画控制），这里只在首次打开时滑出 */
-      if (op && op.hidden){
+      if (op && op.hidden && !(window.isPhone && isPhone())){
         op.hidden = false;
-        /* 下一帧再加 open 类，display 恢复后才能触发滑入动画 */
         requestAnimationFrame(() => op.classList.add('open'));
       }
     } catch (e) {
@@ -63,7 +61,7 @@ import { S } from './state.js';
       S.idx.unshift(meta);
       S.renderTree();
       await S.open(meta.id);
-      goView('notes');
+      if (document.body.dataset.view !== 'notes') goView('notes');
       $('#edTitle').focus();
       $('#edTitle').select();
     } catch (e) { showToast(e.message, 'err'); }
@@ -299,7 +297,7 @@ import { S } from './state.js';
           if (f === o || f.startsWith(o + '/')){ noteMoves.push([n, repath(f, o, nw)]); break; }
         }
       }
-      await API.put('/api/notes/folders', { S.folders: fl });
+      await API.put('/api/notes/folders', { folders: fl });
       for (const [n, nf] of noteMoves){
         await API.put('/api/notes/' + n.id, { folder: nf });
         n.folder = nf;

@@ -45,6 +45,12 @@
   --om-sidebar-w: 250px;
   --om-sidebar-w-rail: 76px;
   --om-topbar-h: 64px;
+  --om-bottom-nav-h: 56px;
+  --om-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --om-safe-top: env(safe-area-inset-top, 0px);
+  --om-app-h: 100vh;
+  --om-bp-phone: 768px;
+  --om-bp-tablet: 1024px;
 
   /* ---------- 字体 ---------- */
   --om-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
@@ -116,6 +122,10 @@
    ============================================================ */
 *, *::before, *::after{ box-sizing: border-box; }
 
+@supports (height: 100dvh){
+  :root{ --om-app-h: 100dvh; }
+}
+
 html{ -webkit-text-size-adjust: 100%; }
 
 body{
@@ -127,9 +137,12 @@ body{
   background:
     radial-gradient(1200px 500px at 85% -10%, var(--om-primary-ghost), transparent 60%),
     var(--om-bg);
-  background-attachment: fixed;
+  background-attachment: scroll;
   transition: background-color var(--om-t-base), color var(--om-t-base);
   -webkit-font-smoothing: antialiased;
+}
+@media (min-width: 769px){
+  body{ background-attachment: fixed; }
 }
 
 ::selection{ background: var(--om-primary-ghost); }

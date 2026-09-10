@@ -290,6 +290,7 @@ const Bookmarks = (() => {
     };
     $$('.tab[data-cat]', group).forEach(tab => {
       if (hover) tab.addEventListener('mouseenter', () => {
+        if (window.isPhone && isPhone()) return;
         /* 已锁定且悬浮的不是锁定项：不切换 */
         if (lockedCat && tab.dataset.cat !== lockedCat) return;
         activate(tab);
