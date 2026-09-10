@@ -1,7 +1,7 @@
 /* ============================================================
    OmniHome 插件 · 服务端 API 封装（MV3 ES Module）
-   - 凭证存 chrome.storage.local：{ server, username, password, token }
-   - 401 自动用保存的密码重登一次；仍失败则标记未登录
+   - 凭证存 chrome.storage.local：{ server, username, token, user }
+   - 不保存登录密码。401 时清 token，提示重新登录。
    ============================================================ */
 
 const KEY = 'omni_auth';
@@ -12,7 +12,9 @@ export async function getAuth(){
 }
 
 export async function saveAuth(auth){
-  await chrome.storage.local.set({ [KEY]: auth });
+  const safe = { ...(auth || {}) };
+  delete safe.password;
+  await chrome.storage.local.set({ [KEY]: safe });
 }
 
 export async function clearAuth(){
@@ -37,10 +39,9 @@ export async function login(server, username, password){
   if (!res.ok) throw new Error('登录失败（HTTP ' + res.status + '）');
   const d = await res.json();
   if (!d.token) throw new Error('服务器响应异常（无 token）');
-  return { server, username, password, token: d.token, user: d.user || {} };
+  return { server, username, token: d.token, user: d.user || {} };
 }
 
-/* 仅验证地址可达且是 OmniHome 服务（不需要账号） */
 export async function testConnection(server){
   server = normServer(server);
   if (!server) throw new Error('请填写服务器地址');
@@ -52,8 +53,7 @@ export async function testConnection(server){
   return d;
 }
 
-/* 带鉴权的请求；401 时自动重登一次 */
-export async function api(method, path, body, _retried){
+export async function api(method, path, body){
   const auth = await getAuth();
   if (!auth || !auth.token) throw new Error('NO_AUTH');
   const headers = { 'Authorization': 'Bearer ' + auth.token };
@@ -67,14 +67,9 @@ export async function api(method, path, body, _retried){
   } catch (e) {
     throw new Error('无法连接服务器，请检查地址与网络');
   }
-  if (res.status === 401 && !_retried && auth.username && auth.password){
-    try {
-      const fresh = await login(auth.server, auth.username, auth.password);
-      await saveAuth(fresh);
-      return api(method, path, body, true);
-    } catch (e) {
-      throw new Error('会话已失效，请重新登录');
-    }
+  if (res.status === 401){
+    await saveAuth({ server: auth.server, username: auth.username, token: '', user: auth.user || {} });
+    throw new Error('会话已失效，请重新登录');
   }
   if (!res.ok){
     let msg = 'HTTP ' + res.status;

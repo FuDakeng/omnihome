@@ -379,3 +379,6 @@ const Dash = (() => {
   init();
   return { load };
 })();
+
+export { Dash };
+window.Dash = Dash;

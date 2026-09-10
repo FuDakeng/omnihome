@@ -1,16 +1,17 @@
-# 万事屋 OmniDesk · 自托管个人门户
+# 万事屋 OmniHome · 自托管个人门户
 # 构建：docker build -t omnihome:latest .
 # 运行：docker compose up -d
 FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY requirements.lock.txt requirements.txt ./
 # 阿里云 PyPI 镜像：NAS 在国内，直连官方源构建极慢甚至超时（部署文档硬性要求保留）
-RUN pip install --no-cache-dir -r requirements.txt \
+RUN pip install --no-cache-dir -r requirements.lock.txt \
     -i https://mirrors.aliyun.com/pypi/simple/ \
     --trusted-host mirrors.aliyun.com
 
+COPY CHANGELOG.md ./
 COPY backend ./backend
 COPY demo ./demo
 COPY obsidian-plugin ./obsidian-plugin
@@ -27,4 +28,6 @@ EXPOSE 8000
 
 ENV PYTHONUNBUFFERED=1
 
+# 默认单进程。会话已入库、文件按路径加锁后可用 UVICORN_WORKERS>1
+# （建议仅在 sqlite/db 引擎下开启）。
 CMD ["python", "backend/main.py"]

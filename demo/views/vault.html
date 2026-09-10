@@ -1,0 +1,45 @@
+      <!-- ==================== 视图：密码保险库 ==================== -->
+      <section class="view" data-view="vault">
+        <div class="view-head">
+          <div>
+            <h2 class="vh-title">密码保险库</h2>
+            <div class="vh-sub">端到端加密 · 主密钥由主密码派生（PBKDF2 → AES-256-GCM），永不离开浏览器</div>
+          </div>
+          <div class="vh-actions">
+            <button class="btn btn-primary btn-sm" id="vaultNew"><svg class="ic"><use href="#i-plus"/></svg>新增凭据</button>
+          </div>
+        </div>
+
+        <div class="vault-wrap card" id="vaultWrap">
+          <div class="lock-panel">
+            <div class="lock-ic"><svg class="ic"><use href="#i-lock"/></svg></div>
+            <h3 class="lock-title">保险库已锁定</h3>
+            <p class="lock-sub">输入主密码解锁。连续 5 次错误将冻结 10 分钟并通知管理员。</p>
+            <div class="lock-form">
+              <div class="input-wrap">
+                <svg class="ic"><use href="#i-key"/></svg>
+                <input class="input" type="password" id="masterPass" placeholder="主密码" autocomplete="new-password">
+              </div>
+              <div class="input-wrap" id="masterPass2Wrap" hidden>
+                <svg class="ic"><use href="#i-key"/></svg>
+                <input class="input" type="password" id="masterPass2" placeholder="再次输入主密码（首次设置）">
+              </div>
+              <button class="btn btn-primary" id="unlockBtn"><svg class="ic"><use href="#i-shield"/></svg>解锁</button>
+            </div>
+            <div class="lock-hint"><svg class="ic"><use href="#i-shield"/></svg>零知识架构 · 服务端无法读取你的任何密码</div>
+          </div>
+
+          <div class="vault-body">
+            <div class="card-head" style="border-bottom:1px solid var(--om-border)">
+              <h3 class="card-title">全部凭据</h3>
+              <span class="chip success" id="vaultCount">0 条</span>
+              <div class="sec-banner" style="margin-left:auto;padding:6px 12px">
+                <svg class="ic"><use href="#i-shield"/></svg>AES-256-GCM 加密 · 30 天无异常访问
+              </div>
+            </div>
+            <div id="vaultItems">
+              <div style="font-size:12px;color:var(--om-text-3);padding:24px 0;text-align:center">解锁后展示凭据列表</div>
+            </div>
+          </div>
+        </div>
+      </section>

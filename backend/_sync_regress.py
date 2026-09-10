@@ -856,16 +856,21 @@ def run_suite(engine):
     check(f"[{engine}] 会话落盘后可恢复", sessions.get_session_user(st) == "t", "reload")
 
 
-try:
-    run_suite("file")
-    run_suite("sqlite")
-finally:
-    shutil.rmtree(TMP, ignore_errors=True)
+def main():
+    try:
+        run_suite("file")
+        run_suite("sqlite")
+    finally:
+        shutil.rmtree(TMP, ignore_errors=True)
 
-print(f"\n==== 结果：PASS {len(OK)} / FAIL {len(FAIL)} ====")
-if FAIL:
-    print("失败项：")
-    for f in FAIL:
-        print("  -", f)
-    raise SystemExit(1)
-print("全部通过 ✅")
+    print(f"\n==== 结果：PASS {len(OK)} / FAIL {len(FAIL)} ====")
+    if FAIL:
+        print("失败项：")
+        for f in FAIL:
+            print("  -", f)
+        raise SystemExit(1)
+    print("全部通过 ✅")
+
+
+if __name__ == "__main__":
+    main()

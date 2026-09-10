@@ -1,0 +1,31 @@
+# HTTPS 反代示例（Caddy）。公网或 Obsidian 同步务必走 TLS。
+#
+# 用法：
+#   1. 把 Caddyfile 里的 omni.example.com 换成你的域名
+#   2. docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
+#
+# 门户容器仍监听 8000；对外只暴露 80/443。
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: omnihome-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - omnihome
+
+  omnihome:
+    ports: !reset []
+    expose:
+      - "8000"
+
+volumes:
+  caddy_data:
+  caddy_config:

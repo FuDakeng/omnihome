@@ -338,3 +338,6 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   if ($('#confirmMask').classList.contains('open')) App._finishConfirm(false);
 });
+
+export { App };
+window.App = App;

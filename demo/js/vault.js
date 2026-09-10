@@ -228,3 +228,6 @@ App.onEnter(() => {
     if (dash) dash.textContent = n;
   }).catch(() => {});
 });
+
+export { Vault };
+window.Vault = Vault;

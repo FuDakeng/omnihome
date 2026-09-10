@@ -1,0 +1,108 @@
+      <!-- ==================== 视图：知识库 ==================== -->
+      <section class="view" data-view="notes">
+        <div class="kb-layout">
+          <!-- 左：目录树列 -->
+          <div class="kb-tree">
+            <header class="kb-tree-head">
+              <div class="kb-tree-titleline">
+                <h2 class="kb-tree-title">知识库</h2>
+                <button type="button" class="kb-vault-switch" id="kbVaultBtn" title="切换笔记仓库">
+                  <svg class="ic"><use href="#i-inbox"/></svg>
+                  <span id="kbVaultName">默认仓库</span>
+                  <svg class="ic kb-vault-chev"><use href="#i-chev-d"/></svg>
+                </button>
+                <div class="kb-tree-meta" id="notesCount">加载中…</div>
+              </div>
+              <button class="kb-tree-overflow" id="notesOverflowBtn" title="更多操作">
+                <svg class="ic"><use href="#i-more"/></svg>
+              </button>
+            </header>
+            <div class="kb-tree-body" id="noteTree">
+              <div class="kb-tree-empty">加载中…</div>
+            </div>
+            <!-- 树列底部：回收站入口（v0.2.25 从树头移入；笔记/文件夹拖到此处快速删除进回收站） -->
+            <div class="kb-tree-foot" id="kbTreeFoot">
+              <button class="kb-tree-sel" id="kbTrashBtn" title="回收站：查看被删除的笔记，可恢复或永久删除；也可把笔记/文件夹拖到此处快速删除"><svg class="ic"><use href="#i-trash"/></svg>回收站<span class="drop-count num" id="kbTrashBadge" hidden>0</span></button>
+            </div>
+            <!-- 多选操作栏：⌘/Ctrl 选中笔记/文件夹后滑出，提供批量删除与取消 -->
+            <div class="kb-batch" id="kbBatchBar" hidden>
+              <span id="kbBatchCount"></span>
+              <button class="btn btn-sm btn-outline-danger" id="kbBatchDel">删除</button>
+              <button class="btn btn-sm btn-ghost" id="kbBatchClear">取消</button>
+            </div>
+          </div>
+
+          <!-- 右：编辑区（顶栏由全局 .topbar 承载，跨视图一致） -->
+          <div class="kb-editor">
+            <article class="card editor" id="edCard">
+              <!-- 标签页直接置顶（原 Markdown 标识/导出/删除区已移除，导出与删除入口收进笔记悬浮 ⋯ 菜单；面包屑在底部状态栏） -->
+              <!-- 多笔记标签页：点击切换，× 关闭；支持多开对照编辑 -->
+              <div class="ed-tabs" id="edTabs" hidden></div>
+              <input class="ed-title" id="edTitle" value="" placeholder="笔记标题…">
+              <div class="ed-bar">
+                <button class="ed-btn" data-act="bold" title="加粗"><b>B</b></button>
+                <button class="ed-btn" data-act="italic" title="斜体"><i>I</i></button>
+                <button class="ed-btn" data-act="strike" title="删除线"><s>S</s></button>
+                <button class="ed-btn" data-act="inline-code" title="行内代码"><code>&lt;/&gt;</code></button>
+                <span class="ed-div"></span>
+                <button class="ed-btn" data-act="h1" title="一级标题">H1</button>
+                <button class="ed-btn" data-act="h2" title="二级标题">H2</button>
+                <button class="ed-btn" data-act="h3" title="三级标题">H3</button>
+                <span class="ed-div"></span>
+                <button class="ed-btn" data-act="ul" title="无序列表">•≡</button>
+                <button class="ed-btn" data-act="ol" title="有序列表">1.</button>
+                <button class="ed-btn" data-act="task" title="任务列表">☐</button>
+                <button class="ed-btn" data-act="quote" title="引用">❝</button>
+                <span class="ed-div"></span>
+                <button class="ed-btn" data-act="code" title="代码块"><svg class="ic"><use href="#i-code"/></svg></button>
+                <button class="ed-btn" data-act="link" title="链接"><svg class="ic"><use href="#i-link"/></svg></button>
+                <button class="ed-btn" data-act="image" title="图片"><svg class="ic"><use href="#i-image"/></svg></button>
+                <button class="ed-btn" data-act="table" title="插入表格"><svg class="ic"><use href="#i-table"/></svg></button>
+                <span class="ed-div"></span>
+                <button class="ed-btn" data-act="outline" id="mdOutlineBtn" title="文档大纲"><svg class="ic"><use href="#i-list"/></svg></button>
+                <button class="ed-btn" data-act="find" id="mdFindBtn" title="查找 / 替换"><svg class="ic"><use href="#i-search"/></svg></button>
+                <div class="seg" style="margin-left:auto" id="edModeSeg">
+                  <button class="seg-btn" data-ed-mode="edit">实时</button>
+                  <button class="seg-btn active" data-ed-mode="split">分屏</button>
+                  <button class="seg-btn" data-ed-mode="preview">预览</button>
+                </div>
+              </div>
+              <!-- 查找 / 替换条 -->
+              <div class="md-findbar" id="mdFindBar" hidden>
+                <svg class="ic"><use href="#i-search"/></svg>
+                <input id="mdFindInput" placeholder="查找…" autocomplete="off">
+                <button class="btn btn-sm btn-ghost md-find-nav" id="mdFindPrev" title="上一个匹配（Shift+Enter）">↑ 上一个</button>
+                <button class="btn btn-sm btn-ghost md-find-nav" id="mdFindNext" title="下一个匹配（Enter）">下一个 ↓</button>
+                <span class="md-find-count num" id="mdFindCount">0 / 0</span>
+                <span class="md-find-scope" id="mdFindScope" hidden>选区内</span>
+                <span class="ed-div"></span>
+                <input id="mdReplaceInput" placeholder="替换为…" autocomplete="off">
+                <button class="btn btn-ghost btn-sm" id="mdReplaceOne" title="替换当前">替换</button>
+                <button class="btn btn-ghost btn-sm" id="mdReplaceAll" title="全部替换">全部</button>
+                <button class="icon-btn-xs" id="mdFindClose" title="关闭"><svg class="ic"><use href="#i-close"/></svg></button>
+              </div>
+              <div class="ed-body">
+                <textarea class="md-src" id="edSrc" spellcheck="false"></textarea>
+                <div class="md-preview" id="edPreview">
+                  <p style="color:var(--om-text-3)">从左侧列表选择一篇笔记开始编辑…</p>
+                </div>
+              </div>
+              <div class="ed-foot">
+                <div class="ed-crumb" id="edCrumb">
+                  <span class="ed-crumb-item" data-crumb="root">知识库</span>
+                </div>
+                <span class="ed-foot-status" id="edFootStatus"><span class="ed-foot-dot"></span>已保存 · <span id="edStat">0 字</span></span>
+                <span class="ed-foot-time" id="edFootTime">尚未保存</span>
+              </div>
+            </article>
+          </div>
+          <!-- 文档大纲（右侧固定栏，样式与左侧目录一致；收起时宽度塌缩为 0，编辑器平滑变宽） -->
+          <div class="md-outline" id="mdOutlinePanel" hidden>
+            <div class="md-outline-head">
+              <span>文档大纲</span>
+              <button class="icon-btn-xs" id="mdOutlineClose" title="关闭"><svg class="ic"><use href="#i-close"/></svg></button>
+            </div>
+            <div class="md-outline-body" id="mdOutlineBody"></div>
+          </div>
+        </div>
+      </section>

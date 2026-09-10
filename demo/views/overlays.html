@@ -1,0 +1,626 @@
+<!-- ==================== 切换用户弹窗 ==================== -->
+<div class="modal-mask" id="switchMask">
+  <div class="modal">
+    <div class="m-head">
+      <h3>切换用户</h3>
+      <p>已绑定账号在有效期内免密切换；手动验证成功后双向绑定</p>
+    </div>
+    <div class="m-body">
+      <div style="font-size:12px;color:var(--om-text-3);margin-bottom:6px">已绑定的账号</div>
+      <div id="switchLinks" style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:12px;color:var(--om-text-3);padding:6px 2px">暂无绑定账号</div>
+      </div>
+      <div style="border-top:1px dashed var(--om-border);margin:12px 0"></div>
+      <div style="font-size:12px;color:var(--om-text-3);margin-bottom:6px">手动输入，验证成功后自动互相绑定</div>
+      <div class="input-wrap">
+        <svg class="ic"><use href="#i-user"/></svg>
+        <input class="input" id="switchUser" placeholder="目标账号的用户名">
+      </div>
+      <div class="input-wrap" style="margin-top:6px">
+        <svg class="ic"><use href="#i-lock"/></svg>
+        <input class="input" type="password" id="switchPass" placeholder="该账号的密码（已绑定且未过期可留空）">
+      </div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-ghost" id="switchCancel">取消</button>
+      <button class="btn btn-primary" id="switchConfirm"><svg class="ic"><use href="#i-users"/></svg>验证并切换</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 登录 / 注册（独立登录页，非弹窗） ==================== -->
+<div class="auth-page" id="authScreen">
+  <div class="auth-deco auth-deco-1"></div>
+  <div class="auth-deco auth-deco-2"></div>
+  <div class="auth-card" id="authCard">
+    <div class="auth-brand">
+      <div class="logo-mark"><svg class="ic ic-fill" style="width:26px;height:26px"><use href="#i-logo"/></svg></div>
+      <div class="auth-brand-text">
+        <div class="auth-brand-name">万事屋</div>
+        <div class="auth-brand-sub">OmniHome · 自托管个人门户</div>
+      </div>
+    </div>
+    <h3 id="authTitle">欢迎回来</h3>
+    <p id="authSub">登录后进入你的个人仪表盘</p>
+    <div class="seg" id="authModeTabs" style="width:100%;margin-bottom:4px">
+      <button class="seg-btn active" data-auth-mode="login">登录</button>
+      <button class="seg-btn" data-auth-mode="register">注册</button>
+    </div>
+    <div class="input-wrap">
+      <svg class="ic"><use href="#i-user"/></svg>
+      <input class="input" id="authUser" placeholder="用户名" autocomplete="username">
+    </div>
+    <div class="input-wrap" id="regNickRow" hidden>
+      <svg class="ic"><use href="#i-user"/></svg>
+      <input class="input" id="authNick" placeholder="昵称（可选）">
+    </div>
+    <div class="input-wrap">
+      <svg class="ic"><use href="#i-lock"/></svg>
+      <input class="input" type="password" id="authPass" placeholder="密码" autocomplete="current-password">
+    </div>
+    <div id="authError" style="min-height:18px;font-size:12px;color:var(--om-danger);text-align:center"></div>
+    <button class="btn btn-primary" id="authSubmit" style="width:100%">登录</button>
+    <div class="auth-foot">首个注册账号即为管理员 · 数据仅存于你自己的服务器</div>
+  </div>
+</div>
+
+<!-- ==================== 书签表单弹窗 ==================== -->
+<div class="modal-mask" id="bmMask">
+  <div class="modal">
+    <div class="m-head"><h3 id="bmModalTitle">新建书签</h3><p>先填网址（自动识别名称与图标），可用 AI 自动填充分类、描述与标签</p></div>
+    <div class="m-body">
+      <div class="input-wrap"><svg class="ic"><use href="#i-link"/></svg><input class="input" id="bmUrl" placeholder="网址，如：https://github.com"></div>
+      <div class="input-wrap"><svg class="ic"><use href="#i-bookmark"/></svg><input class="input" id="bmName" placeholder="名称（填网址后自动识别，也可手写）"></div>
+      <select class="lang-select" id="bmCat" style="width:100%"></select>
+      <div class="bm-icon-row">
+        <span class="bm-fav" id="bmIconPreview" style="--fav:243">?</span>
+        <div class="bm-icon-opts" id="bmIconPicker">
+          <button class="bm-icon-opt on" data-bm-icon="" title="自动获取网站图标" type="button">自动</button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-globe" title="环球" type="button"><svg class="ic"><use href="#i-globe"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-star" title="收藏" type="button"><svg class="ic"><use href="#i-star"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-code" title="代码" type="button"><svg class="ic"><use href="#i-code"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-book" title="阅读" type="button"><svg class="ic"><use href="#i-book"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-image" title="图片" type="button"><svg class="ic"><use href="#i-image"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-volume" title="影音" type="button"><svg class="ic"><use href="#i-volume"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-cloud" title="云服务" type="button"><svg class="ic"><use href="#i-cloud"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-zap" title="效率" type="button"><svg class="ic"><use href="#i-zap"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-shield" title="安全" type="button"><svg class="ic"><use href="#i-shield"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-db" title="数据库" type="button"><svg class="ic"><use href="#i-db"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-note" title="笔记" type="button"><svg class="ic"><use href="#i-note"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-folder" title="文件" type="button"><svg class="ic"><use href="#i-folder"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-home" title="主页" type="button"><svg class="ic"><use href="#i-home"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-search" title="搜索" type="button"><svg class="ic"><use href="#i-search"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-wrench" title="工具" type="button"><svg class="ic"><use href="#i-wrench"/></svg></button>
+          <button class="bm-icon-opt" data-bm-icon="sym:i-clock" title="日程" type="button"><svg class="ic"><use href="#i-clock"/></svg></button>
+        </div>
+      </div>
+      <div class="input-wrap"><svg class="ic"><use href="#i-note"/></svg><input class="input" id="bmDesc" placeholder="描述（可选），如：开源代码托管平台"></div>
+      <div class="input-wrap"><svg class="ic"><use href="#i-pin"/></svg><input class="input" id="bmTags" placeholder="标签（可选），逗号分隔，如：开发,开源"></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-outline" id="bmAi" type="button"><svg class="ic"><use href="#i-zap"/></svg>AI 填充</button>
+      <button class="btn btn-ghost" id="bmCancel">取消</button>
+      <button class="btn btn-primary" id="bmSave"><svg class="ic"><use href="#i-check"/></svg>保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 统一输入弹窗（替代 prompt） ==================== -->
+<div class="modal-mask" id="promptMask">
+  <div class="modal">
+    <div class="m-head"><h3 id="promptTitle">请输入</h3><p id="promptSub" hidden></p></div>
+    <div class="m-body">
+      <div class="input-wrap"><svg class="ic"><use href="#i-pen"/></svg><input class="input" id="promptValue" placeholder=""></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-ghost" id="promptCancel">取消</button>
+      <button class="btn btn-primary" id="promptOk"><svg class="ic"><use href="#i-check"/></svg>确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 统一确认弹窗（替代 confirm） ==================== -->
+<div class="modal-mask" id="confirmMask">
+  <div class="modal" id="confirmBox">
+    <div class="m-head"><h3 id="confirmTitle">请确认</h3><p id="confirmSub" hidden></p></div>
+    <div class="m-foot">
+      <button class="btn btn-ghost" id="confirmCancel">取消</button>
+      <button class="btn btn-primary" id="confirmOk"><svg class="ic"><use href="#i-check"/></svg>确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 知识库回收站（v0.2.23：入口在树头「回收站」按钮） ==================== -->
+<div class="modal-mask" id="kbTrashMask">
+  <div class="modal modal-trash">
+    <div class="m-head">
+      <h3>回收站</h3>
+      <p>被删除的笔记按仓库以文件夹树展示，点击文件夹展开。保留 <b id="kbTrashDaysTxt">30</b> 天后自动清除。</p>
+    </div>
+    <div class="m-body" style="padding:0">
+      <div id="kbTrashList" style="max-height:46vh;overflow:auto;padding:6px 14px"></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-ghost btn-sm" id="kbTrashPurgeAll" style="margin-right:auto;color:var(--om-danger)"><svg class="ic"><use href="#i-trash"/></svg>清空回收站</button>
+      <button class="btn btn-primary" id="kbTrashClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 笔记详情（v0.2.25：⋯ 菜单 → 查看详细） ==================== -->
+<div class="modal-mask" id="kbInfoMask">
+  <div class="modal modal-trash">
+    <div class="m-head"><h3 id="kbInfoTitle">笔记详情</h3></div>
+    <div class="m-body">
+      <div class="wx-meta-item" style="text-align:left"><span style="font-size:11px;color:var(--om-text-3)">最近更新</span><b id="kbInfoUpdated" class="num" style="font-size:13px">—</b></div>
+      <div class="wx-meta-item" style="text-align:left"><span style="font-size:11px;color:var(--om-text-3)">类型</span><b id="kbInfoType" style="font-size:13px">Markdown 笔记</b></div>
+      <div class="wx-meta-item" style="text-align:left"><span style="font-size:11px;color:var(--om-text-3)">字数</span><b id="kbInfoChars" class="num" style="font-size:13px">—</b></div>
+      <div class="wx-meta-item" style="text-align:left"><span style="font-size:11px;color:var(--om-text-3)">大小</span><b id="kbInfoSize" class="num" style="font-size:13px">—</b></div>
+      <div class="wx-meta-item" style="text-align:left;grid-column:1/-1"><span style="font-size:11px;color:var(--om-text-3)">所在文件夹</span><b id="kbInfoFolder" style="font-size:13px">—</b></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-primary" id="kbInfoClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 笔记版本管理 ==================== -->
+<div class="modal-mask" id="kbRevMask">
+  <div class="modal modal-revs">
+    <div class="m-head">
+      <div>
+        <h3 id="kbRevTitle">版本管理</h3>
+        <p>历史版本按保存时间排列。差异视图对比该版本与当前内容。</p>
+      </div>
+    </div>
+    <div class="m-body kb-rev-layout">
+      <div class="kb-rev-list" id="kbRevList"></div>
+      <div class="kb-rev-detail" id="kbRevDetail">
+        <div class="kb-empty">选择一个历史版本查看差异</div>
+      </div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-primary" type="button" id="kbRevClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="kbShareMask">
+  <div class="modal modal-trash">
+    <div class="m-head">
+      <h3 id="kbShareTitle">分享</h3>
+      <p>生成链接后，可选择是否需要登录才能打开。默认开启查看权限，可额外允许编辑。</p>
+    </div>
+    <div class="m-body">
+      <div class="set-row">
+        <div class="set-row-info"><div class="set-row-label">查看权限</div>
+          <div class="set-row-sub">分享范围内的笔记可被阅读</div></div>
+        <button class="switch on" id="kbShareViewPerm" disabled role="switch"></button>
+      </div>
+      <div class="set-row">
+        <div class="set-row-info"><div class="set-row-label">需要登录查看</div>
+          <div class="set-row-sub">开启后，本站已登录用户才能打开链接；关闭则持有链接即可</div></div>
+        <button class="switch" id="kbShareNeedLogin" role="switch"></button>
+      </div>
+      <div class="set-row">
+        <div class="set-row-info"><div class="set-row-label">编辑权限</div>
+          <div class="set-row-sub">允许通过分享接口改写笔记正文（只读/常驻笔记除外）</div></div>
+        <button class="switch" id="kbShareEdit" role="switch"></button>
+      </div>
+      <div class="set-row" style="align-items:center">
+        <div class="set-row-info"><div class="set-row-label">有效期</div>
+          <div class="set-row-sub">到期后链接自动失效</div></div>
+        <div class="seg" id="kbShareExpire">
+          <button class="seg-btn" data-days="1">1 天</button>
+          <button class="seg-btn active" data-days="7">7 天</button>
+          <button class="seg-btn" data-days="30">30 天</button>
+          <button class="seg-btn" data-days="0">长期</button>
+        </div>
+      </div>
+      <div id="kbShareLinkRow" hidden>
+        <div class="set-row-label" style="margin-bottom:8px">分享链接</div>
+        <div style="display:flex;gap:8px">
+          <div class="input-wrap" style="flex:1"><input class="input" id="kbShareLink" readonly style="padding-left:14px"></div>
+          <button class="btn btn-outline btn-sm" id="kbShareCopy"><svg class="ic"><use href="#i-copy"/></svg>复制</button>
+        </div>
+      </div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-ghost btn-sm" id="kbShareRevoke" hidden style="margin-right:auto;color:var(--om-danger)">取消已有分享</button>
+      <button class="btn btn-outline" id="kbShareClose">关闭</button>
+      <button class="btn btn-primary" id="kbShareCreate">生成链接</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="kbTeamMask">
+  <div class="modal" style="width:min(440px,92vw)">
+    <div class="m-head">
+      <h3 id="kbTeamTitle">团队笔记仓库</h3>
+      <p id="kbTeamSub">邀请成员共同使用此仓库</p>
+    </div>
+    <div class="m-body" id="kbTeamBody"></div>
+    <div class="m-foot">
+      <button class="btn btn-ghost" id="kbTeamClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="kbObsidianMask">
+  <div class="modal modal-obsidian">
+    <div class="m-head">
+      <div>
+        <h3>Obsidian 同步</h3>
+        <p id="kbObsidianSub">为当前笔记仓库配置插件同步</p>
+      </div>
+      <span class="chip no-dot" id="kbObsidianChip">未开启</span>
+    </div>
+    <div class="m-body">
+      <div class="set-row">
+        <div class="set-row-info"><div class="set-row-label">启用 Obsidian 同步</div>
+          <div class="set-row-sub" id="kbObsidianEnableSub">开启后可为当前笔记仓库生成同步令牌，用官方插件与 Obsidian 双向同步。</div></div>
+        <div class="set-row-ctrl">
+          <span class="switch-hit" id="kbObsidianSwitchHit">
+            <button class="switch" id="kbObsidianEnabled" role="switch"></button>
+          </span>
+        </div>
+      </div>
+      <div class="obsidian-lock-note" id="kbObsidianBlockNote" hidden>
+        <svg class="ic"><use href="#i-bell"/></svg>
+        <span id="kbObsidianBlockText"></span>
+      </div>
+      <div id="kbObsidianBody" class="obsidian-sync-body" hidden>
+        <div class="set-row">
+          <div class="set-row-info"><div class="set-row-label">服务端地址</div>
+            <div class="set-row-sub">填入插件「服务端地址」（含协议与端口，无末尾斜杠）</div></div>
+          <div class="set-row-ctrl obsidian-url-ctrl">
+            <div class="input-wrap"><input class="input" id="kbObsidianUrl" readonly></div>
+            <button class="btn btn-outline btn-sm" id="kbObsidianUrlCopy"><svg class="ic"><use href="#i-copy"/></svg>复制地址</button>
+          </div>
+        </div>
+        <div class="obsidian-sync-block">
+          <div class="set-row-label">当前仓库同步令牌</div>
+          <div class="set-row-sub" id="kbObsidianTokenSub">明文仅生成时可见。一键复制会带上服务端地址与 API Key，可在 Obsidian 插件设置里粘贴导入。</div>
+          <div id="kbObsidianVaultKey" class="sync-vault-keys"></div>
+        </div>
+        <div class="obsidian-sync-block">
+          <div class="set-row-label">同步日志</div>
+          <div class="set-row-sub">本仓库笔记的新增、修改、删除记录，含同步方向与内容摘要。</div>
+          <div class="sync-log" id="kbObsidianLog">暂无记录</div>
+        </div>
+      </div>
+      <div class="set-row obsidian-plugin-row">
+        <div class="set-row-info"><div class="set-row-label">Obsidian 插件</div>
+          <div class="set-row-sub">下载后把 <code>omnihome-sync</code> 文件夹放到仓库的 <code>.obsidian/plugins/</code> 下并启用。也可使用 BRAT 侧载。</div></div>
+        <button class="btn btn-sm btn-primary" id="kbObsidianPluginDl"><svg class="ic"><use href="#i-download"/></svg>下载插件</button>
+      </div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-primary" id="kbObsidianClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="kbShareViewMask">
+  <div class="modal kb-share-view">
+    <div class="m-head kb-share-view-head">
+      <div>
+        <h3 id="kbShareViewTitle">分享</h3>
+        <p id="kbShareViewSub"></p>
+      </div>
+      <div class="kb-share-view-actions">
+        <button class="ed-btn" type="button" id="kbShareOutlineBtn" title="文档大纲"><svg class="ic"><use href="#i-list"/></svg></button>
+        <a class="btn btn-ghost btn-sm" id="kbShareDlNote" hidden download>下载</a>
+        <a class="btn btn-ghost btn-sm" id="kbShareDlAll" hidden download>下载全部</a>
+        <button class="btn btn-primary btn-sm" type="button" id="kbShareViewClose">关闭</button>
+      </div>
+    </div>
+    <div class="kb-share-view-layout">
+      <div id="kbShareViewList"></div>
+      <div class="kb-share-ed" id="kbShareEd">
+        <div class="ed-bar" id="kbShareEdBar" hidden>
+          <button class="ed-btn" type="button" data-sh-act="bold" title="加粗"><b>B</b></button>
+          <button class="ed-btn" type="button" data-sh-act="italic" title="斜体"><i>I</i></button>
+          <button class="ed-btn" type="button" data-sh-act="strike" title="删除线"><s>S</s></button>
+          <button class="ed-btn" type="button" data-sh-act="inline-code" title="行内代码"><code>&lt;/&gt;</code></button>
+          <span class="ed-div"></span>
+          <button class="ed-btn" type="button" data-sh-act="h1" title="一级标题">H1</button>
+          <button class="ed-btn" type="button" data-sh-act="h2" title="二级标题">H2</button>
+          <button class="ed-btn" type="button" data-sh-act="h3" title="三级标题">H3</button>
+          <span class="ed-div"></span>
+          <button class="ed-btn" type="button" data-sh-act="ul" title="无序列表">•≡</button>
+          <button class="ed-btn" type="button" data-sh-act="ol" title="有序列表">1.</button>
+          <button class="ed-btn" type="button" data-sh-act="task" title="任务列表">☐</button>
+          <button class="ed-btn" type="button" data-sh-act="quote" title="引用">❝</button>
+          <span class="ed-div"></span>
+          <button class="ed-btn" type="button" data-sh-act="code" title="代码块"><svg class="ic"><use href="#i-code"/></svg></button>
+          <button class="ed-btn" type="button" data-sh-act="link" title="链接"><svg class="ic"><use href="#i-link"/></svg></button>
+          <div class="seg" style="margin-left:auto" id="kbShareModeSeg">
+            <button class="seg-btn" type="button" data-sh-mode="edit">实时</button>
+            <button class="seg-btn active" type="button" data-sh-mode="split">分屏</button>
+            <button class="seg-btn" type="button" data-sh-mode="preview">预览</button>
+          </div>
+        </div>
+        <div class="ed-body" id="kbShareEdBody">
+          <textarea class="md-src" id="kbShareSrc" spellcheck="false"></textarea>
+          <div class="md-preview" id="kbSharePreview"></div>
+        </div>
+        <div class="ed-foot" id="kbShareFoot" hidden>
+          <span class="ed-foot-status" id="kbShareFootStatus">只读</span>
+        </div>
+      </div>
+      <div class="md-outline kb-share-outline" id="kbShareOutline">
+        <div class="md-outline-head">
+          <span>文档大纲</span>
+          <button class="icon-btn-xs" type="button" id="kbShareOutlineClose" title="关闭"><svg class="ic"><use href="#i-close"/></svg></button>
+        </div>
+        <div class="md-outline-body" id="kbShareOutlineBody"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 清空数据确认弹窗（需登录密码） ==================== -->
+<div class="modal-mask" id="wipeMask">
+  <div class="modal">
+    <div class="m-head">
+      <h3 style="color:var(--om-danger)"><svg class="ic"><use href="#i-trash"/></svg>清空全部数据</h3>
+      <p>将删除当前用户的笔记、书签、日程与保险库密文（保留账号与偏好），此操作不可恢复。请输入登录密码确认。</p>
+    </div>
+    <div class="m-body">
+      <div class="input-wrap"><svg class="ic"><use href="#i-key"/></svg>
+        <input class="input" type="password" id="wipePass" placeholder="当前账号的登录密码" autocomplete="current-password"></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-ghost" id="wipeCancel">取消</button>
+      <button class="btn btn-sm" id="wipeOk" style="background:var(--om-danger);color:#fff"><svg class="ic"><use href="#i-trash"/></svg>确认清空</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 隐藏分类管理弹窗 ==================== -->
+<div class="modal-mask" id="bmHiddenMask">
+  <div class="modal">
+    <div class="m-head"><h3>已隐藏的分类</h3><p>隐藏的分类不在快捷导航页与仪表盘展示，书签不会被删除，可随时恢复</p></div>
+    <div class="m-body" id="bmHiddenList"></div>
+    <div class="m-foot">
+      <button class="btn btn-primary" id="bmHiddenClose"><svg class="ic"><use href="#i-check"/></svg>完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- 天气详情（顶栏横条信息区点开） -->
+<div class="modal-mask" id="wxDetailMask">
+  <div class="modal">
+    <div class="m-head"><h3 id="wxDTitle">天气详情</h3><p id="wxDSub">加载中…</p></div>
+    <div class="m-body">
+      <div class="wx-d-now">
+        <svg class="ic wx-ic big" id="wxDIc"><use href="#i-cloud"/></svg>
+        <div>
+          <div class="wx-temp num" id="wxDTemp">--<sup>°C</sup></div>
+          <div class="wx-cond" id="wxDCond">…</div>
+        </div>
+      </div>
+      <div class="wx-meta" id="wxDMeta"></div>
+      <div class="wx-days" id="wxDDays"></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-primary" id="wxDClose"><svg class="ic"><use href="#i-check"/></svg>关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 版本更新日志弹窗 ==================== -->
+<div class="modal-mask" id="changelogMask">
+  <div class="modal">
+    <div class="m-head">
+      <h3><svg class="ic"><use href="#i-star"/></svg>万事屋已更新</h3>
+      <p id="changelogSub">更新日志</p>
+    </div>
+    <div class="m-body" id="changelogBody"></div>
+    <div class="m-foot">
+      <button class="btn btn-primary" id="changelogOk"><svg class="ic"><use href="#i-check"/></svg>开始使用</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 凭据表单弹窗 ==================== -->
+<div class="modal-mask" id="vaultItemMask">
+  <div class="modal">
+    <div class="m-head"><h3>凭据</h3><p>保存前在本地加密，服务端只存密文</p></div>
+    <div class="m-body">
+      <div class="input-wrap"><svg class="ic"><use href="#i-bookmark"/></svg><input class="input" id="viName" placeholder="名称，如：GitHub"></div>
+      <div class="input-wrap"><svg class="ic"><use href="#i-user"/></svg><input class="input" id="viAccount" placeholder="账号 / 用户名"></div>
+      <div class="input-wrap"><svg class="ic"><use href="#i-link"/></svg><input class="input" id="viUrl" placeholder="网址（可选）"></div>
+      <div style="display:flex;gap:8px">
+        <div class="input-wrap" style="flex:1"><svg class="ic"><use href="#i-key"/></svg><input class="input" type="password" id="viPass" placeholder="密码"></div>
+        <button class="btn btn-outline btn-sm" id="viGen" title="生成强密码"><svg class="ic"><use href="#i-zap"/></svg>生成</button>
+      </div>
+      <div class="input-wrap"><svg class="ic"><use href="#i-note"/></svg><input class="input" id="viNote" placeholder="备注（可选）"></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-ghost" id="viCancel">取消</button>
+      <button class="btn btn-primary" id="viSave"><svg class="ic"><use href="#i-shield"/></svg>加密保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 修改登录密码弹窗 ==================== -->
+<div class="modal-mask" id="passMask">
+  <div class="modal">
+    <div class="m-head"><h3>修改登录密码</h3><p>至少 6 位，修改后其他会话保持有效</p></div>
+    <div class="m-body">
+      <div class="input-wrap"><svg class="ic"><use href="#i-lock"/></svg><input class="input" type="password" id="pcOld" placeholder="当前密码"></div>
+      <div class="input-wrap"><svg class="ic"><use href="#i-key"/></svg><input class="input" type="password" id="pcNew" placeholder="新密码（至少 6 位）"></div>
+      <div class="input-wrap"><svg class="ic"><use href="#i-key"/></svg><input class="input" type="password" id="pcNew2" placeholder="再次输入新密码"></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-ghost" id="pcCancel">取消</button>
+      <button class="btn btn-primary" id="pcSave"><svg class="ic"><use href="#i-check"/></svg>确认修改</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 添加用户弹窗 ==================== -->
+<div class="modal-mask" id="addUserMask">
+  <div class="modal">
+    <div class="m-head"><h3>添加用户</h3><p>新用户拥有独立的数据空间</p></div>
+    <div class="m-body">
+      <div class="input-wrap"><svg class="ic"><use href="#i-user"/></svg><input class="input" id="nuName" placeholder="用户名（登录用）"></div>
+      <div class="input-wrap"><svg class="ic"><use href="#i-user"/></svg><input class="input" id="nuNick" placeholder="昵称（可选）"></div>
+      <div class="input-wrap"><svg class="ic"><use href="#i-lock"/></svg><input class="input" type="password" id="nuPass" placeholder="密码（至少 6 位）"></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-ghost" id="nuCancel">取消</button>
+      <button class="btn btn-primary" id="nuSave"><svg class="ic"><use href="#i-plus"/></svg>创建用户</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 单日计划编辑弹窗（日历点击日期 / 未来日期自动填充模板） ==================== -->
+<div class="modal-mask" id="planDayMask">
+  <div class="modal">
+    <div class="m-head"><h3 id="planDayTitle">计划</h3><p id="planDaySub">按月归档于知识库「每日计划」文件夹</p></div>
+    <div class="m-body">
+      <textarea class="md-src" id="planDaySrc" spellcheck="false" placeholder="- [ ] 待办事项"></textarea>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-ghost" id="planDayCancel">取消</button>
+      <button class="btn btn-primary" id="planDaySave"><svg class="ic"><use href="#i-check"/></svg>保存计划</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 工具：时间戳转换 ==================== -->
+<div class="modal-mask" id="tsMask">
+  <div class="modal">
+    <div class="m-head"><h3>时间戳转换</h3><p>Unix 秒 / 毫秒时间戳 ⇄ 可读日期</p></div>
+    <div class="m-body">
+      <div style="display:flex;gap:8px">
+        <div class="input-wrap" style="flex:1"><svg class="ic"><use href="#i-clock"/></svg><input class="input num" id="tsInput" placeholder="输入时间戳（秒或毫秒）"></div>
+        <button class="btn btn-outline btn-sm" id="tsNow">现在</button>
+      </div>
+      <div class="tool-out num" id="tsOut">—</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
+        <input type="date" class="input" id="tsDate" style="height:34px;flex:1">
+        <span class="num" id="tsDateOut" style="font-size:12px;color:var(--om-text-3)">选择日期 → 时间戳</span>
+      </div>
+    </div>
+    <div class="m-foot"><button class="btn btn-ghost" data-close>关闭</button></div>
+  </div>
+</div>
+
+<!-- ==================== 工具：二维码生成 ==================== -->
+<div class="modal-mask" id="qrMask">
+  <div class="modal">
+    <div class="m-head"><h3>二维码生成</h3><p>文本 / 链接 → 二维码，可下载 PNG</p></div>
+    <div class="m-body">
+      <div style="display:flex;gap:8px">
+        <div class="input-wrap" style="flex:1"><svg class="ic"><use href="#i-link"/></svg><input class="input" id="qrSrc" placeholder="输入文本或链接"></div>
+        <button class="btn btn-primary btn-sm" id="qrGo"><svg class="ic"><use href="#i-zap"/></svg>生成</button>
+      </div>
+      <div id="qrBox" style="display:flex;justify-content:center;padding:16px;background:#fff;border-radius:var(--om-radius-md);min-height:60px"></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-outline" id="qrDl" hidden><svg class="ic"><use href="#i-download"/></svg>下载 PNG</button>
+      <button class="btn btn-ghost" data-close style="margin-left:auto">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 工具：单位换算 ==================== -->
+<div class="modal-mask" id="unitMask">
+  <div class="modal">
+    <div class="m-head"><h3>单位换算</h3><p>存储容量 · 数据速率 · 长度 · 温度</p></div>
+    <div class="m-body">
+      <select class="lang-select" id="unitCat" style="width:100%">
+        <option>存储容量</option><option>数据速率</option><option>长度</option><option>温度</option>
+      </select>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select class="lang-select" id="unitFrom" style="flex:1"></select>
+        <button class="icon-btn" id="unitSwap" title="交换"><svg class="ic"><use href="#i-swap"/></svg></button>
+        <select class="lang-select" id="unitTo" style="flex:1"></select>
+      </div>
+      <div class="input-wrap"><svg class="ic"><use href="#i-sliders"/></svg><input class="input num" id="unitInput" placeholder="输入数值" value="1"></div>
+      <div class="tool-out num" id="unitOut">—</div>
+    </div>
+    <div class="m-foot"><button class="btn btn-ghost" data-close>关闭</button></div>
+  </div>
+</div>
+
+<!-- ==================== 工具：颜色转换 ==================== -->
+<div class="modal-mask" id="colorMask">
+  <div class="modal">
+    <div class="m-head"><h3>颜色转换</h3><p>HEX / RGB / HSL 互转，点击复制</p></div>
+    <div class="m-body">
+      <div style="display:flex;align-items:center;gap:12px">
+        <input type="color" id="colorPick" value="#6366f1" style="width:64px;height:40px;border:none;background:none;cursor:pointer">
+        <div style="display:flex;flex-direction:column;gap:6px;flex:1">
+          <div style="display:flex;align-items:center;gap:8px"><span class="num" id="colorHex" style="flex:1">#6366F1</span><button class="icon-btn-xs js-color-copy" data-color-id="colorHex" title="复制"><svg class="ic"><use href="#i-copy"/></svg></button></div>
+          <div style="display:flex;align-items:center;gap:8px"><span class="num" id="colorRgb" style="flex:1">rgb(99, 102, 241)</span><button class="icon-btn-xs js-color-copy" data-color-id="colorRgb" title="复制"><svg class="ic"><use href="#i-copy"/></svg></button></div>
+          <div style="display:flex;align-items:center;gap:8px"><span class="num" id="colorHsl" style="flex:1">hsl(239 84% 67%)</span><button class="icon-btn-xs js-color-copy" data-color-id="colorHsl" title="复制"><svg class="ic"><use href="#i-copy"/></svg></button></div>
+        </div>
+      </div>
+    </div>
+    <div class="m-foot"><button class="btn btn-ghost" data-close>关闭</button></div>
+  </div>
+</div>
+
+<!-- ==================== 工具：JSON 格式化 ==================== -->
+<div class="modal-mask" id="jsonMask">
+  <div class="modal" style="max-width:640px">
+    <div class="m-head"><h3>JSON 格式化</h3><p>校验 · 美化 · 压缩</p></div>
+    <div class="m-body">
+      <textarea class="md-src" id="jsonIn" spellcheck="false" style="min-height:110px" placeholder='粘贴 JSON，如 {"name":"万事屋"}'></textarea>
+      <div style="display:flex;gap:8px;margin:10px 0">
+        <button class="btn btn-primary btn-sm" id="jsonFmt">格式化</button>
+        <button class="btn btn-outline btn-sm" id="jsonMin">压缩</button>
+        <button class="btn btn-outline btn-sm" id="jsonCopy" style="margin-left:auto"><svg class="ic"><use href="#i-copy"/></svg>复制结果</button>
+      </div>
+      <textarea class="md-src" id="jsonOut" spellcheck="false" style="min-height:110px" readonly placeholder="结果输出…"></textarea>
+    </div>
+    <div class="m-foot"><button class="btn btn-ghost" data-close>关闭</button></div>
+  </div>
+</div>
+
+<!-- ==================== 工具：Base64 ==================== -->
+<div class="modal-mask" id="b64Mask">
+  <div class="modal" style="max-width:640px">
+    <div class="m-head"><h3>Base64 编解码</h3><p>支持中文（UTF-8）</p></div>
+    <div class="m-body">
+      <textarea class="md-src" id="b64In" spellcheck="false" style="min-height:110px" placeholder="输入原文或 Base64…"></textarea>
+      <div style="display:flex;gap:8px;margin:10px 0">
+        <button class="btn btn-primary btn-sm" id="b64Enc">编码 →</button>
+        <button class="btn btn-outline btn-sm" id="b64Dec">← 解码</button>
+      </div>
+      <textarea class="md-src" id="b64Out" spellcheck="false" style="min-height:110px" readonly placeholder="结果输出…"></textarea>
+    </div>
+    <div class="m-foot"><button class="btn btn-ghost" data-close>关闭</button></div>
+  </div>
+</div>
+
+<!-- ==================== 仪表盘：添加组件弹窗 ==================== -->
+<div class="modal-mask" id="addWidgetMask">
+  <div class="modal">
+    <div class="m-head"><h3>添加组件</h3><p>把收纳起来的仪表盘组件重新放回去</p></div>
+    <div class="m-body">
+      <div id="addWidgetList" class="widget-add-grid"></div>
+    </div>
+    <div class="m-foot"><button class="btn btn-ghost" data-close>关闭</button></div>
+  </div>
+</div>
+
+<!-- ==================== Toast ==================== -->
+<div class="toast" id="toast"><svg class="ic"><use href="#i-check"/></svg><span id="toastMsg">操作成功</span></div>
+
+<!-- 附件灯箱：点击附件图片时大图预览，点背景或按 Esc 关闭 -->
+<div class="asset-lightbox" id="assetLightbox" hidden>
+  <div class="asset-lightbox-mask" data-asset-close></div>
+  <div class="asset-lightbox-body">
+    <img alt="">
+    <div class="asset-lightbox-bar">
+      <span class="asset-lightbox-name"></span>
+    </div>
+  </div>
+</div>
+

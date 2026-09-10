@@ -1,0 +1,173 @@
+      <!-- ==================== 视图：系统监控 ==================== -->
+      <section class="view" data-view="monitor">
+        <div class="view-head">
+          <div>
+            <h2 class="vh-title">系统监控</h2>
+            <div class="vh-sub num" id="monHost">主机信息加载中…</div>
+          </div>
+          <div class="vh-actions">
+            <span class="chip success">全部服务正常</span>
+            <button class="btn btn-outline btn-sm" id="monRefresh"><svg class="ic"><use href="#i-refresh"/></svg>刷新</button>
+            <button class="btn btn-outline btn-sm"><svg class="ic"><use href="#i-download"/></svg>导出报告</button>
+          </div>
+        </div>
+
+        <!-- ========== 系统监控区 ========== -->
+        <div class="mon-zone-title"><svg class="ic"><use href="#i-activity"/></svg>系统监控</div>
+        <div class="grid12">
+          <article class="card lift col-3"><div class="stat">
+            <div class="stat-ic tint-primary"><svg class="ic"><use href="#i-cpu"/></svg></div>
+            <div><div class="stat-val num" id="monCpuVal">--<small>%</small></div><div class="stat-label">CPU 使用率</div><div class="stat-sub" id="monCpuSub">加载中…</div></div>
+          </div></article>
+          <article class="card lift col-3"><div class="stat">
+            <div class="stat-ic tint-warning"><svg class="ic"><use href="#i-db"/></svg></div>
+            <div><div class="stat-val num" id="monMemVal">--<small>%</small></div><div class="stat-label" id="monMemLbl">内存</div><div class="stat-sub">实时读取 · 缓存计入已用</div></div>
+          </div></article>
+          <article class="card lift col-3"><div class="stat">
+            <div class="stat-ic tint-success"><svg class="ic"><use href="#i-box"/></svg></div>
+            <div><div class="stat-val num" id="monDiskVal">--<small>%</small></div><div class="stat-label" id="monDiskLbl">存储</div><div class="stat-sub" id="monDiskSub">根分区实时占用</div></div>
+          </div></article>
+          <article class="card lift col-3"><div class="stat">
+            <div class="stat-ic tint-info"><svg class="ic"><use href="#i-zap"/></svg></div>
+            <div><div class="stat-val num" id="monNetVal">--<small>MB/s</small></div><div class="stat-label">网络 · 下载</div><div class="stat-sub" id="monNetSub">↑ -- MB/s</div></div>
+          </div></article>
+
+          <article class="card col-8">
+            <div class="card-head">
+              <h3 class="card-title">资源监控</h3>
+              <div class="res-tabs" id="resTabs">
+                <button class="res-tab active" data-res="cpu">CPU</button>
+                <button class="res-tab" data-res="gpu">GPU</button>
+                <button class="res-tab" data-res="mem">内存</button>
+                <button class="res-tab" data-res="net">网络</button>
+                <button class="res-tab" data-res="disk">硬盘</button>
+              </div>
+              <select class="res-disk-sel" id="resDiskSel" hidden></select>
+            </div>
+            <div class="card-pad res-chart-pad">
+              <div class="res-series" id="resSeries"></div>
+              <div class="res-chart-wrap" id="resChartWrap">
+                <canvas id="resChart"></canvas>
+                <div class="res-tip" id="resTip" hidden></div>
+                <div class="res-empty" id="resEmpty">数据采集中…</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card col-4">
+            <div class="card-head"><h3 class="card-title">资源占用</h3><span class="chip no-dot">实时</span></div>
+            <div class="card-pad">
+              <div style="display:flex;flex-direction:column;gap:16px">
+                <div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:7px"><span>CPU</span><b class="num">--%</b></div><div class="bar" id="barCpu"><div class="bar-fill ok" style="width:0%"></div></div></div>
+                <div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:7px"><span>内存</span><b class="num">--%</b></div><div class="bar" id="barMem"><div class="bar-fill" style="width:0%"></div></div></div>
+                <div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:7px"><span>存储池</span><b class="num">--%</b></div><div class="bar" id="barDisk"><div class="bar-fill" style="width:0%"></div></div></div>
+                <div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:7px"><span>Docker</span><b class="num" style="visibility:hidden">0%</b></div><div class="bar"><div class="bar-fill ok" style="width:100%;opacity:.25"></div></div><div style="font-size:11px;color:var(--om-text-3);margin-top:5px">容器明细见下方 Docker 监控区</div></div>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <!-- ========== Docker 监控区 ========== -->
+        <div class="mon-zone-title"><svg class="ic"><use href="#i-box"/></svg>Docker 监控
+          <span class="chip success" id="monRunning">加载中…</span>
+        </div>
+        <div class="ct-filter">
+          <div class="dropdown">
+            <button class="btn btn-outline btn-sm" id="ctFilterBtn" title="下拉多选容器筛选">
+              <svg class="ic"><use href="#i-sliders"/></svg>容器筛选
+              <span class="drop-count num" id="ctFilterCount" hidden>0</span>
+              <svg class="ic chev"><use href="#i-chev-d"/></svg>
+            </button>
+            <div class="drop-panel" id="ctFilterPanel" hidden>
+              <div class="ct-f-ops">
+                <button class="ct-f-op" id="ctSelAll">全选</button>
+                <button class="ct-f-op" id="ctSelNone">清空</button>
+              </div>
+              <div id="ctFilterList"></div>
+            </div>
+          </div>
+          <div class="ct-search"><svg class="ic"><use href="#i-search"/></svg><input id="ctSearch" placeholder="搜索容器名 / 镜像…"></div>
+          <span class="ct-f-hint" id="ctFilterHint"></span>
+        </div>
+        <div class="grid12">
+          <article class="card lift col-3"><div class="stat">
+            <div class="stat-ic tint-primary"><svg class="ic"><use href="#i-cpu"/></svg></div>
+            <div><div class="stat-val num" id="dcCpuVal">--<small>%</small></div><div class="stat-label">CPU 占用率</div><div class="stat-sub" id="dcCpuSub">全部容器合计</div></div>
+          </div></article>
+          <article class="card lift col-3"><div class="stat">
+            <div class="stat-ic tint-warning"><svg class="ic"><use href="#i-db"/></svg></div>
+            <div><div class="stat-val num" id="dcMemVal">--</div><div class="stat-label">内存占用</div><div class="stat-sub" id="dcMemSub">全部容器合计</div></div>
+          </div></article>
+          <article class="card lift col-3"><div class="stat">
+            <div class="stat-ic tint-info"><svg class="ic"><use href="#i-zap"/></svg></div>
+            <div><div class="stat-val num" id="dcUpVal">--</div><div class="stat-label">网络 · 上传</div><div class="stat-sub" id="dcUpSub">全部容器实时合计</div></div>
+          </div></article>
+          <article class="card lift col-3"><div class="stat">
+            <div class="stat-ic tint-success"><svg class="ic"><use href="#i-download"/></svg></div>
+            <div><div class="stat-val num" id="dcDownVal">--</div><div class="stat-label">网络 · 下载</div><div class="stat-sub" id="dcDownSub">全部容器实时合计</div></div>
+          </div></article>
+
+          <article class="card col-8">
+            <div class="card-head">
+              <h3 class="card-title">容器曲线</h3>
+              <div class="res-tabs" id="ctTabs">
+                <button class="res-tab active" data-ctab="mem">内存占用</button>
+                <button class="res-tab" data-ctab="cpu">CPU 占用</button>
+                <button class="res-tab" data-ctab="up">网络 · 上传</button>
+                <button class="res-tab" data-ctab="down">网络 · 下载</button>
+              </div>
+              <span class="chip no-dot num">默认占用最高前 5</span>
+            </div>
+            <div class="card-pad res-chart-pad">
+              <div class="res-series" id="ctSeries"></div>
+              <div class="res-chart-wrap" id="ctChartWrap">
+                <canvas id="ctChart"></canvas>
+                <div class="res-tip" id="ctTip" hidden></div>
+                <div class="res-empty" id="ctEmpty">数据采集中…</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card col-4" id="ctPieCard">
+            <div class="card-head">
+              <h3 class="card-title">内存占比</h3>
+              <span class="chip no-dot num" id="ctPieHint">—</span>
+            </div>
+            <div class="card-pad">
+              <div class="ct-pie">
+                <div class="ct-pie-chart">
+                  <svg id="ctPieSvg" viewBox="0 0 140 140" role="img" aria-label="容器内存占比">
+                    <circle class="ct-pie-track" cx="70" cy="70" r="54"></circle>
+                    <g id="ctPieSegs" transform="rotate(-90 70 70)"></g>
+                  </svg>
+                  <div class="ct-pie-center">
+                    <div class="ct-pie-total num" id="ctPieTotal">--</div>
+                    <div class="ct-pie-tlabel" id="ctPieTLabel">合计占用</div>
+                  </div>
+                </div>
+                <div class="ct-pie-legend" id="ctPieLegend"></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card col-12" style="overflow-x:auto">
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-box"/></svg>Docker 容器</h3>
+            </div>
+            <table class="tbl ct-tbl">
+              <thead><tr>
+                <th class="sortable" data-sort="name">容器</th>
+                <th class="sortable" data-sort="status">状态</th>
+                <th class="sortable" data-sort="cpu">CPU</th>
+                <th class="sortable" data-sort="memMB">内存</th>
+                <th class="sortable" data-sort="net">网络</th>
+                <th class="sortable" data-sort="upSecs">运行时长</th>
+                <th style="text-align:right">操作</th>
+              </tr></thead>
+              <tbody id="containerRows">
+                <tr><td colspan="7" style="text-align:center;color:var(--om-text-3);padding:28px">容器状态加载中…</td></tr>
+              </tbody>
+            </table>
+          </article>
+        </div>
+      </section>

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "OmniHome 快捷导航",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "连接你的 OmniHome 服务器：右键把当前网页收进快捷导航，浏览器书签与万事屋双向同步（含分类与顺序）。",
   "permissions": [
     "storage",

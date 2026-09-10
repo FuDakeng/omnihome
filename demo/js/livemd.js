@@ -12,7 +12,7 @@
      inst.show()/hide() 编辑模式与其它模式切换
      inst.focus() / inst.destroy()
    ============================================================ */
-window.LiveMD = (() => {
+export const LiveMD = (() => {
   const E = s => { const d = document.createElement('div'); d.innerHTML = s; return d.firstChild; };
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const escAttr = s => esc(s).replace(/"/g, '&quot;');
@@ -1588,3 +1588,4 @@ window.LiveMD = (() => {
 
   return { attach, highlightCode, nextExpandRange };
 })();
+window.LiveMD = LiveMD;

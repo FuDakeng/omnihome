@@ -1,0 +1,110 @@
+
+/* ---------- 天气卡片 ---------- */
+.wx-main{ display: flex; align-items: center; justify-content: space-between; gap: var(--om-space-3); }
+.wx-temp{ font-size: 52px; font-weight: 250; line-height: 1; letter-spacing: -2px; }
+.wx-temp sup{ font-size: 22px; font-weight: 400; color: var(--om-text-2); }
+.wx-cond{ margin-top: 6px; font-size: var(--om-fs-sm); color: var(--om-text-2); }
+.wx-loc{ font-size: var(--om-fs-xs); color: var(--om-text-3); margin-top: 2px; display: flex; align-items: center; gap: 4px; }
+.wx-loc .ic{ width: 12px; height: 12px; }
+.wx-ic{ color: var(--om-warning); }
+.wx-ic.big{ width: 68px; height: 68px; stroke-width: 1.4; filter: drop-shadow(0 6px 14px color-mix(in oklab, var(--om-warning) 35%, transparent)); }
+.wx-meta{
+  display: flex; gap: var(--om-space-2);
+  margin-top: var(--om-space-4);
+  padding-top: var(--om-space-4);
+  border-top: 1px dashed var(--om-border);
+}
+.wx-meta-item{
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 8px 4px;
+  border-radius: var(--om-radius-sm);
+  background: var(--om-surface-2);
+  font-size: var(--om-fs-xs);
+  transition: background var(--om-t-fast);
+}
+.wx-meta-item:hover{ background: var(--om-surface-3); }
+.wx-meta-item .ic{ width: 15px; height: 15px; color: var(--om-info); }
+.wx-meta-item b{ font-weight: 600; }
+.wx-meta-item span{ color: var(--om-text-3); font-size: 11px; }
+/* 列宽自适应：宽屏一行排满，窄屏自动折行为多行，不再挤压裁切 */
+.wx-days{ display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: var(--om-space-2); margin-top: var(--om-space-3); }
+.wx-day{
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px 4px;
+  border-radius: var(--om-radius-md);
+  border: 1px solid transparent;
+  transition: all var(--om-t-fast);
+  cursor: default;
+}
+.wx-day:hover{ background: var(--om-surface-2); border-color: var(--om-border); }
+.wx-day.today{ background: var(--om-primary-ghost); border-color: var(--om-primary-border); }
+.wx-d-name{ font-size: 11px; color: var(--om-text-3); }
+.wx-day.today .wx-d-name{ color: var(--om-primary); font-weight: 700; }
+.wx-day .ic{ width: 22px; height: 22px; }
+.wx-d-t{ font-size: var(--om-fs-xs); display: flex; gap: 4px; white-space: nowrap; }
+.wx-d-t b{ font-weight: 600; }
+.wx-d-t span{ color: var(--om-text-3); }
+.wx-d-rain{ display: inline-flex; align-items: center; gap: 2px; min-height: 12px; font-size: 10px; color: var(--om-info); }
+.wx-d-rain .ic{ width: 10px; height: 10px; }
+
+/* ---------- 顶栏天气横条：信息区（点按看详情） + 操作区 ---------- */
+.wx-strip{
+  position: relative;
+  display: flex; align-items: center; gap: 2px;
+  height: 40px; padding: 0 4px 0 8px;
+  flex: none; max-width: 560px;
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius-md);
+  background: var(--om-surface-2);
+}
+.wxs-info{
+  display: flex; align-items: center; gap: 7px;
+  min-width: 0; padding: 4px 6px;
+  border: 0; border-radius: var(--om-radius-sm);
+  background: none; color: var(--om-text-2); cursor: pointer;
+  transition: all var(--om-t-fast);
+}
+.wxs-info:hover{ background: var(--om-surface-3); color: var(--om-text-1); }
+.wxs-ic{ width: 18px; height: 18px; color: var(--om-warning); flex: none; }
+.wxs-city{
+  font-size: 12px; color: var(--om-text-3); flex: none;
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wxs-temp{ font-size: 15px; font-weight: 700; color: var(--om-text-1); flex: none; }
+.wxs-extra{
+  font-size: 11px; color: var(--om-text-3); flex: none;
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wxs-more{ width: 12px; height: 12px; color: var(--om-text-3); flex: none; }
+.wxs-ops{ display: flex; align-items: center; gap: 1px; margin-left: 2px; flex: none; }
+.wxs-op{
+  width: 26px; height: 26px;
+  display: grid; place-items: center;
+  border: 0; border-radius: 6px;
+  background: none; color: var(--om-text-3); cursor: pointer;
+  transition: all var(--om-t-fast);
+}
+.wxs-op:hover{ background: var(--om-surface-3); color: var(--om-primary); }
+.wxs-op .ic{ width: 13px; height: 13px; }
+/* 操作区下拉弹层（显示内容 / 位置设置），相对横条右下定位 */
+.wxs-pop{
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 70;
+  min-width: 220px; padding: 8px;
+  background: var(--om-surface);
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius-md);
+  box-shadow: var(--om-shadow-md);
+}
+.wxs-pop-loc{ min-width: 280px; }
+.wxs-pop .tag-opt{ margin-top: 4px; }
+/* 天气横条位于仪表盘头部：与「编辑布局」按钮同一行，底部对齐 */
+.view-head .wx-strip{ align-self: flex-end; margin-right: auto; }
+/* 窄屏逐级收缩：先压附加项，再隐藏附加项（横条本体保留） */
+@media (max-width: 1280px){ .wxs-extra{ max-width: 150px; } }
+@media (max-width: 1024px){ .wxs-extra{ display: none; } }
+
+/* ---------- 天气详情弹窗（横条信息区点开） ---------- */
+.wx-d-now{ display: flex; align-items: center; gap: 18px; padding: 6px 4px 14px; }
+.wx-d-now .wx-temp{ font-size: 46px; }
+
