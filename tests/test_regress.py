@@ -31,7 +31,10 @@ def test_render_index_injects_version():
     assert "js/vendor/qrcode.min.js" in html
     assert "jsdelivr" not in html
     assert 'id="i-logo"' in html
-    assert 'id="phoneNav"' in html
+    assert 'id="phoneNav"' not in html
+    assert 'phone-more' not in html
+    assert 'class="sidebar"' in html
+    assert 'id="collapseBtn"' in html
     assert "css/mobile.css" in html
     assert 'id="i-menu"' in html
     assert "__VER__" not in html

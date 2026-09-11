@@ -42,7 +42,7 @@ pytest
 | 本轮改动 | 命令 |
 |---|---|
 | 同步 / 审批 / `/api/about/logs` / 插件协议 | `python3 backend/_sync_regress.py` |
-| 仅 LiveMD / 前端文案，无 API 契约变化 | 仍跑默认套件作回归；浏览器能开则点一下相关界面 |
+| 仅 LiveMD / 前端文案 / 手机或 PC 布局，无 API 契约变化 | 仍跑默认套件作回归；**≤768 与 ≥1280 各看一遍改动页**（见 `.cursor/rules/omnihome-ui-responsive.mdc`） |
 | 插件 `main.js` / `manifest.json` | 默认套件 + 确认 `PLUGIN_VERSION` 与 `manifest.json` 一致 |
 
 ## 失败处理

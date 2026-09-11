@@ -45,7 +45,8 @@
   --om-sidebar-w: 250px;
   --om-sidebar-w-rail: 76px;
   --om-topbar-h: 64px;
-  --om-bottom-nav-h: 56px;
+  /* 手机不再使用常驻底栏，保留变量以免旧 calc 失效 */
+  --om-bottom-nav-h: 0px;
   --om-safe-bottom: env(safe-area-inset-bottom, 0px);
   --om-safe-top: env(safe-area-inset-top, 0px);
   --om-app-h: 100vh;

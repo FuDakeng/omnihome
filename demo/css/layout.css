@@ -249,19 +249,28 @@
   .crumb-date{ display: none; }
 }
 
-/* 手机：单列内容 + 抽屉侧栏 + 底栏（覆盖 1024 图标栏） */
+/* 手机：单列内容 + 抽屉侧栏（覆盖 1024 图标栏；导航只走侧栏，无底栏） */
 @media (max-width: 768px){
   html, body, .app{ overflow-x: hidden; }
-  .app, .sidebar-collapsed .app{ grid-template-columns: 1fr; min-height: var(--om-app-h); }
+  .app, .sidebar-collapsed .app{
+    grid-template-columns: 1fr;
+    height: var(--om-app-h);
+    min-height: var(--om-app-h);
+  }
+  .main{ min-height: 0; overflow: hidden; }
   .topbar{
     padding: var(--om-safe-top) var(--om-space-3) 0;
     height: calc(var(--om-topbar-h) + var(--om-safe-top));
     gap: var(--om-space-2);
   }
   .content{
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
     padding: var(--om-space-4);
-    padding-bottom: calc(var(--om-bottom-nav-h) + var(--om-safe-bottom) + 16px);
+    padding-bottom: calc(var(--om-space-4) + var(--om-safe-bottom));
   }
+  .view.active[data-view="notes"]{ overflow: hidden; }
   .col-2, .col-3, .col-4, .col-5, .col-6, .col-8{ grid-column: span 12; }
   .crumb-date{ display: none; }
   .sidebar{
