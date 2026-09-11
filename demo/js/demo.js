@@ -29,8 +29,6 @@ function goView(name, fromHash){
   $('#collapseBtn')?.setAttribute('title', (window.isPhone && isPhone()) ? '打开菜单' : '折叠 / 展开侧边栏');
   $('#userMenu').classList.remove('open');
   if (typeof window.closePhoneChrome === 'function') closePhoneChrome();
-  $$('#phoneNav [data-nav]').forEach(b => b.classList.toggle('active', b.dataset.nav === name));
-  $('#phoneMoreBtn')?.classList.toggle('active', name === 'monitor' || name === 'toolbox');
   if (name !== 'notes'){
     document.body.classList.remove('kb-phone-editor', 'kb-phone-list');
     if (history.state && history.state.kbEditor)
