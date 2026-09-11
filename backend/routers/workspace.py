@@ -22,6 +22,7 @@ from pydantic import BaseModel
 import storage
 import secretbox
 import teams
+import translate as translate_svc
 from sessions import require_user, verify_password
 
 router = APIRouter()
@@ -102,47 +103,17 @@ def put_vault(body: VaultSaveIn, authorization: Optional[str] = Header(None)):
     storage.save_user_json(username, "vault.json", vault)
     return {"ok": True}
 
-def _gt_translate(src_lang: str, tgt_lang: str, text: str) -> str:
-    r = httpx.get("https://translate.googleapis.com/translate_a/single",
-                  params={"client": "gtx", "sl": src_lang, "tl": tgt_lang,
-                          "dt": "t", "q": text}, timeout=6)
-    data = r.json()
-    return "".join(seg[0] for seg in data[0] if seg and seg[0])
-
 @router.get("/api/tools/translate")
 def translate(text: str, source: str = "zh-CN", target: str = "en",
               authorization: Optional[str] = Header(None)):
     require_user(authorization)
-    text = text[:500]
-
-    def call_mymemory(src_lang, tgt_lang):
-        r = httpx.get("https://api.mymemory.translated.net/get",
-                      params={"q": text, "langpair": f"{src_lang}|{tgt_lang}"},
-                      timeout=12)
-        return r.json()
-
-    # 主引擎：Google（质量优先）；网络不可达时自动回退 MyMemory
     try:
-        out = _gt_translate(source, target, text)
-        if out.strip():
-            return {"translation": out}
-    except Exception:
-        pass
-    try:
-        data = call_mymemory(source, target)
-        if str(data.get("responseStatus")) != "200" and "zh" in source + target:
-            # MyMemory 对 zh-CN 偶发不识别，降级为 zh 再试一次（双向兼容）
-            alt_s = "zh" if source == "zh-CN" else source
-            alt_t = "zh" if target == "zh-CN" else target
-            data = call_mymemory(alt_s, alt_t)
-        if str(data.get("responseStatus")) == "200":
-            return {"translation": data["responseData"]["translatedText"]}
-        detail = str(data.get("responseDetails") or "")[:80]
-        raise HTTPException(502, f"翻译服务返回异常：{detail}" if detail else "翻译服务返回异常")
-    except HTTPException:
-        raise
+        out = translate_svc.translate_text(text, source, target)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     except Exception as e:
         raise HTTPException(502, f"翻译服务暂不可用：{e}")
+    return {"translation": out}
 
 @router.get("/api/search/site")
 def site_search(q: str, authorization: Optional[str] = Header(None)):

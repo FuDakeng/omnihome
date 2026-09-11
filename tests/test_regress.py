@@ -80,3 +80,14 @@ def test_secretbox_script():
     )
     if r.returncode != 0:
         pytest.fail(r.stdout[-2000:] + "\n" + r.stderr[-2000:])
+
+
+def test_translate_script():
+    r = subprocess.run(
+        [sys.executable, str(BACKEND / "_translate_test.py")],
+        cwd=str(BACKEND),
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        pytest.fail(r.stdout[-2000:] + "\n" + r.stderr[-2000:])
