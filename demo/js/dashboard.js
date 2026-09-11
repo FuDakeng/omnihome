@@ -90,7 +90,8 @@ const Dash = (() => {
   function applySize(card){
     const s = sizes[card.dataset.widget] || {};
     card.style.setProperty('--dash-col', String(s.col || defaultCol(card)));
-    card.style.setProperty('--dash-h', s.h ? s.h + 'px' : 'auto');
+    if (s.h) card.style.setProperty('--dash-h', s.h + 'px');
+    else card.style.removeProperty('--dash-h');
     card.classList.toggle('sized', !!(s.col || s.h) && sizeEnabled());
   }
   function applyAllSizes(){
@@ -154,7 +155,8 @@ const Dash = (() => {
       : clamp(Math.round(((hStored || h0) + dy) / H_STEP) * H_STEP, H_MIN, H_MAX);
     resizing.col = col; resizing.h = h;
     card.style.setProperty('--dash-col', col);
-    card.style.setProperty('--dash-h', h ? h + 'px' : 'auto');
+    if (h) card.style.setProperty('--dash-h', h + 'px');
+    else card.style.removeProperty('--dash-h');
     showSizeTip(card, col, h);
   }
 

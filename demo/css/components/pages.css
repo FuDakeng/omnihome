@@ -380,10 +380,25 @@ pre.md-code.is-folded [data-md-code-act="fold"]{ transform: rotate(-90deg); }
 [data-widget="plan"] .livemd{ flex: 1; max-height: none; min-height: 150px; }
 [data-widget="plan"] .ed-foot{ margin-top: auto; }
 .editor-inline #planSrc{ height: 96px; }
-/* 灵感速记：输入区占满剩余高度，字数统计贴底边 */
-[data-widget="quicknote"] .livemd{ flex: 1; max-height: none; min-height: 132px; }
+/* 灵感速记：卡片固定高度，正文超出滚动，底栏贴底；自定义尺寸时跟 --dash-h */
+[data-widget="quicknote"]{
+  height: 300px;
+  overflow: hidden;
+}
+#dashGrid [data-widget="quicknote"].sized{
+  height: var(--dash-h, 300px);
+  max-height: var(--dash-h, 300px);
+}
+[data-widget="quicknote"] .livemd{
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+}
+[data-widget="quicknote"] .card-head,
+[data-widget="quicknote"] .ed-foot{ flex-shrink: 0; }
 [data-widget="quicknote"] .ed-foot{ margin-top: auto; }
-.editor-inline #quickNoteSrc{ flex: 1; height: auto; min-height: 132px; }
+.editor-inline #quickNoteSrc{ flex: 1 1 auto; min-height: 0; height: auto; overflow-y: auto; }
 
 /* 单日计划编辑弹窗：内嵌编辑器 */
 #planDayMask .m-body .md-src{
