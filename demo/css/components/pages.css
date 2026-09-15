@@ -199,6 +199,17 @@
 .cl-items{ margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; }
 .cl-items li{ font-size: 12.5px; color: var(--om-text-2); line-height: 1.7; }
 .cl-items li::marker{ color: var(--om-primary); }
+/* 关于页：固定高度，超出内部滚动，避免把下方「开源与致谢」顶出视口 */
+#aboutChangelog{
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: 220px;
+  max-height: min(220px, 36vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
 
 /* 危险操作按钮（统一确认弹窗） */
 .btn.danger{ background: var(--om-danger); border-color: var(--om-danger); color: #fff; }
@@ -574,6 +585,7 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
   display: flex; align-items: center; justify-content: center; gap: 8px;
   padding: 9px 12px;
   background: transparent; border-color: transparent;
+  pointer-events: none; /* 按钮只是视觉，点击/拖放都由 #kbTreeFoot 承接 */
 }
 
 /* 常驻笔记徽标 */

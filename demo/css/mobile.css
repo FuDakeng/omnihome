@@ -82,6 +82,8 @@
   .set-row{ flex-wrap: wrap; }
   .ms-body{ padding: 12px; }
   #changelogMask .modal{ width: min(520px, calc(100vw - 16px)); max-height: calc(var(--om-app-h) - 80px); }
+  /* 关于页更新日志：窄屏同样固定高度，给下方「开源与致谢」留位置 */
+  #aboutChangelog{ height: 180px; max-height: min(180px, 32vh); }
 
   .kb-menu{ z-index: 120; }
 

@@ -43,6 +43,20 @@ def test_render_index_injects_version():
     assert "<!--OVERLAYS-->" not in html
 
 
+def test_kb_drag_state_uses_module_sets():
+    """v0.2.52 ESM 拆分后裸 selNotes 会 ReferenceError，拖到回收站失效。"""
+    import re
+    text = (ROOT / "demo" / "js" / "notes" / "bind-tree.js").read_text(encoding="utf-8")
+    assert "[...S.selNotes]" in text
+    assert "[...S.selFolders]" in text
+    assert "[...S.selAssets]" in text
+    assert "[...selNotes]" not in text
+    assert "[...selFolders]" not in text
+    assert "[...selAssets]" not in text
+    css = (ROOT / "demo" / "css" / "components" / "pages.css").read_text(encoding="utf-8")
+    assert re.search(r"#aboutChangelog\{[^}]*overflow-y:\s*auto", css, re.S)
+
+
 def test_demo_js_modules_parse():
     """node --check 不按 ESM 解析，会漏掉 `{ S.folders: fl }` 这类模块语法错误。"""
     js_root = ROOT / "demo" / "js"

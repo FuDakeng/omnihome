@@ -312,7 +312,7 @@ S.bindTree = function () {/* ---------- 桌面拖拽 .md 文件 / 文件夹 → 
         const id = item.dataset.noteId;
         if (!S.selNotes.has(id)) S.selNotes = new Set([id]);
         S.selFolders.clear();
-        S.dragState = { kind: 'note', ids: [...selNotes] };
+        S.dragState = { kind: 'note', ids: [...S.selNotes] };
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', id);
         setTimeout(() => item.classList.add('dragging'), 0);
@@ -323,7 +323,7 @@ S.bindTree = function () {/* ---------- 桌面拖拽 .md 文件 / 文件夹 → 
         if (f === S.PLAN_FOLDER || f === S.QUICK_FOLDER){ e.preventDefault(); return; }
         if (!S.selFolders.has(f)) S.selFolders = new Set([f]);
         S.selNotes.clear();
-        S.dragState = { kind: 'folder', ids: [...selFolders] };
+        S.dragState = { kind: 'folder', ids: [...S.selFolders] };
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', f);
         setTimeout(() => row.classList.add('dragging'), 0);
@@ -331,7 +331,7 @@ S.bindTree = function () {/* ---------- 桌面拖拽 .md 文件 / 文件夹 → 
       if (assetRow){
         /* 拖动附件 → 编辑区可在光标位置插入引用；多选时批量插入 */
         const name = assetRow.dataset.assetName;
-        const names = S.selAssets.has(name) ? [...selAssets] : [name];
+        const names = S.selAssets.has(name) ? [...S.selAssets] : [name];
         const mds = names.map(nm => '![' + nm.replace(/[\[\]()]/g, '') + '](/api/notes/assets/' + encodeURIComponent(nm) + ')');
         e.dataTransfer.effectAllowed = 'copy';
         e.dataTransfer.setData('text/omni-asset', names.join('\n'));
@@ -437,31 +437,39 @@ S.bindTree = function () {/* ---------- 桌面拖拽 .md 文件 / 文件夹 → 
       if (trashed) S.loadTrash();
     }
 
-    /* 快速删除：拖拽落到树列底部「回收站」条即删（v0.2.25 替代原全屏横条；内置项自动跳过） */
+    /* 快速删除：拖拽落到树列底部「回收站」条即删（v0.2.25 替代原全屏横条；内置项自动跳过）
+       v0.3.4：ESM 拆分后必须读 S.selNotes，裸 ident 会在 dragstart 抛错，drop 因无 dragState 被拒 */
     const foot = $('#kbTreeFoot');
-    foot.addEventListener('dragover', e => {
-      if (!S.dragState) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      foot.classList.add('kb-drop-del');
-    });
-    foot.addEventListener('dragleave', e => {
-      if (!foot.contains(e.relatedTarget)) foot.classList.remove('kb-drop-del');
-    });
-    foot.addEventListener('drop', async e => {
-      if (!S.dragState) return;
-      e.preventDefault();
-      const { kind, ids } = S.dragState;
-      S.dragState = null;
-      S.highlightTrash(false);
-      $$('.kb-drop-hint', tree).forEach(x => x.classList.remove('kb-drop-hint'));
-      if (kind === 'note') await bulkDeleteNotes(ids);
-      else await bulkDeleteFolders(ids);
-    });
+    if (foot){
+      const allowTrashDrop = e => {
+        if (!S.dragState) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        foot.classList.add('kb-drop-del');
+      };
+      /* capture：内部按钮是视觉层，保证拖到按钮上也能 preventDefault 接受 drop */
+      foot.addEventListener('dragover', allowTrashDrop, true);
+      foot.addEventListener('dragenter', allowTrashDrop, true);
+      foot.addEventListener('dragleave', e => {
+        if (!foot.contains(e.relatedTarget)) foot.classList.remove('kb-drop-del');
+      });
+      foot.addEventListener('drop', async e => {
+        if (!S.dragState) return;
+        e.preventDefault();
+        e.stopPropagation();
+        S._trashDropAt = Date.now();   // 抑制随后误触发的 click（打开回收站弹层）
+        const { kind, ids } = S.dragState;
+        S.dragState = null;
+        S.highlightTrash(false);
+        $$('.kb-drop-hint', tree).forEach(x => x.classList.remove('kb-drop-hint'));
+        if (kind === 'note') await bulkDeleteNotes(ids);
+        else await bulkDeleteFolders(ids);
+      }, true);
+    }
 
     /* 多选操作栏：批量删除 / 取消选择 */
     $('#kbBatchDel')?.addEventListener('click', async () => {
-      const noteIds = [...selNotes], folderIds = [...selFolders];
+      const noteIds = [...S.selNotes], folderIds = [...S.selFolders];
       if (!noteIds.length && !folderIds.length) return;
       if (noteIds.length) await bulkDeleteNotes(noteIds);
       if (folderIds.length) await bulkDeleteFolders(folderIds);

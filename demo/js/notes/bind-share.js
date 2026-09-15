@@ -209,8 +209,12 @@ S.bindShare = function () {
       items.push(['新建仓库…', 'i-plus', () => S.createVault()]);
       S.kbMenu($('#kbVaultBtn'), items);
     });
-    /* 回收站入口：v0.2.26 整个底部条都是点击热区（按钮只是视觉），点击弹层 */
-    $('#kbTreeFoot')?.addEventListener('click', () => S.openTrashModal());
+    /* 回收站入口：v0.2.26 整个底部条都是点击热区（按钮只是视觉），点击弹层。
+       拖放到回收站后浏览器可能再派发 click，用时间戳跳过，避免误开弹层 */
+    $('#kbTreeFoot')?.addEventListener('click', () => {
+      if (Date.now() - (S._trashDropAt || 0) < 500) return;
+      S.openTrashModal();
+    });
     $('#kbTrashClose')?.addEventListener('click', () => App.closeModal('kbTrashMask'));
     $('#kbTrashPurgeAll')?.addEventListener('click', S.purgeAllTrash);
     $('#kbTrashMask')?.addEventListener('click', e => { if (e.target === $('#kbTrashMask')) App.closeModal('kbTrashMask'); });

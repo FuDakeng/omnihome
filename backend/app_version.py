@@ -4,8 +4,8 @@
 """
 from pathlib import Path
 
-VERSION = "0.3.3"
-STAGE = "手机导航"
+VERSION = "0.3.4"
+STAGE = "回收站拖放"
 
 _CHANGELOG_FILE = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
 
