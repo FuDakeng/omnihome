@@ -29,32 +29,51 @@
                 </div>
                 <div class="card-pad">
                   <div class="set-row">
-                    <div class="set-row-info"><div class="set-row-label">明暗模式</div><div class="set-row-sub">明暗与主色方案正交，可任意组合</div></div>
+                    <div class="set-row-info">
+                      <div class="set-row-label">明暗模式</div>
+                      <div class="set-row-sub">明暗与主色方案正交，可任意组合</div>
+                    </div>
                     <div class="seg" id="modeSeg">
-                      <button class="seg-btn" data-mode="light"><svg class="ic"><use href="#i-sun"/></svg>浅色</button>
-                      <button class="seg-btn active" data-mode="dark"><svg class="ic"><use href="#i-moon"/></svg>深色</button>
-                      <button class="seg-btn" data-mode="auto"><svg class="ic"><use href="#i-clock"/></svg>跟随系统</button>
+                      <button type="button" class="seg-btn" data-mode="light"><svg class="ic"><use href="#i-sun"/></svg>浅色</button>
+                      <button type="button" class="seg-btn active" data-mode="dark"><svg class="ic"><use href="#i-moon"/></svg>深色</button>
+                      <button type="button" class="seg-btn" data-mode="auto"><svg class="ic"><use href="#i-clock"/></svg>跟随系统</button>
                     </div>
                   </div>
                   <div class="set-row">
-                    <div class="set-row-info"><div class="set-row-label">界面密度</div><div class="set-row-sub">紧凑模式减小卡片间距，单屏展示更多内容</div></div>
-                    <div class="seg" id="densitySeg"><button class="seg-btn" data-density="compact">紧凑</button><button class="seg-btn active" data-density="cozy">舒适</button></div>
+                    <div class="set-row-info">
+                      <div class="set-row-label">界面密度</div>
+                      <div class="set-row-sub">紧凑模式减小卡片间距，单屏展示更多内容</div>
+                    </div>
+                    <div class="seg" id="densitySeg">
+                      <button type="button" class="seg-btn" data-density="compact">紧凑</button>
+                      <button type="button" class="seg-btn active" data-density="cozy">舒适</button>
+                    </div>
                   </div>
                   <div class="set-row">
-                    <div class="set-row-info"><div class="set-row-label">降低动效</div><div class="set-row-sub">减少过渡动画与悬浮位移</div></div>
-                    <button class="switch" id="motionSwitch" role="switch"></button>
+                    <div class="set-row-info">
+                      <div class="set-row-label">降低动效</div>
+                      <div class="set-row-sub">减少过渡动画与悬浮位移</div>
+                    </div>
+                    <button type="button" class="switch" id="motionSwitch" role="switch" aria-checked="false"></button>
+                  </div>
+                </div>
+              </article>
+
+              <article class="card">
+                <div class="card-head">
+                  <h3 class="card-title"><svg class="ic"><use href="#i-palette"/></svg>品牌主色</h3>
                   <span class="chip no-dot">一个色相值全站换肤</span>
                 </div>
                 <div class="card-pad">
                   <div class="swatches">
-                    <button class="swatch on" data-hue="243" style="background:hsl(243 72% 58%)" title="靛蓝"></button>
-                    <button class="swatch" data-hue="190" style="background:hsl(190 72% 48%)" title="青碧"></button>
-                    <button class="swatch" data-hue="160" style="background:hsl(160 70% 42%)" title="翡翠"></button>
-                    <button class="swatch" data-hue="35" style="background:hsl(35 90% 52%)" title="琥珀"></button>
-                    <button class="swatch" data-hue="340" style="background:hsl(340 75% 55%)" title="玫瑰"></button>
-                    <button class="swatch custom" title="自定义颜色"><input type="color" id="customColor" value="#6366f1"></button>
+                    <button type="button" class="swatch on" data-hue="243" style="background:hsl(243 72% 58%)" title="靛蓝"></button>
+                    <button type="button" class="swatch" data-hue="190" style="background:hsl(190 72% 48%)" title="青碧"></button>
+                    <button type="button" class="swatch" data-hue="160" style="background:hsl(160 70% 42%)" title="翡翠"></button>
+                    <button type="button" class="swatch" data-hue="35" style="background:hsl(35 90% 52%)" title="琥珀"></button>
+                    <button type="button" class="swatch" data-hue="340" style="background:hsl(340 75% 55%)" title="玫瑰"></button>
+                    <button type="button" class="swatch custom" title="自定义颜色"><input type="color" id="customColor" value="#6366f1"></button>
                   </div>
-                  <div style="font-size:11px;color:var(--om-text-3);margin-top:10px">派生色由 color-mix() 自动生成，按钮 / 高亮 / 图表随主色联动，点击上方色板即可实时预览</div>
+                  <p class="set-swatch-hint">派生色由 color-mix() 自动生成，按钮 / 高亮 / 图表随主色联动，点击上方色板即可实时预览</p>
                 </div>
               </article>
 

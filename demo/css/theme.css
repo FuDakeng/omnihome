@@ -163,3 +163,16 @@ input, textarea, select{ font-family: inherit; font-size: inherit; color: inheri
 ::-webkit-scrollbar-thumb{ background: var(--om-surface-3); border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover{ background: var(--om-border-strong); }
 ::-webkit-scrollbar-track{ background: transparent; }
+
+/* 紧凑密度：缩小间距令牌，仪表盘网格 / 卡片内边距 / 顶栏自动变密 */
+html[data-compact="on"]{
+  --om-space-1: 3px;
+  --om-space-2: 6px;
+  --om-space-3: 8px;
+  --om-space-4: 10px;
+  --om-space-5: 12px;
+  --om-space-6: 16px;
+  --om-space-8: 20px;
+  --om-topbar-h: 56px;
+  --om-radius-lg: 14px;
+}

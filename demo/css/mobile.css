@@ -79,8 +79,26 @@
     padding-bottom: 4px;
   }
   .set-item{ white-space: nowrap; flex: none; }
-  .set-row{ flex-wrap: wrap; }
+  .set-row{
+    flex-wrap: wrap;
+    align-items: flex-start;
+    row-gap: 10px;
+    padding: 14px 0;
+  }
+  .set-row:first-child{ padding-top: 10px; }
+  .set-row:last-child{ padding-bottom: 10px; }
+  .set-row > .seg,
+  .set-row > .switch,
+  .set-row > .lang-select,
+  .set-row > .btn{ margin-left: auto; }
+  .set-panel .card-head{ padding: 14px 16px 12px; }
+  .set-panel .card-pad{ padding: 4px 16px 14px; }
   .ms-body{ padding: 12px; }
+  html[data-compact="on"] .modal-settings .set-panel .card-head{ padding: 14px 16px 12px; }
+  html[data-compact="on"] .modal-settings .set-panel .card-pad{ padding: 4px 16px 14px; }
+  html[data-compact="on"] .modal-settings .set-row{ padding: 14px 0; }
+  html[data-compact="on"] .modal-settings .set-row:first-child{ padding-top: 10px; }
+  html[data-compact="on"] .modal-settings .set-row:last-child{ padding-bottom: 10px; }
   #changelogMask .modal{ width: min(520px, calc(100vw - 16px)); max-height: calc(var(--om-app-h) - 80px); }
   /* 关于页更新日志：窄屏同样固定高度，给下方「开源与致谢」留位置 */
   #aboutChangelog{ height: 180px; max-height: min(180px, 32vh); }

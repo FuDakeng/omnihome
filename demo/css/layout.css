@@ -131,10 +131,10 @@
 .user-name{ font-size: 13px; font-weight: 600; }
 .user-plan{ font-size: 11px; color: var(--om-text-3); }
 
-/* 降低动效开启时取消悬浮位移（仅保留背景变化） */
-[data-motion="off"] .user-chip:hover,
-[data-motion="off"] .user-chip:active{ transform: none; }
-[data-motion="off"] .user-chip:hover .avatar{ transform: none; }
+html[data-compact="on"] .nav-item{ padding: 7px 10px; }
+html[data-compact="on"] .nav-group{ margin-bottom: var(--om-space-3); }
+html[data-compact="on"] .card-head{ padding: var(--om-space-3) var(--om-space-4); }
+html[data-compact="on"] .card-pad{ padding: 0 var(--om-space-4) var(--om-space-4); }
 
 /* 折叠（图标栏）模式 */
 .sidebar-collapsed .app{ grid-template-columns: var(--om-sidebar-w-rail) 1fr; }
@@ -318,7 +318,29 @@
   .set-item{ white-space: nowrap; }
 }
 
-/* 降低动效偏好 */
+/* 降低动效：设置开关（html[data-motion=off]）或系统偏好 */
+html[data-motion="off"] *,
+html[data-motion="off"] *::before,
+html[data-motion="off"] *::after{
+  animation-duration: .01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .01ms !important;
+  scroll-behavior: auto !important;
+}
+html[data-motion="off"] .card.lift:hover,
+html[data-motion="off"] .swatch:hover,
+html[data-motion="off"] .user-chip:hover,
+html[data-motion="off"] .user-chip:active,
+html[data-motion="off"] .user-chip:hover .avatar,
+html[data-motion="off"] .user-chip:hover .chev,
+html[data-motion="off"] .btn:active{
+  transform: none;
+}
 @media (prefers-reduced-motion: reduce){
-  *, *::before, *::after{ animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  *, *::before, *::after{
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -43,6 +43,32 @@ def test_render_index_injects_version():
     assert "<!--OVERLAYS-->" not in html
 
 
+def test_appearance_density_and_motion_wired():
+    """密度 / 动效开关必须真正改 html dataset，且有对应 CSS；外观页结构完整。"""
+    html = (ROOT / "demo" / "views" / "overlays-settings.html").read_text(encoding="utf-8")
+    assert 'id="densitySeg"' in html
+    assert 'id="motionSwitch"' in html
+    assert "品牌主色" in html
+    motion_idx = html.index('id="motionSwitch"')
+    accent_idx = html.index("品牌主色")
+    chip_idx = html.index("一个色相值全站换肤")
+    assert motion_idx < accent_idx < chip_idx
+
+    theme = (ROOT / "demo" / "css" / "theme.css").read_text(encoding="utf-8")
+    layout = (ROOT / "demo" / "css" / "layout.css").read_text(encoding="utf-8")
+    compact_block = theme.split('html[data-compact="on"]', 1)[1][:400]
+    motion_block = layout.split('html[data-motion="off"]', 1)[1][:500]
+    assert "--om-space-5:" in compact_block
+    assert "animation-duration" in motion_block
+
+    settings_js = (ROOT / "demo" / "js" / "settings.js").read_text(encoding="utf-8")
+    assert "previewAppearance" in settings_js
+    app_js = (ROOT / "demo" / "js" / "app.js").read_text(encoding="utf-8")
+    assert "dataset.compact" in app_js
+    assert "dataset.motion" in app_js
+    assert "om_layout_compact" in app_js
+
+
 def test_kb_drag_state_uses_module_sets():
     """v0.2.52 ESM 拆分后裸 selNotes 会 ReferenceError，拖到回收站失效。"""
     import re

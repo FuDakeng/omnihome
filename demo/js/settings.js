@@ -30,18 +30,37 @@
   function reflectPrefs(){
     const p = App.prefs;
     if (!p) return;
+    const layout = p.layout || {};
+    const theme = p.theme || {};
+    const locale = p.locale || {};
     $$('#densitySeg .seg-btn').forEach(b =>
       b.classList.toggle('active',
-        b.dataset.density === (p.layout.compact ? 'compact' : 'cozy')));
-    $('#motionSwitch').classList.toggle('on', !!p.layout.reduceMotion);
-    $('#langSelect').value = p.locale.lang || 'zh-CN';
+        b.dataset.density === (layout.compact ? 'compact' : 'cozy')));
+    const motionOn = !!layout.reduceMotion;
+    $('#motionSwitch').classList.toggle('on', motionOn);
+    $('#motionSwitch').setAttribute('aria-checked', motionOn ? 'true' : 'false');
+    $('#langSelect').value = locale.lang || 'zh-CN';
     $$('#weekSeg .seg-btn').forEach(b =>
-      b.classList.toggle('active', b.dataset.week === (p.locale.weekStart || 'mon')));
+      b.classList.toggle('active', b.dataset.week === (locale.weekStart || 'mon')));
     $$('#tempSeg .seg-btn').forEach(b =>
-      b.classList.toggle('active', b.dataset.temp === (p.locale.tempUnit || 'c')));
+      b.classList.toggle('active', b.dataset.temp === (locale.tempUnit || 'c')));
     /* 色板高亮 */
     $$('.swatch[data-hue]').forEach(sw =>
-      sw.classList.toggle('on', String(sw.dataset.hue) === String(p.theme.hue)));
+      sw.classList.toggle('on', String(sw.dataset.hue) === String(theme.hue)));
+  }
+
+  /* 控件已更新后立刻套到 <html>，不必等接口往返；持久化仍防抖。 */
+  function previewAppearance(){
+    const next = collect();
+    const cur = App.prefs || { theme: {}, layout: {}, locale: {} };
+    App.applyPrefs({
+      ...cur,
+      theme: { ...cur.theme, ...next.theme },
+      layout: { ...cur.layout, ...next.layout },
+      locale: { ...cur.locale, ...next.locale },
+    });
+    const sw = $('#motionSwitch');
+    if (sw) sw.setAttribute('aria-checked', sw.classList.contains('on') ? 'true' : 'false');
   }
 
   /* ---------- 自动保存 ----------
@@ -49,6 +68,7 @@
      其余分区（账号 / 数据 / AI）各有独立保存按钮。 */
   let saveTimer = null;
   function autoSave(){
+    previewAppearance();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
       try {

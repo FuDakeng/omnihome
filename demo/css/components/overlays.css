@@ -25,6 +25,7 @@
 @media (prefers-reduced-motion: reduce){
   .boot-bar i{ animation: none; width: 100%; opacity: .35; }
 }
+html[data-motion="off"] .boot-bar i{ animation: none; width: 100%; opacity: .35; }
 
 /* ---------- 附件灯箱 ---------- */
 .asset-lightbox{ position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; }
@@ -280,7 +281,7 @@
 }
 .ms-head{
   display: flex; align-items: flex-start; justify-content: space-between; gap: var(--om-space-3);
-  padding: var(--om-space-4) var(--om-space-5);
+  padding: 16px 20px;
   border-bottom: 1px solid var(--om-border);
 }
 .ms-head h3{
@@ -293,7 +294,7 @@
 .ms-body{
   flex: 1; min-height: 0;
   overflow-y: auto;
-  padding: var(--om-space-5);
+  padding: 20px;
   background: color-mix(in oklab, var(--om-bg) 55%, var(--om-surface));
 }
 .modal-settings .m-foot{ flex-shrink: 0; }
@@ -301,7 +302,7 @@
 .set-layout{
   display: grid;
   grid-template-columns: 216px minmax(0, 1fr);
-  gap: var(--om-space-5);
+  gap: 20px;
   align-items: start;
 }
 .set-menu{
@@ -322,19 +323,43 @@
 .set-item:hover{ background: var(--om-surface-2); color: var(--om-text-1); }
 .set-item.active{ background: var(--om-primary-ghost); color: var(--om-primary); font-weight: 600; }
 .set-item.active .ic{ color: var(--om-primary); }
-.set-panel{ display: flex; flex-direction: column; gap: var(--om-space-5); min-width: 0; }
-.set-row{
-  display: flex; align-items: center; justify-content: space-between; gap: var(--om-space-4);
-  padding: 14px 0;
+.set-panel{ display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.set-panel .card-head{
+  padding: 18px 22px 14px;
   border-bottom: 1px solid var(--om-border);
 }
-.set-row:first-child{ padding-top: 0; }
-.set-row:last-child{ border-bottom: 0; padding-bottom: 0; }
-.set-row-info{ min-width: 0; }
-.set-row-label{ font-size: var(--om-fs-sm); font-weight: 600; color: var(--om-text-1); }
-.set-row-sub{ font-size: 12px; color: var(--om-text-3); margin-top: 2px; line-height: 1.5; }
+.set-panel .card-pad{ padding: 6px 22px 18px; }
+.set-row{
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px 24px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--om-border);
+}
+.set-row:first-child{ padding-top: 12px; }
+.set-row:last-child{ border-bottom: 0; padding-bottom: 12px; }
+.set-row-info{ min-width: 0; flex: 1 1 168px; }
+.set-row-label{ font-size: var(--om-fs-sm); font-weight: 600; color: var(--om-text-1); line-height: 1.45; }
+.set-row-sub{ font-size: 12px; color: var(--om-text-3); margin-top: 5px; line-height: 1.55; }
 .set-row-ctrl{ display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .set-row-hint{ font-size: 12px; color: var(--om-text-3); }
+.set-row > .seg,
+.set-row > .switch,
+.set-row > .lang-select,
+.set-row > .btn,
+.set-row > .set-row-ctrl{ flex: none; }
+.set-row > .seg{ flex-wrap: wrap; justify-content: flex-end; }
+.set-swatch-hint{
+  font-size: 12px; color: var(--om-text-3);
+  margin: 14px 0 4px; line-height: 1.65;
+}
+.set-panel .swatches{ padding-top: 12px; }
+/* 紧凑模式不挤扁设置表单，保持上面的可读间距 */
+html[data-compact="on"] .modal-settings .set-panel{ gap: 20px; }
+html[data-compact="on"] .modal-settings .set-panel .card-head{ padding: 18px 22px 14px; }
+html[data-compact="on"] .modal-settings .set-panel .card-pad{ padding: 6px 22px 18px; }
+html[data-compact="on"] .modal-settings .set-row{ padding: 16px 0; }
+html[data-compact="on"] .modal-settings .set-row:first-child{ padding-top: 12px; }
+html[data-compact="on"] .modal-settings .set-row:last-child{ padding-bottom: 12px; }
 /* 仅给非管理员看的提示条（功能设置卡里开关的替代说明） */
 .features-admin-only{
   display: flex; align-items: center; gap: 8px;

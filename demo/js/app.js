@@ -20,8 +20,15 @@ const App = (() => {
     if (typeof setAccent === 'function' && prefs.theme){
       setAccent(prefs.theme.hue, (prefs.theme.sat || 72) + '%');
     }
-    document.documentElement.dataset.compact = prefs.layout && prefs.layout.compact ? 'on' : 'off';
-    document.documentElement.dataset.motion = prefs.layout && prefs.layout.reduceMotion ? 'off' : 'on';
+    const layout = prefs.layout || {};
+    const compact = !!layout.compact;
+    const reduceMotion = !!layout.reduceMotion;
+    document.documentElement.dataset.compact = compact ? 'on' : 'off';
+    document.documentElement.dataset.motion = reduceMotion ? 'off' : 'on';
+    try {
+      localStorage.setItem('om_layout_compact', compact ? '1' : '0');
+      localStorage.setItem('om_layout_motion', reduceMotion ? '1' : '0');
+    } catch (e) { /* 隐私模式等无法写入时跳过，登录后仍由服务端偏好生效 */ }
   }
 
   /* 头像渲染：有自定义头像时用图片填充，否则回首字母 */
