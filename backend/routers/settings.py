@@ -56,7 +56,7 @@ def put_settings(body: PrefsIn, authorization: Optional[str] = Header(None)):
     return prefs
 
 DEFAULT_WIDGETS = ["weather", "monitor", "quicknav", "calendar", "word",
-                   "vault", "quicknote", "plan", "toolbox"]
+                   "vault", "quicknote", "plan", "translate", "passgen"]
 
 class DashboardIn(BaseModel):
     order: list = []

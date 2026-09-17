@@ -1,6 +1,5 @@
 /* ---------- 实用工具箱 ---------- */
 .tool-grid{ display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--om-space-3); }
-[data-widget="toolbox"] .tool-grid{ grid-template-columns: repeat(6, 1fr); }
 .tool-tile{
   display: flex; flex-direction: column; gap: 8px;
   padding: var(--om-space-4);
@@ -31,7 +30,7 @@
 }
 
 /* 翻译面板 */
-.trans-lang{ display: flex; align-items: center; gap: var(--om-space-3); }
+.trans-lang{ display: flex; align-items: center; gap: var(--om-space-3); flex-wrap: wrap; }
 .lang-select{
   height: 34px; padding: 0 12px;
   border-radius: var(--om-radius-sm);
@@ -58,6 +57,24 @@
   background: transparent;
   color: var(--om-text-1);
   line-height: 1.8;
+  font-size: var(--om-fs-sm);
+}
+#dashGrid [data-widget="translate"],
+#dashGrid [data-widget="passgen"]{
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+#dashGrid [data-widget="translate"] .card-pad,
+#dashGrid [data-widget="passgen"] .card-pad{
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+#dashGrid [data-widget="translate"].sized,
+#dashGrid [data-widget="passgen"].sized{
+  height: var(--dash-h, auto);
+  max-height: var(--dash-h, none);
 }
 .t-pane.result{ border-color: var(--om-primary-border); background: var(--om-primary-soft); }
 

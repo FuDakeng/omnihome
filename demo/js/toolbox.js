@@ -4,56 +4,64 @@
    颜色转换 · JSON 格式化 · Base64 编解码。
    ============================================================ */
 (() => {
-  /* ---------- 翻译 ---------- */
+  /* ---------- 翻译（工具箱页 + 仪表盘组件各一份，按根节点绑定） ---------- */
   const LANGS = { '中文': 'zh-CN', 'English': 'en', '日本語': 'ja', '한국어': 'ko' };
-  function initTranslate(){
-    const src = $('#trSrc'), out = $('#trOut');
-    const from = $('#trFrom'), to = $('#trTo');
-    const update = () => $('#trCount').textContent = src.value.length + ' / 5000';
+  function initTranslate(root){
+    const src = $('[data-tr="src"]', root), out = $('[data-tr="out"]', root);
+    const from = $('[data-tr="from"]', root), to = $('[data-tr="to"]', root);
+    const count = $('[data-tr="count"]', root);
+    const btnGo = $('[data-tr="go"]', root);
+    if (!src || !out || !from || !to || !btnGo) return;
+    const update = () => { if (count) count.textContent = src.value.length + ' / 5000'; };
     src.addEventListener('input', update);
-    $('#trSwap').addEventListener('click', () => {
+    update();
+    $('[data-tr="swap"]', root)?.addEventListener('click', () => {
       const a = from.value; from.value = to.value; to.value = a;
       const outTxt = out.querySelector('span');
       const b = src.value; src.value = outTxt.textContent.trim();
       outTxt.textContent = b;
       update();
     });
-    $('#trCopy').addEventListener('click', async () => {
+    $('[data-tr="copy"]', root)?.addEventListener('click', async () => {
       await navigator.clipboard.writeText(out.querySelector('span').textContent.trim());
       showToast('译文已复制');
     });
-    $('#trSpeak').addEventListener('click', () => {
+    $('[data-tr="speak"]', root)?.addEventListener('click', () => {
       const u = new SpeechSynthesisUtterance(out.querySelector('span').textContent.trim());
       u.lang = LANGS[to.value] === 'zh-CN' ? 'zh-CN' : 'en-US';
       speechSynthesis.cancel(); speechSynthesis.speak(u);
     });
-    $('#trGo').addEventListener('click', async () => {
+    btnGo.addEventListener('click', async () => {
       const text = src.value.trim();
       if (!text) return showToast('请输入要翻译的内容', 'err');
-      const btn = $('#trGo');
-      btn.disabled = true;
-      btn.dataset.origHtml = btn.innerHTML;
-      btn.innerHTML = '<span class="loading-dot"></span>翻译中…';
+      btnGo.disabled = true;
+      btnGo.dataset.origHtml = btnGo.innerHTML;
+      btnGo.innerHTML = '<span class="loading-dot"></span>翻译中…';
       try {
         const d = await API.get(`/api/tools/translate?text=${encodeURIComponent(text)}` +
           `&source=${LANGS[from.value]}&target=${LANGS[to.value]}`);
         out.querySelector('span').textContent = d.translation;
       } catch (e) { showToast(e.message, 'err'); }
       finally {
-        btn.disabled = false;
-        if (btn.dataset.origHtml){ btn.innerHTML = btn.dataset.origHtml; delete btn.dataset.origHtml; }
+        btnGo.disabled = false;
+        if (btnGo.dataset.origHtml){ btnGo.innerHTML = btnGo.dataset.origHtml; delete btnGo.dataset.origHtml; }
       }
     });
   }
 
-  /* ---------- 强密码生成 ---------- */
-  function initPassGen(){
-    const out = $('#pgOut'), lenLabel = $('#pgLenVal'), range = $('#pgLen');
+  /* ---------- 强密码生成（工具箱页 + 仪表盘组件各一份） ---------- */
+  function initPassGen(root){
+    const out = $('[data-pg="out"]', root), lenLabel = $('[data-pg="len-val"]', root);
+    const range = $('[data-pg="len"]', root);
+    const bar = $('[data-pg="strength"]', root), barLbl = $('[data-pg="strength-lbl"]', root);
+    if (!out || !range) return;
     function gen(){
       const len = parseInt(range.value, 10);
       const use = {
-        upper: $('#pgUpper').checked, lower: $('#pgLower').checked,
-        digit: $('#pgDigit').checked, symbol: $('#pgSymbol').checked,
+        upper: $('[data-pg="upper"]', root)?.checked,
+        lower: $('[data-pg="lower"]', root)?.checked,
+        digit: $('[data-pg="digit"]', root)?.checked,
+        symbol: $('[data-pg="symbol"]', root)?.checked,
       };
       let pool = '';
       if (use.upper) pool += 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -65,8 +73,8 @@
       crypto.getRandomValues(buf);
       const pwd = Array.from(buf, n => pool[n % pool.length]).join('');
       out.textContent = pwd;
-      $('#pgStrength').className = 'strength s' + score(pwd);
-      $('#pgStrengthLbl').textContent = ['—', '弱', '中', '强', '极强'][score(pwd)];
+      if (bar) bar.className = 'strength s' + score(pwd);
+      if (barLbl) barLbl.textContent = ['—', '弱', '中', '强', '极强'][score(pwd)];
       return pwd;
     }
     function score(pwd){
@@ -76,11 +84,11 @@
       if (/[^A-Za-z0-9]/.test(pwd) && /\d/.test(pwd)) s++;
       return Math.min(4, s);
     }
-    range.addEventListener('input', () => { lenLabel.textContent = range.value; gen(); });
-    $$('.pg-checks input').forEach(cb => cb.addEventListener('change', gen));
-    $('#pgGo').addEventListener('click', gen);
-    $('#pgRegen').addEventListener('click', gen);
-    $('#pgCopy').addEventListener('click', async () => {
+    range.addEventListener('input', () => { if (lenLabel) lenLabel.textContent = range.value; gen(); });
+    $$('.pg-checks input', root).forEach(cb => cb.addEventListener('change', gen));
+    $('[data-pg="go"]', root)?.addEventListener('click', gen);
+    $('[data-pg="regen"]', root)?.addEventListener('click', gen);
+    $('[data-pg="copy"]', root)?.addEventListener('click', async () => {
       if (!out.textContent) gen();
       await navigator.clipboard.writeText(out.textContent);
       showToast('密码已复制');
@@ -238,15 +246,15 @@
                        'tool-color': 'colorMask', 'tool-json': 'jsonMask', 'tool-b64': 'b64Mask' };
 
   function init(){
-    initTranslate(); initPassGen(); initTimestamp();
+    $$('[data-tool="translate"]').forEach(initTranslate);
+    $$('[data-tool="passgen"]').forEach(initPassGen);
+    initTimestamp();
     initQr(); initUnit(); initColor(); initJson(); initBase64();
     document.addEventListener('click', e => {
       const tile = e.target.closest('.tool-tile[id], .js-tool-tile[id]');
       if (!tile || tile.classList.contains('soon')) return;
       const modalId = TOOL_MODAL[tile.id];
       if (modalId) App.openModal(modalId);
-      else if (tile.id === 'tool-trans') goView('toolbox');
-      else if (tile.id === 'tool-pass') goView('toolbox');
     });
     $$('.modal [data-close]').forEach(b =>
       b.addEventListener('click', () => b.closest('.modal-mask').classList.remove('open')));
