@@ -76,12 +76,16 @@ def test_dashboard_widget_layout_flex():
     assert "sameRow" in js
     assert "has-h" in js
     assert "classList.add('dragging')" in js
+    assert "beginSort" in js
+    assert "onSortMove" in js
+    assert "dragstart" not in js
     css = (ROOT / "demo" / "css" / "components" / "pages.css").read_text(encoding="utf-8")
     assert "align-items: start" in css
     assert "#dashGrid [data-widget].has-h" in css
     assert "min-height: var(--dash-h" not in css
     assert "position: fixed" in css
-    assert "left: -9999px" in css
+    assert "dash-sorting" in css
+    assert "left: -9999px" not in css
     html = (ROOT / "demo" / "views" / "dashboard.html").read_text(encoding="utf-8")
     assert "dash-spark-svg" in html
 

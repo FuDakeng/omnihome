@@ -455,17 +455,19 @@ pre.md-code.is-folded [data-md-code-act="fold"]{ transform: rotate(-90deg); }
 }
 #dashGrid.editing{ row-gap: calc(var(--om-space-5) + 16px); }
 #dashGrid.editing [data-widget]{ outline: 1px dashed var(--om-primary-border); outline-offset: 3px; }
-/* 拖起后移出网格，避免原位仍占一格导致只能往前插 */
+/* 指针拖：卡片悬浮跟随光标，不占网格；占位框留在原位/目标位 */
 #dashGrid [data-widget].dragging{
   position: fixed;
-  left: -9999px;
-  top: 0;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
+  z-index: 80;
+  margin: 0;
+  opacity: .92;
   pointer-events: none;
-  z-index: -1;
+  box-shadow: var(--om-shadow-lg);
+  max-height: none;
 }
+body.dash-sorting{ user-select: none; cursor: grabbing; }
+body.dash-sorting .dash-grip{ cursor: grabbing; }
+body.dash-sorting .card.lift:hover{ transform: none; }
 
 /* 卡片边缘悬浮操作条：拖拽把手 + 收纳 */
 .dash-tools{

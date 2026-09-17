@@ -215,12 +215,7 @@ const Dash = (() => {
     $('#dashAddBtn').hidden = !on;
     cards().forEach(toggleCardTools);
     if (!on){
-      if (placeholder && placeholder.parentNode){
-        if (dragCard) placeholder.parentNode.insertBefore(dragCard, placeholder);
-        placeholder.remove();
-      }
-      if (dragCard){ dragCard.classList.remove('dragging'); dragCard.draggable = false; dragCard = null; }
-      placeholder = null;
+      finishSort(false);
       abortResize();
     }
   }
@@ -249,7 +244,6 @@ const Dash = (() => {
       if (bar) bar.remove();
       if (handle) handle.remove();
       hideSizeTip(card);
-      card.draggable = false;
     }
   }
 
@@ -287,17 +281,27 @@ const Dash = (() => {
     showToast(`已添加「${WIDGETS[id].title}」`);
   }
 
-  /* ---------- 拖拽排序（虚影预览） ---------- */
-  /* 源卡片拖起后移出文档流，只留占位框占格，这样同一行可以前后互换。
-     同行用水平中线、跨行用卡片顶边：后面的能往前、前面的也能往后。
-     光标还在占位框里时不移动，避免占位框一挪卡片跟着跑造成抖动。 */
+  /* ---------- 拖拽排序（指针拖，不用 HTML5 drag） ---------- */
+  /* HTML5 拖放在源节点被移出文档流时会被浏览器直接取消，卡片就再也拖不动。
+     改成按住把手用 pointer 拖：源卡悬浮跟随光标，网格里只留占位框，
+     同行按水平中线、跨行按顶边插入，前面的也能挪到后面。 */
+  let pendingMove = null;   // { card, x0, y0 }
+  let dragOff = { x: 0, y: 0 };
+
   function onGripDown(e){
-    if (!editing) return;
+    if (!editing || e.button !== 0) return;
     if (window.isPhone && isPhone()) return;
     const grip = e.target.closest('.dash-grip');
     if (!grip) return;
     const card = grip.closest('[data-widget]');
-    if (card) card.draggable = true;
+    if (!card || card.hidden || resizing || dragCard) return;
+    e.preventDefault();
+    pendingMove = { card, x0: e.clientX, y0: e.clientY };
+    document.addEventListener('pointermove', onSortMove);
+    document.addEventListener('mousemove', onSortMove);
+    document.addEventListener('pointerup', onSortUp);
+    document.addEventListener('pointercancel', onSortUp);
+    document.addEventListener('mouseup', onSortUp);
   }
 
   function effectiveCol(card){
@@ -313,36 +317,35 @@ const Dash = (() => {
     return ph;
   }
 
-  function onDragStart(e){
-    const card = e.target.closest ? e.target.closest('[data-widget]') : null;
-    if (!editing || !card || card.hidden || !card.draggable){ return; }
+  function beginSort(card, e){
+    const r = card.getBoundingClientRect();
+    dragOff = { x: e.clientX - r.left, y: e.clientY - r.top };
     dragCard = card;
-    e.dataTransfer.effectAllowed = 'move';
-    try { e.dataTransfer.setData('text/plain', card.dataset.widget); } catch (_) {}
     placeholder = makePlaceholder(card);
     card.parentNode.insertBefore(placeholder, card);
-    /* 延后移出文档流：让浏览器先用原外观生成拖拽虚影 */
-    setTimeout(() => { if (dragCard === card) card.classList.add('dragging'); }, 0);
+    card.style.width = r.width + 'px';
+    card.style.height = r.height + 'px';
+    card.style.left = r.left + 'px';
+    card.style.top = r.top + 'px';
+    card.classList.add('dragging');
+    document.body.classList.add('dash-sorting');
   }
 
-  function onDragOver(e){
-    if (!dragCard || !placeholder) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+  function relocatePlaceholder(clientX, clientY){
     const pr = placeholder.getBoundingClientRect();
-    if (e.clientX >= pr.left && e.clientX <= pr.right &&
-        e.clientY >= pr.top && e.clientY <= pr.bottom) return;
+    if (clientX >= pr.left && clientX <= pr.right &&
+        clientY >= pr.top && clientY <= pr.bottom) return;
 
     const others = cards().filter(c => c !== dragCard && !c.hidden);
     let ref = null;
     for (const c of others){
       const r = c.getBoundingClientRect();
-      const sameRow = e.clientY >= r.top && e.clientY <= r.bottom;
+      const sameRow = clientY >= r.top && clientY <= r.bottom;
       if (sameRow){
-        if (e.clientX < r.left + r.width / 2){ ref = c; break; }
+        if (clientX < r.left + r.width / 2){ ref = c; break; }
         continue;
       }
-      if (e.clientY < r.top){ ref = c; break; }
+      if (clientY < r.top){ ref = c; break; }
     }
     if (ref){
       if (placeholder.nextElementSibling !== ref) grid.insertBefore(placeholder, ref);
@@ -352,17 +355,47 @@ const Dash = (() => {
     }
   }
 
-  function onDragEnd(){
+  function onSortMove(e){
+    if (dragCard){
+      e.preventDefault();
+      dragCard.style.left = (e.clientX - dragOff.x) + 'px';
+      dragCard.style.top = (e.clientY - dragOff.y) + 'px';
+      relocatePlaceholder(e.clientX, e.clientY);
+      return;
+    }
+    if (!pendingMove) return;
+    const dx = e.clientX - pendingMove.x0, dy = e.clientY - pendingMove.y0;
+    if (dx * dx + dy * dy < 16) return;
+    beginSort(pendingMove.card, e);
+    pendingMove = null;
+  }
+
+  function onSortUp(){
+    const commit = !!dragCard;
+    finishSort(commit);
+  }
+
+  function finishSort(commit){
+    document.removeEventListener('pointermove', onSortMove);
+    document.removeEventListener('mousemove', onSortMove);
+    document.removeEventListener('pointerup', onSortUp);
+    document.removeEventListener('pointercancel', onSortUp);
+    document.removeEventListener('mouseup', onSortUp);
+    document.body.classList.remove('dash-sorting');
+    pendingMove = null;
     if (!dragCard) return;
     dragCard.classList.remove('dragging');
-    dragCard.draggable = false;
+    dragCard.style.left = '';
+    dragCard.style.top = '';
+    dragCard.style.width = '';
+    dragCard.style.height = '';
     if (placeholder && placeholder.parentNode){
       placeholder.parentNode.insertBefore(dragCard, placeholder);
       placeholder.remove();
     }
     dragCard = null;
     placeholder = null;
-    save();
+    if (commit) save();
   }
 
   /* ---------- 事件绑定 ---------- */
@@ -378,11 +411,6 @@ const Dash = (() => {
     });
 
     grid.addEventListener('mousedown', e => { onGripDown(e); onResizeDown(e); });
-    /* 未真正拖动时复位 draggable，避免误拖卡片内的文本选区 */
-    grid.addEventListener('mouseup', () => {
-      if (!editing) return;
-      cards().forEach(c => { if (c !== dragCard) c.draggable = false; });
-    });
     /* 双击手柄恢复该组件默认尺寸 */
     grid.addEventListener('dblclick', e => {
       const handle = e.target.closest('.dash-resize');
@@ -397,11 +425,6 @@ const Dash = (() => {
         removeWidget(btn.dataset.dashRemove);
       }
     });
-    grid.addEventListener('dragstart', onDragStart);
-    grid.addEventListener('dragenter', e => e.preventDefault());
-    grid.addEventListener('dragover', onDragOver);
-    grid.addEventListener('drop', e => e.preventDefault());
-    grid.addEventListener('dragend', onDragEnd);
 
     /* 视口跨越阈值时切换自定义尺寸的生效状态（窄屏回落响应式默认） */
     let lastWide = sizeEnabled();
