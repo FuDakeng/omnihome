@@ -43,6 +43,33 @@ def test_render_index_injects_version():
     assert "<!--OVERLAYS-->" not in html
 
 
+def test_dashboard_translate_passgen_widgets():
+    """仪表盘去掉工具箱卡片；翻译 / 强密码可添加，且工具箱页仍保留完整组件。"""
+    dash = (ROOT / "demo" / "views" / "dashboard.html").read_text(encoding="utf-8")
+    assert 'data-widget="toolbox"' not in dash
+    assert 'data-widget="translate"' in dash
+    assert 'data-widget="passgen"' in dash
+    assert 'data-tool="translate"' in dash
+    assert 'data-tool="passgen"' in dash
+
+    tb = (ROOT / "demo" / "views" / "toolbox.html").read_text(encoding="utf-8")
+    assert 'data-tool="translate"' in tb
+    assert 'data-tool="passgen"' in tb
+    assert 'id="tool-json"' in tb
+
+    js = (ROOT / "demo" / "js" / "dashboard.js").read_text(encoding="utf-8")
+    assert "translate:" in js
+    assert "passgen:" in js
+    assert "toolbox:" not in js
+    assert "OPT_IN" in js
+
+    settings = (ROOT / "backend" / "routers" / "settings.py").read_text(encoding="utf-8")
+    block = settings.split("DEFAULT_WIDGETS", 1)[1].split("]", 1)[0]
+    assert '"translate"' in block
+    assert '"passgen"' in block
+    assert '"toolbox"' not in block
+
+
 def test_appearance_density_and_motion_wired():
     """密度 / 动效开关必须真正改 html dataset，且有对应 CSS；外观页结构完整。"""
     html = (ROOT / "demo" / "views" / "overlays-settings.html").read_text(encoding="utf-8")

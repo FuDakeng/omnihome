@@ -193,6 +193,16 @@
   .wxs-op{ width: 36px; height: 36px; }
   .dash-spark{ min-width: 0 !important; }
   .tool-grid{ grid-template-columns: repeat(2, 1fr) !important; }
+  .trans-lang .lang-select{
+    flex: 1; min-width: 0;
+    min-height: 40px; font-size: 16px;
+  }
+  .trans-lang .icon-btn,
+  .trans-lang [data-tr="go"]{ min-height: 40px; }
+  .t-pane textarea{ font-size: 16px; min-height: 88px; }
+  .pg-out{ min-height: 44px; }
+  .pg-checks .checkbox{ min-height: 44px; }
+  [data-pg="go"]{ min-height: 40px; }
 
   .bm-cat-list{
     flex-wrap: nowrap !important;

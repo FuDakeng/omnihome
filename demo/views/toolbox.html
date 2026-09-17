@@ -9,26 +9,26 @@
 
         <div class="grid12">
           <!-- 翻译 -->
-          <article class="card col-8">
+          <article class="card col-8" data-tool="translate">
             <div class="card-head">
               <h3 class="card-title"><svg class="ic"><use href="#i-globe"/></svg>翻译</h3>
               <span class="chip no-dot">多引擎加速</span>
             </div>
             <div class="card-pad">
               <div class="trans-lang">
-                <select class="lang-select" id="trFrom"><option>中文</option><option>English</option><option>日本語</option><option>한국어</option></select>
-                <button class="icon-btn" id="trSwap" title="交换语言"><svg class="ic"><use href="#i-swap"/></svg></button>
-                <select class="lang-select" id="trTo"><option>中文</option><option selected>English</option><option>日本語</option><option>한국어</option></select>
-                <button class="btn btn-primary btn-sm" id="trGo" style="margin-left:auto"><svg class="ic"><use href="#i-zap"/></svg>翻译</button>
+                <select class="lang-select" data-tr="from"><option>中文</option><option>English</option><option>日本語</option><option>한국어</option></select>
+                <button class="icon-btn" data-tr="swap" title="交换语言"><svg class="ic"><use href="#i-swap"/></svg></button>
+                <select class="lang-select" data-tr="to"><option>中文</option><option selected>English</option><option>日本語</option><option>한국어</option></select>
+                <button class="btn btn-primary btn-sm" data-tr="go" style="margin-left:auto"><svg class="ic"><use href="#i-zap"/></svg>翻译</button>
               </div>
               <div class="t-panes">
                 <div class="t-pane">
-                  <textarea id="trSrc" placeholder="输入要翻译的文本…">自托管的最大乐趣，在于数据完全掌握在自己手中。</textarea>
-                  <div style="font-size:11px;color:var(--om-text-3);margin-top:8px" class="num" id="trCount">0 / 5000</div>
+                  <textarea data-tr="src" placeholder="输入要翻译的文本…">自托管的最大乐趣，在于数据完全掌握在自己手中。</textarea>
+                  <div style="font-size:11px;color:var(--om-text-3);margin-top:8px" class="num" data-tr="count">0 / 5000</div>
                 </div>
-                <div class="t-pane result" id="trOut"><span>译文将显示在这里，点击「翻译」开始。</span><div style="margin-top:8px;display:flex;gap:4px">
-                    <button class="icon-btn-xs" id="trCopy" title="复制"><svg class="ic"><use href="#i-copy"/></svg></button>
-                    <button class="icon-btn-xs" id="trSpeak" title="朗读"><svg class="ic"><use href="#i-volume"/></svg></button>
+                <div class="t-pane result" data-tr="out"><span>译文将显示在这里，点击「翻译」开始。</span><div style="margin-top:8px;display:flex;gap:4px">
+                    <button class="icon-btn-xs" data-tr="copy" title="复制"><svg class="ic"><use href="#i-copy"/></svg></button>
+                    <button class="icon-btn-xs" data-tr="speak" title="朗读"><svg class="ic"><use href="#i-volume"/></svg></button>
                   </div>
                 </div>
               </div>
@@ -36,29 +36,29 @@
           </article>
 
           <!-- 强密码生成 -->
-          <article class="card col-4">
+          <article class="card col-4" data-tool="passgen">
             <div class="card-head">
               <h3 class="card-title"><svg class="ic"><use href="#i-key"/></svg>强密码生成</h3>
             </div>
             <div class="card-pad">
               <div class="pg-out">
-                <span class="num" id="pgOut"></span>
-                <button class="icon-btn-xs" id="pgCopy" title="复制"><svg class="ic"><use href="#i-copy"/></svg></button>
-                <button class="icon-btn-xs" id="pgRegen" title="重新生成"><svg class="ic"><use href="#i-refresh"/></svg></button>
+                <span class="num" data-pg="out"></span>
+                <button class="icon-btn-xs" data-pg="copy" title="复制"><svg class="ic"><use href="#i-copy"/></svg></button>
+                <button class="icon-btn-xs" data-pg="regen" title="重新生成"><svg class="ic"><use href="#i-refresh"/></svg></button>
               </div>
               <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
-                <span class="strength" id="pgStrength" style="flex:1"><i style="width:auto;flex:1"></i><i style="width:auto;flex:1"></i><i style="width:auto;flex:1"></i><i style="width:auto;flex:1"></i></span>
-                <span style="font-size:11px;color:var(--om-text-3);font-weight:600" id="pgStrengthLbl">—</span>
+                <span class="strength" data-pg="strength" style="flex:1"><i style="width:auto;flex:1"></i><i style="width:auto;flex:1"></i><i style="width:auto;flex:1"></i><i style="width:auto;flex:1"></i></span>
+                <span style="font-size:11px;color:var(--om-text-3);font-weight:600" data-pg="strength-lbl">—</span>
               </div>
-              <div class="pg-row"><span>密码长度</span><b class="num" id="pgLenVal">16</b></div>
-              <input type="range" class="range" id="pgLen" min="8" max="32" value="16">
+              <div class="pg-row"><span>密码长度</span><b class="num" data-pg="len-val">16</b></div>
+              <input type="range" class="range" data-pg="len" min="8" max="32" value="16">
               <div class="pg-checks">
-                <label class="checkbox"><input type="checkbox" id="pgUpper" checked><span class="box"></span>大写字母</label>
-                <label class="checkbox"><input type="checkbox" id="pgLower" checked><span class="box"></span>小写字母</label>
-                <label class="checkbox"><input type="checkbox" id="pgDigit" checked><span class="box"></span>数字</label>
-                <label class="checkbox"><input type="checkbox" id="pgSymbol" checked><span class="box"></span>特殊符号</label>
+                <label class="checkbox"><input type="checkbox" data-pg="upper" checked><span class="box"></span>大写字母</label>
+                <label class="checkbox"><input type="checkbox" data-pg="lower" checked><span class="box"></span>小写字母</label>
+                <label class="checkbox"><input type="checkbox" data-pg="digit" checked><span class="box"></span>数字</label>
+                <label class="checkbox"><input type="checkbox" data-pg="symbol" checked><span class="box"></span>特殊符号</label>
               </div>
-              <button class="btn btn-primary" id="pgGo" style="width:100%;margin-top:14px"><svg class="ic"><use href="#i-refresh"/></svg>生成新密码</button>
+              <button class="btn btn-primary" data-pg="go" style="width:100%;margin-top:14px"><svg class="ic"><use href="#i-refresh"/></svg>生成新密码</button>
             </div>
           </article>
 
@@ -69,6 +69,7 @@
             <button class="tool-tile" id="tool-unit"><span class="tt-ic"><svg class="ic"><use href="#i-sliders"/></svg></span><span class="tt-name">单位换算</span><span class="tt-desc">长度 / 温度 / 容量 / 速率</span></button>
             <button class="tool-tile" id="tool-color"><span class="tt-ic"><svg class="ic"><use href="#i-palette"/></svg></span><span class="tt-name">颜色转换</span><span class="tt-desc">HEX / RGB / HSL 互转与取色</span></button>
             <button class="tool-tile" id="tool-b64"><span class="tt-ic"><svg class="ic"><use href="#i-code"/></svg></span><span class="tt-name">Base64 编解码</span><span class="tt-desc">文本与 Base64 双向转换</span></button>
+            <button class="tool-tile" id="tool-json"><span class="tt-ic"><svg class="ic"><use href="#i-code"/></svg></span><span class="tt-name">JSON 格式化</span><span class="tt-desc">校验 · 美化 · 压缩</span></button>
             <button class="tool-tile soon"><span class="flag-soon">即将上线</span><span class="tt-ic"><svg class="ic"><use href="#i-note"/></svg></span><span class="tt-name">文本对比</span><span class="tt-desc">两段文本差异高亮对比</span></button>
           </div>
         </div>

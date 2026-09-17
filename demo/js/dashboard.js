@@ -15,9 +15,12 @@ const Dash = (() => {
     vault:     { title: '密码保险库',   icon: 'i-shield' },
     quicknote: { title: '灵感速记',     icon: 'i-pen' },
     plan:      { title: '今日计划',     icon: 'i-check' },
-    toolbox:   { title: '实用工具箱',   icon: 'i-wrench' },
+    translate: { title: '翻译',         icon: 'i-globe' },
+    passgen:   { title: '强密码生成',   icon: 'i-key' },
   };
-  const DEFAULT_ORDER = Object.keys(WIDGETS);
+  /* 默认上盘的组件；翻译 / 强密码需用户主动添加，避免挤掉现有布局 */
+  const DEFAULT_ORDER = ['monitor', 'quicknav', 'calendar', 'word', 'vault', 'quicknote', 'plan'];
+  const OPT_IN = ['translate', 'passgen'];
 
   /* 尺寸拖拽边界：跨列 3~12（低于 3 列卡片内容无法阅读），高度 160px 起按 20px 吸附 */
   const COL_MIN = 3, COL_MAX = 12;
@@ -48,13 +51,21 @@ const Dash = (() => {
       sizes = (d.sizes && typeof d.sizes === 'object' && !Array.isArray(d.sizes))
         ? d.sizes : {};
     } catch (e) { /* 未登录或网络异常：保持默认布局 */ }
+    /* 未上过盘的可选组件一律进收纳，出现在「添加组件」里 */
+    OPT_IN.forEach(id => {
+      if (!order.includes(id) && !removed.includes(id)) removed.push(id);
+    });
     apply(order);
     applyAllSizes();
   }
 
   /* 按保存顺序重排卡片（未记录的组件按默认顺序补在末尾），收纳的隐藏 */
   function apply(order){
-    const seq = [...order, ...DEFAULT_ORDER.filter(id => !order.includes(id))];
+    const seq = [
+      ...order,
+      ...DEFAULT_ORDER.filter(id => !order.includes(id)),
+      ...OPT_IN.filter(id => !order.includes(id)),
+    ];
     seq.forEach(id => {
       const c = cardOf(id);
       if (c) grid.appendChild(c);
