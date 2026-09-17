@@ -100,10 +100,12 @@ const Dash = (() => {
   }
   function applySize(card){
     const s = sizes[card.dataset.widget] || {};
+    const wide = sizeEnabled();
     card.style.setProperty('--dash-col', String(s.col || defaultCol(card)));
     if (s.h) card.style.setProperty('--dash-h', s.h + 'px');
     else card.style.removeProperty('--dash-h');
-    card.classList.toggle('sized', !!(s.col || s.h) && sizeEnabled());
+    card.classList.toggle('sized', !!(s.col || s.h) && wide);
+    card.classList.toggle('has-h', !!s.h && wide);
   }
   function applyAllSizes(){
     cards().forEach(applySize);
@@ -111,7 +113,7 @@ const Dash = (() => {
   function resetSize(card){
     const id = card.dataset.widget;
     delete sizes[id];
-    card.classList.remove('sized');
+    card.classList.remove('sized', 'has-h');
     card.style.removeProperty('--dash-col');
     card.style.removeProperty('--dash-h');
     save();
@@ -168,6 +170,7 @@ const Dash = (() => {
     card.style.setProperty('--dash-col', col);
     if (h) card.style.setProperty('--dash-h', h + 'px');
     else card.style.removeProperty('--dash-h');
+    card.classList.toggle('has-h', !!h);
     showSizeTip(card, col, h);
   }
 
@@ -212,7 +215,12 @@ const Dash = (() => {
     $('#dashAddBtn').hidden = !on;
     cards().forEach(toggleCardTools);
     if (!on){
-      if (dragCard){ dragCard.classList.remove('dragging'); dragCard = null; }
+      if (placeholder && placeholder.parentNode){
+        if (dragCard) placeholder.parentNode.insertBefore(dragCard, placeholder);
+        placeholder.remove();
+      }
+      if (dragCard){ dragCard.classList.remove('dragging'); dragCard.draggable = false; dragCard = null; }
+      placeholder = null;
       abortResize();
     }
   }
@@ -280,7 +288,9 @@ const Dash = (() => {
   }
 
   /* ---------- 拖拽排序（虚影预览） ---------- */
-  /* 只有按住把手才允许拖动，避免编辑态误触卡片内的输入 */
+  /* 源卡片拖起后移出文档流，只留占位框占格，这样同一行可以前后互换。
+     同行用水平中线、跨行用卡片顶边：后面的能往前、前面的也能往后。
+     光标还在占位框里时不移动，避免占位框一挪卡片跟着跑造成抖动。 */
   function onGripDown(e){
     if (!editing) return;
     if (window.isPhone && isPhone()) return;
@@ -290,44 +300,55 @@ const Dash = (() => {
     if (card) card.draggable = true;
   }
 
+  function effectiveCol(card){
+    const s = sizes[card.dataset.widget] || {};
+    return s.col || defaultCol(card);
+  }
+
+  function makePlaceholder(card){
+    const ph = document.createElement('div');
+    ph.className = 'dash-placeholder';
+    ph.style.gridColumn = 'span ' + effectiveCol(card);
+    ph.style.height = Math.round(card.getBoundingClientRect().height) + 'px';
+    return ph;
+  }
+
   function onDragStart(e){
     const card = e.target.closest ? e.target.closest('[data-widget]') : null;
     if (!editing || !card || card.hidden || !card.draggable){ return; }
     dragCard = card;
     e.dataTransfer.effectAllowed = 'move';
     try { e.dataTransfer.setData('text/plain', card.dataset.widget); } catch (_) {}
-    /* 占位虚框：继承跨列宽度，高度与原卡片一致 */
-    const colCls = (card.className.match(/col-\d+/) || ['col-12'])[0];
-    placeholder = document.createElement('div');
-    placeholder.className = 'dash-placeholder ' + colCls;
-    placeholder.style.height = card.offsetHeight + 'px';
-    /* 延后加样式：保证浏览器以原始外观生成跟随鼠标的虚影 */
-    setTimeout(() => card.classList.add('dragging'), 0);
+    placeholder = makePlaceholder(card);
+    card.parentNode.insertBefore(placeholder, card);
+    /* 延后移出文档流：让浏览器先用原外观生成拖拽虚影 */
+    setTimeout(() => { if (dragCard === card) card.classList.add('dragging'); }, 0);
   }
 
   function onDragOver(e){
     if (!dragCard || !placeholder) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    /* 统一按阅读序判定：光标「排在」某张卡片之前（位于卡片垂直中心以上，
-       或同行且在卡片水平中心以左）时，占位框插入其前；否则追加到末尾。
-       该判定只依赖光标与目标卡片的相对关系：占位框移动引起布局重排后，
-       判定结果不变，因此不会来回抖动，宽卡也能稳定拖到第一排 */
+    const pr = placeholder.getBoundingClientRect();
+    if (e.clientX >= pr.left && e.clientX <= pr.right &&
+        e.clientY >= pr.top && e.clientY <= pr.bottom) return;
+
     const others = cards().filter(c => c !== dragCard && !c.hidden);
     let ref = null;
     for (const c of others){
       const r = c.getBoundingClientRect();
-      const before = e.clientY < r.top + r.height / 2 ||
-        (e.clientY <= r.bottom && e.clientX < r.left + r.width / 2);
-      if (before){ ref = c; break; }
+      const sameRow = e.clientY >= r.top && e.clientY <= r.bottom;
+      if (sameRow){
+        if (e.clientX < r.left + r.width / 2){ ref = c; break; }
+        continue;
+      }
+      if (e.clientY < r.top){ ref = c; break; }
     }
     if (ref){
       if (placeholder.nextElementSibling !== ref) grid.insertBefore(placeholder, ref);
     } else {
-      /* 追加到末尾：仅当占位框后面还有可见卡片时才移动，避免拖尾抖动 */
-      const hasAfter = others.some(c =>
-        placeholder.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING);
-      if (hasAfter) grid.appendChild(placeholder);
+      const tail = [...grid.children].filter(el => el !== dragCard);
+      if (tail[tail.length - 1] !== placeholder) grid.appendChild(placeholder);
     }
   }
 
@@ -377,6 +398,7 @@ const Dash = (() => {
       }
     });
     grid.addEventListener('dragstart', onDragStart);
+    grid.addEventListener('dragenter', e => e.preventDefault());
     grid.addEventListener('dragover', onDragOver);
     grid.addEventListener('drop', e => e.preventDefault());
     grid.addEventListener('dragend', onDragEnd);

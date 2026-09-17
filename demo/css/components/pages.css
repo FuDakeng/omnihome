@@ -391,12 +391,12 @@ pre.md-code.is-folded [data-md-code-act="fold"]{ transform: rotate(-90deg); }
 [data-widget="plan"] .livemd{ flex: 1; max-height: none; min-height: 150px; }
 [data-widget="plan"] .ed-foot{ margin-top: auto; }
 .editor-inline #planSrc{ height: 96px; }
-/* 灵感速记：卡片固定高度，正文超出滚动，底栏贴底；自定义尺寸时跟 --dash-h */
+/* 灵感速记：卡片固定高度，正文超出滚动，底栏贴底；自定义高度时跟 --dash-h */
 [data-widget="quicknote"]{
   height: 300px;
   overflow: hidden;
 }
-#dashGrid [data-widget="quicknote"].sized{
+#dashGrid [data-widget="quicknote"].has-h{
   height: var(--dash-h, 300px);
   max-height: var(--dash-h, 300px);
 }
@@ -410,6 +410,14 @@ pre.md-code.is-folded [data-md-code-act="fold"]{ transform: rotate(-90deg); }
 [data-widget="quicknote"] .ed-foot{ flex-shrink: 0; }
 [data-widget="quicknote"] .ed-foot{ margin-top: auto; }
 .editor-inline #quickNoteSrc{ flex: 1 1 auto; min-height: 0; height: auto; overflow-y: auto; }
+#dashGrid [data-widget="plan"].has-h .livemd,
+#dashGrid [data-widget="plan"].has-h #planSrc{
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+  overflow: auto;
+}
 
 /* 单日计划编辑弹窗：内嵌编辑器 */
 #planDayMask .m-body .md-src{
@@ -426,10 +434,38 @@ pre.md-code.is-folded [data-md-code-act="fold"]{ transform: rotate(-90deg); }
 /* ============================================================
    仪表盘组件编辑：编辑态 / 拖拽虚影 / 添加组件
    ============================================================ */
-#dashGrid [data-widget]{ position: relative; }
+#dashGrid{
+  align-items: start; /* 纵向拉高只作用于本卡，不把同行其它卡一起撑高 */
+}
+#dashGrid [data-widget]{
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  width: 100%;
+  align-self: start;
+}
+#dashGrid [data-widget] > .card-head,
+#dashGrid [data-widget] > .ed-foot{ flex: none; }
+#dashGrid [data-widget] > .card-pad{
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 #dashGrid.editing{ row-gap: calc(var(--om-space-5) + 16px); }
 #dashGrid.editing [data-widget]{ outline: 1px dashed var(--om-primary-border); outline-offset: 3px; }
-#dashGrid [data-widget].dragging{ opacity: .35; }
+/* 拖起后移出网格，避免原位仍占一格导致只能往前插 */
+#dashGrid [data-widget].dragging{
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
 
 /* 卡片边缘悬浮操作条：拖拽把手 + 收纳 */
 .dash-tools{
@@ -446,20 +482,27 @@ pre.md-code.is-folded [data-md-code-act="fold"]{ transform: rotate(-90deg); }
 .dash-grip:active{ cursor: grabbing; }
 .dash-grip .ic{ width: 14px; height: 14px; }
 
-/* 拖拽占位虚框（继承卡片跨列宽度，高度由 JS 指定） */
+/* 拖拽占位虚框（跨列由 JS 写 grid-column，高度与原卡片一致） */
 .dash-placeholder{
   border: 2px dashed var(--om-primary);
   border-radius: var(--om-radius-lg);
   background: var(--om-primary-ghost);
   opacity: .7;
+  min-width: 0;
+  pointer-events: none;
+  box-sizing: border-box;
 }
 
-/* ---------- 组件尺寸：自定义跨列 + 最小高度 ---------- */
-/* 仅宽屏套用自定义尺寸；窄屏移除 .sized 后回落 col-* 自带的响应式规则 */
+/* ---------- 组件尺寸：自定义跨列 + 高度（高度只作用于本卡） ---------- */
+/* 仅宽屏套用自定义尺寸；窄屏移除 .sized / .has-h 后回落 col-* 响应式 */
 #dashGrid [data-widget].sized{
   grid-column: span var(--dash-col, 12);
-  min-height: var(--dash-h, auto);
 }
+#dashGrid [data-widget].has-h{
+  height: var(--dash-h);
+  max-height: var(--dash-h);
+}
+#dashGrid [data-widget].has-h > .card-pad{ overflow: auto; }
 #dashGrid [data-widget].resizing{
   outline: 2px solid var(--om-primary);
   outline-offset: 3px;
@@ -486,6 +529,56 @@ pre.md-code.is-folded [data-md-code-act="fold"]{ transform: rotate(-90deg); }
 }
 body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 @media (max-width: 1280px){ .dash-resize{ display: none; } }
+
+/* 拉高/拉宽后内容铺满卡片 */
+.dash-spark{ flex: 1; min-width: 0; align-self: center; }
+.dash-spark-lbl{
+  display: flex; justify-content: space-between;
+  font-size: 12px; color: var(--om-text-3); margin-bottom: 6px;
+}
+.dash-spark-svg{ height: 90px; display: block; width: 100%; }
+#dashGrid [data-widget="monitor"] .gauge-wrap{ flex: none; }
+#dashGrid [data-widget="monitor"].has-h .dash-spark{
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 90px;
+}
+#dashGrid [data-widget="monitor"].has-h .dash-spark-svg{
+  flex: 1;
+  height: auto;
+  min-height: 90px;
+}
+#dashGrid [data-widget="monitor"].has-h .qk-containers{
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+#dashGrid [data-widget="monitor"].sized .qk-name{
+  width: auto;
+  flex: 1;
+  min-width: 72px;
+}
+#dashGrid [data-widget="quicknav"] #quickNavPanels{
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+#dashGrid [data-widget="quicknav"] .dash-qn-hint{ flex: none; margin-top: auto; }
+#dashGrid [data-widget="calendar"].has-h .cal-grid{
+  flex: 1;
+  min-height: 0;
+  align-content: stretch;
+  grid-auto-rows: minmax(28px, 1fr);
+}
+#dashGrid [data-widget="calendar"].has-h .cal-day{
+  aspect-ratio: auto;
+  min-height: 28px;
+  height: auto;
+}
+#dashGrid [data-widget="word"].has-h .word-actions,
+#dashGrid [data-widget="vault"].has-h .btn,
+#dashGrid [data-widget="passgen"].has-h [data-pg="go"]{ margin-top: auto; }
 
 /* 添加组件弹窗列表 */
 .widget-add-grid{ display: flex; flex-direction: column; gap: 8px; }
