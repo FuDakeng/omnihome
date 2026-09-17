@@ -71,11 +71,23 @@
   min-height: 0;
   overflow: auto;
 }
-#dashGrid [data-widget="translate"].sized,
-#dashGrid [data-widget="passgen"].sized{
-  height: var(--dash-h, auto);
-  max-height: var(--dash-h, none);
+#dashGrid [data-widget="translate"].has-h .t-panes{
+  flex: 1;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
 }
+#dashGrid [data-widget="translate"].has-h .t-pane{
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+#dashGrid [data-widget="translate"].has-h .t-pane textarea{
+  flex: 1;
+  min-height: 0;
+}
+#dashGrid [data-widget="translate"].has-h .t-pane.result > span{ flex: 1; }
 .t-pane.result{ border-color: var(--om-primary-border); background: var(--om-primary-soft); }
 
 /* 密码生成器 */

@@ -70,6 +70,22 @@ def test_dashboard_translate_passgen_widgets():
     assert '"toolbox"' not in block
 
 
+def test_dashboard_widget_layout_flex():
+    """同行可前后互换；拉高只作用于本卡；内容随卡片长宽铺开。"""
+    js = (ROOT / "demo" / "js" / "dashboard.js").read_text(encoding="utf-8")
+    assert "sameRow" in js
+    assert "has-h" in js
+    assert "classList.add('dragging')" in js
+    css = (ROOT / "demo" / "css" / "components" / "pages.css").read_text(encoding="utf-8")
+    assert "align-items: start" in css
+    assert "#dashGrid [data-widget].has-h" in css
+    assert "min-height: var(--dash-h" not in css
+    assert "position: fixed" in css
+    assert "left: -9999px" in css
+    html = (ROOT / "demo" / "views" / "dashboard.html").read_text(encoding="utf-8")
+    assert "dash-spark-svg" in html
+
+
 def test_appearance_density_and_motion_wired():
     """密度 / 动效开关必须真正改 html dataset，且有对应 CSS；外观页结构完整。"""
     html = (ROOT / "demo" / "views" / "overlays-settings.html").read_text(encoding="utf-8")
