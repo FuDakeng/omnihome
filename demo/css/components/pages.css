@@ -569,6 +569,7 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
   flex: 1;
   min-height: 0;
   align-content: stretch;
+  grid-template-rows: auto;
   grid-auto-rows: minmax(28px, 1fr);
 }
 #dashGrid [data-widget="calendar"].has-h .cal-day{
