@@ -225,6 +225,20 @@
 
   .lock-form{ flex-direction: column; width: min(100%, 360px); }
   .lock-form .input, .lock-form .input-wrap, .lock-form .btn{ width: 100%; }
+  .vault-cats{
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .vault-cats .tab{ min-height: 40px; }
+  .v-main{ flex-wrap: wrap; row-gap: 8px; }
+  .v-pass, .v-date{ display: none; }
+  .v-actions{ margin-left: auto; }
+  .v-actions .icon-btn-xs,
+  .v-preview .icon-btn-xs{ width: 44px; height: 44px; }
+  .v-kv{ grid-template-columns: 48px minmax(0, 1fr) 44px; }
+  .v-preview{ padding-left: var(--om-space-4); }
+  #viCat{ font-size: 16px; min-height: 40px; height: 40px; }
   .input{ font-size: 16px; }
 
   .ct-filter{ flex-wrap: wrap; }

@@ -31,11 +31,14 @@
 
           <div class="vault-body">
             <div class="card-head" style="border-bottom:1px solid var(--om-border)">
-              <h3 class="card-title">全部凭据</h3>
+              <h3 class="card-title" id="vaultTitle">全部凭据</h3>
               <span class="chip success" id="vaultCount">0 条</span>
               <div class="sec-banner" style="margin-left:auto;padding:6px 12px">
                 <svg class="ic"><use href="#i-shield"/></svg>AES-256-GCM 加密 · 30 天无异常访问
               </div>
+            </div>
+            <div class="vault-toolbar">
+              <div class="tabs vault-cats" id="vaultCats"></div>
             </div>
             <div id="vaultItems">
               <div style="font-size:12px;color:var(--om-text-3);padding:24px 0;text-align:center">解锁后展示凭据列表</div>

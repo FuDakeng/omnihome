@@ -117,6 +117,35 @@ def test_dashboard_edit_tools_not_clipped():
     assert "width: 44px" in mobile.split(".dash-tools .icon-btn-xs", 1)[1][:80]
 
 
+def test_vault_categories_and_preview():
+    """保险库可建分类管理凭据；预览同时展示地址 / 账号 / 密码；分类写在加密校验密文里。"""
+    js = (ROOT / "demo" / "js" / "vault.js").read_text(encoding="utf-8")
+    html = (ROOT / "demo" / "views" / "vault.html").read_text(encoding="utf-8")
+    overlay = (ROOT / "demo" / "views" / "overlays.html").read_text(encoding="utf-8")
+    css = (ROOT / "demo" / "css" / "components" / "widgets.css").read_text(encoding="utf-8")
+    mobile = (ROOT / "demo" / "css" / "mobile.css").read_text(encoding="utf-8")
+    assert 'id="vaultCats"' in html
+    assert 'id="viCat"' in overlay
+    assert "data-v-cat-add" in js
+    assert "data-v-cat-edit" in js
+    assert "data-v-cat-del" in js
+    assert "writeCheck" in js
+    assert "cats" in js
+    assert "enc({ v: 1, cats" in js
+    assert "previewHtml" in js
+    assert "setPreview" in js
+    assert ">地址<" in js or "'地址'" in js
+    assert ">账号<" in js or "'账号'" in js
+    assert ">密码<" in js or "'密码'" in js
+    assert 'data-v-act="show"' in js
+    assert ".v-preview" in css
+    assert ".v-item.is-open .v-preview" in css
+    assert ".vault-cats" in css
+    assert ".vault-cats" in mobile
+    assert "v-preview .icon-btn-xs" in mobile
+    assert "title=\"预览\"" in js
+
+
 def test_appearance_density_and_motion_wired():
     """密度 / 动效开关必须真正改 html dataset，且有对应 CSS；外观页结构完整。"""
     html = (ROOT / "demo" / "views" / "overlays-settings.html").read_text(encoding="utf-8")
