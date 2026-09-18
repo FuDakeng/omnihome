@@ -609,6 +609,14 @@ const Vault = (() => {
     }
   }
 
+  function eventHit(e, selector){
+    const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+    for (const n of path){
+      if (n && n.nodeType === 1 && n.matches && n.matches(selector)) return n;
+    }
+    return e.target && e.target.closest ? e.target.closest(selector) : null;
+  }
+
   /* ---------- 事件 ---------- */
   function init(){
     $('#unlockBtn').addEventListener('click', unlock);
@@ -637,29 +645,29 @@ const Vault = (() => {
     const batch = $('#vaultBatch');
 
     document.addEventListener('click', async e => {
-      if (!e.target.closest('#vaultView')) return;
-      if (e.target.closest('[data-v-cat-add]')){
+      if (!eventHit(e, '#vaultView')) return;
+      if (eventHit(e, '[data-v-cat-add]')){
         e.preventDefault();
         return addCat();
       }
-      const catSelBtn = e.target.closest('[data-v-cat-sel]');
+      const catSelBtn = eventHit(e, '[data-v-cat-sel]');
       if (catSelBtn){
         e.preventDefault(); e.stopPropagation();
         return toggleCatSel(catSelBtn.getAttribute('data-v-cat-sel'));
       }
-      const editCat = e.target.closest('[data-v-cat-edit]');
+      const editCat = eventHit(e, '[data-v-cat-edit]');
       if (editCat){
         e.preventDefault(); e.stopPropagation();
         return renameCat(editCat.getAttribute('data-v-cat-edit'));
       }
-      const delCatBtn = e.target.closest('[data-v-cat-del]');
+      const delCatBtn = eventHit(e, '[data-v-cat-del]');
       if (delCatBtn){
         e.preventDefault(); e.stopPropagation();
         return deleteCats([delCatBtn.getAttribute('data-v-cat-del')]);
       }
-      const tab = e.target.closest('#vaultCats [data-v-cat]');
+      const tab = eventHit(e, '#vaultCats [data-v-cat]');
       if (tab){
-        if (e.target.closest('.tab-ops') || e.target.closest('.v-cat-check')) return;
+        if (eventHit(e, '.tab-ops') || eventHit(e, '.v-cat-check')) return;
         if (e.metaKey || e.ctrlKey){
           toggleCatSel(tab.dataset.vCat);
           return;
@@ -669,7 +677,7 @@ const Vault = (() => {
         return render();
       }
 
-      const copyField = e.target.closest('[data-v-copy]');
+      const copyField = eventHit(e, '[data-v-copy]');
       if (copyField){
         const card = copyField.closest('[data-v-id]');
         const row = cache.find(x => x.id === card?.dataset.vId);
@@ -681,14 +689,14 @@ const Vault = (() => {
         return showToast(`${label}已复制`);
       }
 
-      const selBtn = e.target.closest('[data-v-sel]');
+      const selBtn = eventHit(e, '[data-v-sel]');
       if (selBtn){
         e.stopPropagation();
         toggleSel(selBtn.dataset.vSel);
         return;
       }
 
-      const actBtn = e.target.closest('[data-v-act]');
+      const actBtn = eventHit(e, '[data-v-act]');
       if (actBtn){
         const card = actBtn.closest('[data-v-id]');
         const id = card?.dataset.vId;
@@ -710,8 +718,8 @@ const Vault = (() => {
         }
       }
 
-      const card = e.target.closest('#vaultItems .v-card[data-v-id]');
-      if (card && (e.metaKey || e.ctrlKey || sel.size)){
+      const card = eventHit(e, '#vaultItems .v-card[data-v-id]');
+      if (card){
         toggleSel(card.dataset.vId);
       }
     });

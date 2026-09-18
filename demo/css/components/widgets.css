@@ -164,6 +164,9 @@
 .vault-grid{ min-height: 120px; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: var(--om-space-4); }
 .v-card .bmc-info .bm-name{ display: flex; align-items: center; gap: 6px; }
 .v-card{ cursor: grab; }
+.v-card .bm-check{ opacity: 1; }
+.v-card .bm-check .ic,
+.vault-cat-list .v-cat-check .ic{ pointer-events: none; }
 .v-card .bmc-foot{ gap: 8px; }
 .v-card .v-eye{ margin-left: auto; }
 .v-site-chip{ font-size: 10px; padding: 0 7px; line-height: 1.6; }

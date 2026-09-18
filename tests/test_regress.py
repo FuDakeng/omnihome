@@ -158,6 +158,8 @@ def test_vault_categories_and_preview():
     assert ".vault-cat-list" in mobile
     assert "v-preview .icon-btn-xs" in mobile
     assert "个账号" in js
+    assert "eventHit" in js
+    assert "toggleSel(card.dataset.vId)" in js
 
 
 def test_appearance_density_and_motion_wired():
