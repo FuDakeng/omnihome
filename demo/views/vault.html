@@ -1,16 +1,16 @@
       <!-- ==================== 视图：密码保险库 ==================== -->
-      <section class="view" data-view="vault">
+      <section class="view" data-view="vault" id="vaultView">
         <div class="view-head">
           <div>
             <h2 class="vh-title">密码保险库</h2>
-            <div class="vh-sub">端到端加密 · 主密钥由主密码派生（PBKDF2 → AES-256-GCM），永不离开浏览器</div>
+            <div class="vh-sub">端到端加密 · 同一网站可保存多个账号 · 分类与凭据均在浏览器加密</div>
           </div>
           <div class="vh-actions">
             <button class="btn btn-primary btn-sm" id="vaultNew"><svg class="ic"><use href="#i-plus"/></svg>新增凭据</button>
           </div>
         </div>
 
-        <div class="vault-wrap card" id="vaultWrap">
+        <div class="vault-wrap" id="vaultWrap">
           <div class="lock-panel">
             <div class="lock-ic"><svg class="ic"><use href="#i-lock"/></svg></div>
             <h3 class="lock-title">保险库已锁定</h3>
@@ -30,19 +30,34 @@
           </div>
 
           <div class="vault-body">
-            <div class="card-head" style="border-bottom:1px solid var(--om-border)">
-              <h3 class="card-title" id="vaultTitle">全部凭据</h3>
-              <span class="chip success" id="vaultCount">0 条</span>
-              <div class="sec-banner" style="margin-left:auto;padding:6px 12px">
-                <svg class="ic"><use href="#i-shield"/></svg>AES-256-GCM 加密 · 30 天无异常访问
+            <div class="bm-layout vault-layout">
+              <div class="tabs bm-cat-list vault-cat-list" id="vaultCats"></div>
+              <div class="vault-main">
+                <div class="vault-main-head">
+                  <h3 class="card-title" id="vaultTitle">全部凭据</h3>
+                  <span class="chip success" id="vaultCount">0 条</span>
+                  <select class="lang-select" id="vaultSort" title="凭据排序" aria-label="凭据排序">
+                    <option value="manual">手动排序</option>
+                    <option value="added">按加入时间</option>
+                    <option value="updated">按更新时间</option>
+                    <option value="name">按凭据名称</option>
+                  </select>
+                  <div class="sec-banner vault-sec">
+                    <svg class="ic"><use href="#i-shield"/></svg>AES-256-GCM
+                  </div>
+                </div>
+                <div class="bm-grid vault-grid" id="vaultItems">
+                  <div style="grid-column:1/-1;font-size:12px;color:var(--om-text-3);padding:24px 0;text-align:center">解锁后展示凭据卡片</div>
+                </div>
               </div>
             </div>
-            <div class="vault-toolbar">
-              <div class="tabs vault-cats" id="vaultCats"></div>
-            </div>
-            <div id="vaultItems">
-              <div style="font-size:12px;color:var(--om-text-3);padding:24px 0;text-align:center">解锁后展示凭据列表</div>
-            </div>
           </div>
+        </div>
+
+        <div class="bm-batch" id="vaultBatch" hidden>
+          <span class="bm-batch-n num" id="vaultBatchN">已选 0 个</span>
+          <span class="bm-batch-hint" id="vaultBatchHint">拖到左侧分类可归类，拖到此条可删除</span>
+          <button class="btn btn-sm danger" id="vaultBatchDel"><svg class="ic"><use href="#i-trash"/></svg>删除</button>
+          <button class="btn btn-ghost btn-sm" id="vaultBatchClear">取消选择</button>
         </div>
       </section>
