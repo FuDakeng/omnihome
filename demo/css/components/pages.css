@@ -453,8 +453,18 @@ pre.md-code.is-folded [data-md-code-act="fold"]{ transform: rotate(-90deg); }
   display: flex;
   flex-direction: column;
 }
-#dashGrid.editing{ row-gap: calc(var(--om-space-5) + 16px); }
-#dashGrid.editing [data-widget]{ outline: 1px dashed var(--om-primary-border); outline-offset: 3px; }
+/* 行距 + 顶留白：胶囊 top:-13px 贴在卡片上沿，第一行也不被裁 */
+#dashGrid.editing{
+  row-gap: calc(var(--om-space-5) + 16px);
+  padding-top: 18px;
+}
+#dashGrid.editing [data-widget]{
+  outline: 1px dashed var(--om-primary-border);
+  outline-offset: 3px;
+  overflow: visible; /* .editor / 灵感速记 overflow:hidden 会剪掉上沿胶囊 */
+}
+/* 右上角胶囊与「全部笔记」等同排按钮错开 */
+#dashGrid.editing [data-widget] > .card-head{ padding-right: 76px; }
 /* 指针拖：卡片悬浮跟随光标，不占网格；占位框留在原位/目标位 */
 #dashGrid [data-widget].dragging{
   position: fixed;
@@ -471,7 +481,7 @@ body.dash-sorting .card.lift:hover{ transform: none; }
 
 /* 卡片边缘悬浮操作条：拖拽把手 + 收纳 */
 .dash-tools{
-  position: absolute; top: -13px; right: 14px; z-index: 4;
+  position: absolute; top: -13px; right: 14px; z-index: 8;
   display: flex; align-items: center; gap: 4px;
   padding: 3px 6px;
   background: var(--om-surface);

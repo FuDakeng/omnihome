@@ -90,6 +90,33 @@ def test_dashboard_widget_layout_flex():
     assert "dash-spark-svg" in html
 
 
+def test_dashboard_edit_tools_not_clipped():
+    """编辑布局时拖拽/收纳胶囊贴在卡片上沿，不能被 .editor / 灵感速记 overflow 裁掉。"""
+    import re
+    css = (ROOT / "demo" / "css" / "components" / "pages.css").read_text(encoding="utf-8")
+    notes = (ROOT / "demo" / "css" / "components" / "notes.css").read_text(encoding="utf-8")
+    mobile = (ROOT / "demo" / "css" / "mobile.css").read_text(encoding="utf-8")
+    html = (ROOT / "demo" / "views" / "dashboard.html").read_text(encoding="utf-8")
+    js = (ROOT / "demo" / "js" / "dashboard.js").read_text(encoding="utf-8")
+    assert "dash-tools" in js
+    assert 'data-widget="quicknote"' in html
+    assert 'editor editor-inline' in html
+    assert re.search(r"\.editor\{[^}]*overflow:\s*hidden", notes)
+    assert re.search(r'\[data-widget="quicknote"\]\{[^}]*overflow:\s*hidden', css)
+    assert re.search(
+        r"#dashGrid\.editing \[data-widget\]\{[^}]*overflow:\s*visible",
+        css,
+    )
+    assert "padding-top: 18px" in css
+    assert "padding-right: 76px" in css
+    assert ".dash-tools{" in css
+    assert "top: -13px" in css
+    assert "z-index: 8" in css
+    assert "#dashGrid.editing [data-widget] > .card-head" in css
+    assert ".dash-tools .icon-btn-xs" in mobile
+    assert "width: 44px" in mobile.split(".dash-tools .icon-btn-xs", 1)[1][:80]
+
+
 def test_appearance_density_and_motion_wired():
     """密度 / 动效开关必须真正改 html dataset，且有对应 CSS；外观页结构完整。"""
     html = (ROOT / "demo" / "views" / "overlays-settings.html").read_text(encoding="utf-8")
