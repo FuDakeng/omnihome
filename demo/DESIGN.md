@@ -1,5 +1,7 @@
 # 万事屋个人门户 · UI/UX 设计规范
 
+> **跨项目对接请以 [`docs/UI对接规范.md`](../docs/UI对接规范.md) 为准**（令牌、组件、断点、扩展/插件映射）。本文保留门户早期布局说明，若与 CSS 或对接文档冲突，以对接文档与 `css/theme.css` / `css/layout.css` / `css/mobile.css` 为准。
+
 > 本目录是**生产前端**：原生 HTML/CSS/JS，无打包器。服务端组装 `views/*.html` 写入壳层，静态 URL 的 `?v=` 由 `app_version.VERSION` 注入。
 > 入口为 ESM `js/boot.js`；主视图走 hash 路由（`#/notes`）。不引入 Vue/React。
 
