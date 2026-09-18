@@ -178,7 +178,8 @@
   border-bottom: 1px solid var(--om-border);
 }
 .vault-cats{ width: 100%; max-width: 100%; }
-.vault-cats .tab{ cursor: pointer; display: inline-flex; align-items: center; }
+.vault-cats .tab{ cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.vault-cats .bm-cat-n{ margin-left: 0; }
 .vault-cats .tab-ops i[data-v-cat-del]:hover{ color: var(--om-danger); }
 .v-preview{
   display: none;
