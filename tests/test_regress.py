@@ -118,32 +118,46 @@ def test_dashboard_edit_tools_not_clipped():
 
 
 def test_vault_categories_and_preview():
-    """保险库可建分类管理凭据；预览同时展示地址 / 账号 / 密码；分类写在加密校验密文里。"""
+    """保险库左分类右卡片；分类/凭据可多选拖拽；预览同时展示地址账号密码；同站可多账号。"""
     js = (ROOT / "demo" / "js" / "vault.js").read_text(encoding="utf-8")
     html = (ROOT / "demo" / "views" / "vault.html").read_text(encoding="utf-8")
     overlay = (ROOT / "demo" / "views" / "overlays.html").read_text(encoding="utf-8")
     css = (ROOT / "demo" / "css" / "components" / "widgets.css").read_text(encoding="utf-8")
     mobile = (ROOT / "demo" / "css" / "mobile.css").read_text(encoding="utf-8")
+    pages = (ROOT / "demo" / "css" / "components" / "pages.css").read_text(encoding="utf-8")
     assert 'id="vaultCats"' in html
+    assert 'id="vaultSort"' in html
+    assert 'id="vaultBatch"' in html
+    assert "vault-layout" in html
+    assert "bm-layout" in html
     assert 'id="viCat"' in overlay
+    assert "同一网站可保存多个账号" in overlay
     assert "data-v-cat-add" in js
     assert "data-v-cat-edit" in js
     assert "data-v-cat-del" in js
+    assert "data-v-cat-sel" in js
+    assert "data-v-sel" in js
     assert "writeCheck" in js
-    assert "cats" in js
     assert "enc({ v: 1, cats" in js
+    assert "dropSelToCat" in js
+    assert "persistCardOrder" in js
+    assert "persistCatOrder" in js
+    assert "sameSiteN" in js
     assert "previewHtml" in js
     assert "setPreview" in js
-    assert ">地址<" in js or "'地址'" in js
-    assert ">账号<" in js or "'账号'" in js
-    assert ">密码<" in js or "'密码'" in js
+    assert "'地址'" in js and "'账号'" in js and "'密码'" in js
     assert 'data-v-act="show"' in js
-    assert ".v-preview" in css
-    assert ".v-item.is-open .v-preview" in css
-    assert ".vault-cats" in css
-    assert ".vault-cats" in mobile
-    assert "v-preview .icon-btn-xs" in mobile
     assert "title=\"预览\"" in js
+    assert "按加入时间" in html
+    assert "按更新时间" in html
+    assert "按凭据名称" in html
+    assert ".v-preview" in css
+    assert ".v-card.is-open .v-preview" in css
+    assert ".vault-cat-list" in css
+    assert ".bm-layout{" in pages
+    assert ".vault-cat-list" in mobile
+    assert "v-preview .icon-btn-xs" in mobile
+    assert "个账号" in js
 
 
 def test_appearance_density_and_motion_wired():
