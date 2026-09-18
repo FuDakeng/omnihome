@@ -168,6 +168,7 @@ python3 backend/main.py
 ## 📄 子项目
 
 - `omnihome-extension/`（或 `extension/`）— 浏览器扩展源码
+- `docs/UI对接规范.md` — 跨项目 UI 设计令牌、组件与扩展/插件映射
 - `DEPLOY.md` — 通用部署文档
 - `DEPLOY-NAS.md` — NAS 部署专属文档
 
