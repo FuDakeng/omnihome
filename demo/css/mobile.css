@@ -192,6 +192,15 @@
   .wxs-pop, .wxs-pop-loc{ min-width: 0; width: min(280px, calc(100vw - 32px)); }
   .wxs-op{ width: 36px; height: 36px; }
   .dash-spark{ min-width: 0 !important; }
+  /* 编辑布局：拖拽/收纳胶囊完整露在卡片上沿，触控热区 ≥44px */
+  #dashGrid.editing{
+    padding-top: 22px;
+    row-gap: calc(var(--om-space-5) + 22px);
+  }
+  #dashGrid.editing [data-widget] > .card-head{ padding-right: 104px; }
+  .dash-tools{ top: -18px; padding: 4px 8px; }
+  .dash-grip{ width: 44px; height: 44px; min-width: 44px; padding: 0; flex: none; }
+  .dash-tools .icon-btn-xs{ width: 44px; height: 44px; min-width: 44px; flex: none; }
   .tool-grid{ grid-template-columns: repeat(2, 1fr) !important; }
   .trans-lang .lang-select{
     flex: 1; min-width: 0;
