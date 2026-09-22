@@ -14,7 +14,7 @@
 | 账鹅源码仓库            | `https://git.jeanlaw.xyz/jeanlaw/goosecount.git` |
 | 镜像仓库（容器 registry） | `git.jeanlaw.xyz`（`/v2/`）                        |
 | Gitea 账号          | `jeanlaw`                                        |
-| Gitea令牌           | `d475d507ca92727ba4f095a8689ab8336fa39344`       |
+| Gitea令牌 | 不在文档中记录（见 NAS 上的凭据文件 / Gitea → 设置 → 应用） |
 
 > 拉取私有源码/镜像需登录： `docker login git.jeanlaw.xyz`（用户名 jeanlaw，密码用令牌） 令牌在 Gitea → 设置 → 应用 → 生成（勾选 package 权限）
 
