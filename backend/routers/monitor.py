@@ -364,17 +364,60 @@ def _physical_disks(root_disk=None) -> list:
     return disks
 
 
+def _is_container_id(name: str) -> bool:
+    """容器主机名通常是一段十六进制（如 715fbcad427），不能当成设备名。"""
+    return bool(re.fullmatch(r"[0-9a-fA-F]{8,64}", (name or "").strip()))
+
+
+_DOCKER_HOST_CACHE = {"ts": 0.0, "name": "", "os": ""}
+
+
+def _docker_host_facts() -> dict:
+    """通过 Docker 守护进程读取宿主主机名和操作系统。
+
+    容器里的 /etc/hostname 是容器 ID。docker.sock 上的 /info
+    由宿主机上的 dockerd 回答，Name / OperatingSystem 才是这台 NAS。
+    """
+    now = time.time()
+    if _DOCKER_HOST_CACHE["ts"] and now - _DOCKER_HOST_CACHE["ts"] < 60:
+        return _DOCKER_HOST_CACHE
+    name = os_name = ""
+    try:
+        import docker
+        client = docker.from_env(timeout=2)
+        info = client.info() or {}
+        name = (info.get("Name") or "").strip()
+        os_name = (info.get("OperatingSystem") or "").strip()
+    except Exception:
+        name = os_name = ""
+    _DOCKER_HOST_CACHE.update({"ts": now, "name": name, "os": os_name})
+    return _DOCKER_HOST_CACHE
+
+
 def _host_hostname() -> str:
-    """宿主主机名（容器里 platform.node() 返回的是容器 ID 如 b0c3b5531620）。"""
+    """宿主主机名。不要回落到容器 ID。"""
     import platform
-    for cand in (_HOST_ROOT / "etc" / "hostname", Path("/etc/hostname")):
+    host_file = _HOST_ROOT / "etc" / "hostname"
+    try:
+        val = host_file.read_text().strip()
+        if val:
+            return val
+    except OSError:
+        pass
+    docker_name = (_docker_host_facts().get("name") or "").strip()
+    if docker_name and not _is_container_id(docker_name):
+        return docker_name
+    for cand in (Path("/etc/hostname"),):
         try:
             val = cand.read_text().strip()
-            if val:
-                return val
         except OSError:
             continue
-    return platform.node() or "nas"
+        if val and not _is_container_id(val):
+            return val
+    node = (platform.node() or "").strip()
+    if node and not _is_container_id(node):
+        return node
+    return docker_name or "nas"
 
 
 def _os_release_pretty(text: str) -> str:
@@ -416,6 +459,9 @@ def _host_os_name() -> str:
                 return pretty
         except OSError:
             pass
+    docker_os = (_docker_host_facts().get("os") or "").strip()
+    if docker_os:
+        return docker_os
     return f"{platform.system()} {platform.release()}".strip() or "—"
 
 
