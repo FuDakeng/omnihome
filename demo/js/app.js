@@ -23,11 +23,18 @@ const App = (() => {
     const layout = prefs.layout || {};
     const compact = !!layout.compact;
     const reduceMotion = !!layout.reduceMotion;
+    const sidebarCollapsed = !!layout.sidebarCollapsed;
     document.documentElement.dataset.compact = compact ? 'on' : 'off';
     document.documentElement.dataset.motion = reduceMotion ? 'off' : 'on';
+    if (typeof setSidebarCollapsed === 'function') setSidebarCollapsed(sidebarCollapsed);
+    else {
+      document.documentElement.classList.toggle('sidebar-collapsed', sidebarCollapsed);
+      if (document.body) document.body.classList.toggle('sidebar-collapsed', sidebarCollapsed);
+    }
     try {
       localStorage.setItem('om_layout_compact', compact ? '1' : '0');
       localStorage.setItem('om_layout_motion', reduceMotion ? '1' : '0');
+      localStorage.setItem('om_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
     } catch (e) { /* 隐私模式等无法写入时跳过，登录后仍由服务端偏好生效 */ }
   }
 

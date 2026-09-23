@@ -17,6 +17,7 @@
       layout: {
         compact: $('#densitySeg .seg-btn.active')?.dataset.density === 'compact',
         reduceMotion: $('#motionSwitch').classList.contains('on'),
+        sidebarCollapsed: document.body.classList.contains('sidebar-collapsed'),
       },
       locale: {
         lang: $('#langSelect').value,

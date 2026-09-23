@@ -162,6 +162,28 @@ def test_vault_categories_and_preview():
     assert "toggleSel(card.dataset.vId)" in js
 
 
+def test_marker_wrap_and_sidebar_pref():
+    """选区包裹不能把换行算进去；侧栏折叠要进账户偏好，内容区随列变宽。"""
+    livemd = (ROOT / "demo" / "js" / "livemd.js").read_text(encoding="utf-8")
+    assert "function trimEdgeNewlines" in livemd
+    assert "function wrapMarkedSpan" in livemd
+    editor = (ROOT / "demo" / "js" / "notes" / "bind-editor.js").read_text(encoding="utf-8")
+    assert "value.charAt(a) === '\\n'" in editor
+    layout = (ROOT / "demo" / "css" / "layout.css").read_text(encoding="utf-8")
+    assert "max-width: 1400px" not in layout
+    assert "minmax(0, 1fr)" in layout
+    demo = (ROOT / "demo" / "js" / "demo.js").read_text(encoding="utf-8")
+    assert "sidebarCollapsed" in demo
+    assert "/api/settings" in demo
+    app = (ROOT / "demo" / "js" / "app.js").read_text(encoding="utf-8")
+    assert "layout.sidebarCollapsed" in app
+    boot = (ROOT / "demo" / "js" / "theme-boot.js").read_text(encoding="utf-8")
+    assert "om_sidebar_collapsed" in boot
+    sys.path.insert(0, str(BACKEND))
+    import storage
+    assert storage.DEFAULT_PREFS["layout"]["sidebarCollapsed"] is False
+
+
 def test_appearance_density_and_motion_wired():
     """密度 / 动效开关必须真正改 html dataset，且有对应 CSS；外观页结构完整。"""
     html = (ROOT / "demo" / "views" / "overlays-settings.html").read_text(encoding="utf-8")
