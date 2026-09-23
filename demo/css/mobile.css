@@ -255,7 +255,10 @@
     min-width: 0;
     max-height: min(320px, 55vh);
   }
-  .mon-hw{ grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+  .mon-top{ grid-template-columns: minmax(0, 1fr); }
+  .mon-metrics{ grid-template-columns: minmax(0, 1fr); }
+  .mon-hw{ gap: 10px; }
+  .mon-disk-pick{ height: 44px; font-size: 16px; max-width: 70%; }
   #ctFilterBtn{ min-height: 44px; }
   .tbl-wrap, .card:has(> .tbl){ overflow-x: auto; -webkit-overflow-scrolling: touch; }
 

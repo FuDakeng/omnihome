@@ -103,24 +103,82 @@
 .mon-zone-title .ic{ width: 16px; height: 16px; color: var(--om-primary); }
 .mon-zone-title .chip{ margin-left: var(--om-space-2); }
 
-/* ---------- 系统 / 硬件信息卡 ---------- */
-.mon-hw{
+/* ---------- 指标卡 + 系统信息：宽屏同一行，中等及以下改为上下堆叠 ---------- */
+.mon-top{
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px 28px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(240px, 0.72fr);
+  gap: var(--om-space-5);
+  align-items: stretch;
+  margin-bottom: var(--om-space-5);
+  min-width: 0;
+}
+.mon-metrics{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--om-space-5);
+  min-width: 0;
+}
+.mon-metrics > .card{ min-width: 0; height: 100%; }
+.mon-hw-card{
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mon-hw-card .card-pad{
+  flex: 1;
+  min-height: 0;
+}
+.mon-hw{
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 10px;
+  height: 100%;
   margin: 0;
 }
-.mon-hw > div{ min-width: 0; }
+.mon-hw > div{
+  display: grid;
+  grid-template-columns: 4.75em minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
 .mon-hw dt{
-  margin: 0 0 4px;
-  font-size: 11px; font-weight: 600; letter-spacing: .4px;
+  margin: 0;
+  font-size: 12px;
   color: var(--om-text-3);
+  white-space: nowrap;
 }
 .mon-hw dd{
   margin: 0;
-  font-size: 14px; font-weight: 600; line-height: 1.45;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
   color: var(--om-text-1);
   overflow-wrap: anywhere;
+}
+.mon-disk-body{ min-width: 0; }
+.mon-disk-line{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.mon-disk-pick{
+  margin-left: auto;
+  max-width: 58%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  font-size: 11px;
+  background: var(--om-surface-2);
+  color: var(--om-text-1);
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius-sm);
+}
+@media (max-width: 1280px){
+  .mon-top{ grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ---------- Docker 筛选栏：多选下拉 + 搜索 + 结果提示 ---------- */

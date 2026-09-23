@@ -13,7 +13,9 @@
   const CT_POLL_MS = 5000;   // 容器指标轮询（后端已并行采集）
   let statTimer = null, metricTimer = null, ctTimer = null;
   let allowed = false;       // 管理员 && 功能开关开启
-  let curView = 'dashboard';
+  /* demo.js 在本模块注册监听之前就会按地址打开视图，错过那一次 view-change
+     的话 curView 会一直停在 dashboard，曲线轮询不画，刷新后卡在「数据采集中」。 */
+  let curView = (document.body && document.body.dataset.view) || 'dashboard';
   let lastStats = null;      // 最近一次主机摘要（容器卡换算占主机比例用）
 
   const STATUS = {
@@ -44,6 +46,58 @@
     else if (v < 90) circle.classList.add('warn');
   }
   function barCls(v){ return v < 70 ? 'ok' : v < 90 ? 'warn' : ''; }
+
+  let monDiskPick = '';
+
+  function fmtCap(bytes){
+    if (bytes == null || !isFinite(Number(bytes))) return '—';
+    const n = Number(bytes);
+    const tb = n / 1099511627776;
+    if (tb >= 1) return tb.toFixed(1) + ' TB';
+    const gb = n / 1073741824;
+    return (gb >= 10 ? gb.toFixed(0) : gb.toFixed(1)) + ' GB';
+  }
+
+  function syncDiskPick(disks){
+    const sel = $('#monDiskPick');
+    if (!sel) return;
+    const list = disks || [];
+    const key = list.map(d => d.name).join('|');
+    if (sel.dataset.key !== key){
+      sel.dataset.key = key;
+      sel.innerHTML = '<option value="">全部硬盘</option>' +
+        list.map(d => `<option value="${App.esc(d.name)}">${App.esc(d.name)}</option>`).join('');
+    }
+    if (monDiskPick && !list.some(d => d.name === monDiskPick)) monDiskPick = '';
+    sel.value = monDiskPick;
+  }
+
+  /* 默认「全部硬盘」合计；下拉改看单块盘。返回当前占用百分比，未知为 null。 */
+  function renderDiskStat(s){
+    syncDiskPick(s.disks);
+    const picked = monDiskPick && (s.disks || []).find(d => d.name === monDiskPick);
+    const tempTxt = s.diskTemp != null && s.diskTemp !== undefined
+      ? ` · ${s.diskTemp}°C` : '';
+    let pct, sub;
+    if (!picked){
+      pct = (s.disk == null || s.disk === '') ? null : s.disk;
+      const scopeHint = s.storageScope === 'host' ? '全部硬盘合计' : '当前环境存储';
+      sub = `${s.diskUsedTB} / ${s.diskTotalTB} TB · ${scopeHint}${tempTxt}`;
+    } else {
+      pct = picked.percent == null ? null : picked.percent;
+      const used = picked.usedBytes == null ? '—' : fmtCap(picked.usedBytes);
+      const total = fmtCap(picked.totalBytes != null ? picked.totalBytes : picked.sizeBytes);
+      const mp = picked.mountpoint ? ' · ' + picked.mountpoint : '';
+      sub = `${used} / ${total} · ${picked.name}${mp}${tempTxt}`;
+    }
+    const val = $('#monDiskVal');
+    if (val) val.innerHTML = pct == null ? '—' : pct + '<small>%</small>';
+    const lbl = $('#monDiskLbl');
+    if (lbl) lbl.textContent = '存储';
+    const subEl = $('#monDiskSub');
+    if (subEl) subEl.textContent = sub;
+    return pct;
+  }
 
   function renderHwCard(s){
     const set = (id, text) => {
@@ -77,10 +131,9 @@
       setGauge($('#dashMemGauge'), s.mem);
       $('#dashMemNum').textContent = s.mem + '%';
       $('#dashMemLbl').textContent = `内存 · ${s.memUsedGB}/${s.memTotalGB} GB`;
-      const diskPct = (s.disk == null || s.disk === '') ? null : s.disk;
-      const scopeHint = s.storageScope === 'host' ? '全部硬盘合计' : '当前环境存储';
-      setGauge($('#dashDiskGauge'), diskPct == null ? 0 : diskPct);
-      $('#dashDiskNum').textContent = diskPct == null ? '—' : diskPct + '%';
+      const summaryPct = (s.disk == null || s.disk === '') ? null : s.disk;
+      setGauge($('#dashDiskGauge'), summaryPct == null ? 0 : summaryPct);
+      $('#dashDiskNum').textContent = summaryPct == null ? '—' : summaryPct + '%';
       $('#dashDiskLbl').textContent = `存储 · ${s.diskUsedTB}/${s.diskTotalTB} TB`;
       $('#dashNet').textContent = `↓ ${s.netDownMbps} · ↑ ${s.netUpMbps} MB/s`;
       /* 监控视图四卡。存储总览用宿主全部真实卷合计，不再拿单块盘冒充根分区。 */
@@ -91,11 +144,7 @@
           : `温度 — · ${s.cpuCount} 逻辑核心`);
       $('#monMemVal').innerHTML = s.mem + '<small>%</small>';
       $('#monMemLbl').textContent = `内存 ${s.memUsedGB} / ${s.memTotalGB} GB`;
-      $('#monDiskVal').innerHTML = diskPct == null ? '—' : diskPct + '<small>%</small>';
-      $('#monDiskLbl').textContent = `存储 ${s.diskUsedTB} / ${s.diskTotalTB} TB`;
-      const diskTempTxt = s.diskTemp !== null && s.diskTemp !== undefined
-        ? `硬盘温度 ${s.diskTemp}°C（NVMe）` : '硬盘温度 —';
-      $('#monDiskSub').textContent = `${diskTempTxt} · ${scopeHint}`;
+      const diskPct = renderDiskStat(s);
       renderHwCard(s);
       /* 网络：以前显示的是累计字节、还把"实时上传"标成"累计下载"。
          现在是真速率 + 文案对应：主值 = 下载速率，副值 = 上传速率 */
@@ -283,7 +332,7 @@
       });
       if (samples.length > MAX_POINTS) samples.shift();
       syncDiskSelect(m.disks || []);
-      if (curView === 'monitor') drawResChart();
+      if (monitorVisible()) drawResChart();
     } catch (e) { /* 轮询失败静默，下个周期重试 */ }
   }
 
@@ -300,6 +349,20 @@
     sel.value = resState.disk;
     sel.hidden = names.length < 2 || resState.tab !== 'disk';
   }
+  const diskPick = $('#monDiskPick');
+  if (diskPick) diskPick.addEventListener('change', e => {
+    monDiskPick = e.target.value;
+    if (!lastStats) return;
+    const pct = renderDiskStat(lastStats);
+    const box = $('#barDisk');
+    if (!box) return;
+    const known = pct != null && pct !== '';
+    const n = known ? pct : 0;
+    const fill = $('.bar-fill', box);
+    fill.style.width = n + '%';
+    fill.className = 'bar-fill ' + (known ? barCls(n) : '');
+    $('.num', box.parentElement).textContent = known ? n + '%' : '—';
+  });
   $('#resDiskSel').addEventListener('change', e => {
     resState.disk = e.target.value;
     drawResChart();
@@ -721,12 +784,15 @@
     loadStats(); loadContainers(); pollMetrics();
   });
 
+  function monitorVisible(){
+    return (document.body.dataset.view || curView) === 'monitor';
+  }
   document.addEventListener('view-change', e => {
     curView = e.detail;
     if (curView === 'monitor' && allowed){ drawResChart(); drawCtChart(); }
   });
   window.addEventListener('resize', () => {
-    if (curView === 'monitor' && allowed){ drawResChart(); drawCtChart(); }
+    if (monitorVisible() && allowed){ drawResChart(); drawCtChart(); }
   });
 
   function stopTimers(){
