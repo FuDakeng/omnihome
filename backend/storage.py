@@ -46,7 +46,7 @@ SAFE_NAME = re.compile(r"^[\w\u4e00-\u9fa5\-]{1,32}$")
 
 DEFAULT_PREFS = {
     "theme": {"mode": "dark", "hue": 243, "sat": 72},
-    "layout": {"compact": False, "reduceMotion": False},
+    "layout": {"compact": False, "reduceMotion": False, "sidebarCollapsed": False},
     "locale": {"lang": "zh-CN", "weekStart": "mon", "tempUnit": "c"},
     "weather": {"city": "", "lat": 30.2741, "lon": 120.1552},
     "trashDays": 30,        # v0.2.15 增：回收站文件保留天数，0 = 永久（需手工清空）

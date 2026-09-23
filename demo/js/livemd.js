@@ -1557,6 +1557,39 @@ export const LiveMD = (() => {
       });
     }
 
+    /* 浏览器选中一整行时，选区常停在下一行开头（或从上一行末尾起算），
+       原始偏移会把换行算进去。行内标记不能跨行，否则闭合符号落到邻行、语法匹配失败。 */
+    function trimEdgeNewlines(raw, start, end){
+      if (end < start){ const t = start; start = end; end = t; }
+      start = Math.max(0, Math.min(raw.length, start));
+      end = Math.max(start, Math.min(raw.length, end));
+      while (start < end && raw.charAt(start) === '\n') start++;
+      while (end > start && raw.charAt(end - 1) === '\n') end--;
+      return { start, end };
+    }
+    /* 在 [start, end) 上加标记。先剥掉两端换行；中间还有换行时按行分别包裹，空行不动。
+       返回 null 表示剥掉换行后没有可标记的文本。caret 落在最后一行正文末尾（闭合标记之前）。 */
+    function wrapMarkedSpan(raw, start, end, pre, suf){
+      const span = trimEdgeNewlines(raw, start, end);
+      if (span.end <= span.start) return null;
+      const inner = raw.slice(span.start, span.end);
+      const parts = inner.split('\n');
+      const wrapped = parts.map(line => line ? (pre + line + suf) : line).join('\n');
+      let caret = span.start;
+      let pos = span.start;
+      parts.forEach((line, i) => {
+        if (line) caret = pos + pre.length + line.length;
+        pos += (line ? pre.length + line.length + suf.length : 0) + (i < parts.length - 1 ? 1 : 0);
+      });
+      const single = parts.length === 1;
+      return {
+        raw: raw.slice(0, span.start) + wrapped + raw.slice(span.end),
+        selStart: span.start + (single ? pre.length : 0),
+        selEnd: span.start + (single ? pre.length + inner.length : wrapped.length),
+        caret
+      };
+    }
+
     /* ---------- 选区上直接输入修饰符：* 斜体、再按加粗、~ 删除线、` 行内代码 ---------- */
     const MARK_MAX = { '*': 3, '_': 2, '~': 2, '`': 1 };
     function applyMarkerText(text){
@@ -1567,8 +1600,20 @@ export const LiveMD = (() => {
       const rng = selectionRawRange();
       if (!rng || rng.end <= rng.start) return false;
       let raw = serializeAll();
-      let start = rng.start, end = rng.end;
+      const span = trimEdgeNewlines(raw, rng.start, rng.end);
+      if (span.end <= span.start) return false;
+      let start = span.start, end = span.end;
       const inner = raw.slice(start, end);
+      if (inner.includes('\n')){
+        const mk = ch.repeat(Math.min(text.length, max));
+        const wrapped = wrapMarkedSpan(raw, start, end, mk, mk);
+        if (!wrapped) return false;
+        ta.value = wrapped.raw;
+        try { ta.dispatchEvent(new Event('input')); } catch (_) {}
+        rebuild(wrapped.raw);
+        selectRawRange(wrapped.selStart, wrapped.selEnd);
+        return true;
+      }
       let outside = 0;
       while (outside < max
           && start - (outside + 1) >= 0
@@ -1871,13 +1916,14 @@ export const LiveMD = (() => {
         const r = sel.getRangeAt(0);
         const s = rawOffset(r.startContainer, r.startOffset);
         const e = rawOffset(r.endContainer, r.endOffset);
-        const raw = serializeAll();
-        const next = raw.slice(0, s) + pre + raw.slice(s, e) + suf + raw.slice(e);
-        ta.value = next;
-        try { ta.dispatchEvent(new Event('input')); } catch (_) {}
-        rebuild(next);
-        restoreCaret(s + pre.length + (e - s));
-        return true;
+        const wrapped = wrapMarkedSpan(serializeAll(), s, e, pre, suf);
+        if (wrapped){
+          ta.value = wrapped.raw;
+          try { ta.dispatchEvent(new Event('input')); } catch (_) {}
+          rebuild(wrapped.raw);
+          restoreCaret(wrapped.caret);
+          return true;
+        }
       }
       const pos = (sel.rangeCount && root.contains(sel.anchorNode))
         ? rawOffset(sel.anchorNode, sel.anchorOffset) : serializeAll().length;

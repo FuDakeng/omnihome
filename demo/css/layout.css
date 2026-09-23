@@ -5,7 +5,8 @@
 /* ---------- 页面骨架 ---------- */
 .app{
   display: grid;
-  grid-template-columns: var(--om-sidebar-w) 1fr;
+  grid-template-columns: var(--om-sidebar-w) minmax(0, 1fr);
+  width: 100%;
   min-height: var(--om-app-h);
   transition: grid-template-columns var(--om-t-base);
 }
@@ -14,6 +15,8 @@
 .sidebar{
   position: sticky;
   top: 0;
+  width: 100%;
+  min-width: 0;
   height: var(--om-app-h);
   display: flex;
   flex-direction: column;
@@ -137,7 +140,7 @@ html[data-compact="on"] .card-head{ padding: var(--om-space-3) var(--om-space-4)
 html[data-compact="on"] .card-pad{ padding: 0 var(--om-space-4) var(--om-space-4); }
 
 /* 折叠（图标栏）模式 */
-.sidebar-collapsed .app{ grid-template-columns: var(--om-sidebar-w-rail) 1fr; }
+.sidebar-collapsed .app{ grid-template-columns: var(--om-sidebar-w-rail) minmax(0, 1fr); }
 .sidebar-collapsed .sidebar{ padding-left: 10px; padding-right: 10px; }
 .sidebar-collapsed .logo-text,
 .sidebar-collapsed .nav-title,
@@ -154,7 +157,7 @@ html[data-compact="on"] .card-pad{ padding: 0 var(--om-space-4) var(--om-space-4
 .sidebar-collapsed .sb-top{ justify-content: center; padding-left: 0; padding-right: 0; }
 
 /* ---------- 主区域 ---------- */
-.main{ min-width: 0; display: flex; flex-direction: column; }
+.main{ min-width: 0; width: 100%; display: flex; flex-direction: column; }
 
 /* ---------- 顶栏 ---------- */
 .topbar{
@@ -181,12 +184,13 @@ html[data-compact="on"] .card-pad{ padding: 0 var(--om-space-4) var(--om-space-4
 .content{
   flex: 1;
   width: 100%;
-  max-width: 1400px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
   padding: var(--om-space-6) var(--om-space-6) var(--om-space-8);
   display: flex;
   flex-direction: column;
   min-height: 0;
+  box-sizing: border-box;
 }
 
 /* 视图切换 */
@@ -239,7 +243,7 @@ html[data-compact="on"] .card-pad{ padding: 0 var(--om-space-4) var(--om-space-4
 
 /* 窄屏：侧边栏自动收为图标栏 */
 @media (max-width: 1024px){
-  .app{ grid-template-columns: var(--om-sidebar-w-rail) 1fr; }
+  .app{ grid-template-columns: var(--om-sidebar-w-rail) minmax(0, 1fr); }
   .sidebar{ padding-left: 10px; padding-right: 10px; }
   .logo-text, .nav-title, .nav-label, .nav-badge, .user-meta, .user-chip > .chev{ display: none; }
   .nav-item{ justify-content: center; padding: 10px 0; }

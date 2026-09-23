@@ -153,11 +153,26 @@ S.bindShare = function () {
       };
       const wrapSel = (pre, suf, ph) => {
         if (liveOn()){ S.shareLiveEd.wrapSelection(pre, suf, ph || ''); return; }
-        const s = ta.selectionStart, e2 = ta.selectionEnd;
-        const sel = ta.value.slice(s, e2);
-        const mid = sel || ph || '';
+        let s = ta.selectionStart, e2 = ta.selectionEnd;
+        if (e2 < s){ const t = s; s = e2; e2 = t; }
+        const value = ta.value;
+        let a = s, b = e2;
+        while (a < b && value.charAt(a) === '\n') a++;
+        while (b > a && value.charAt(b - 1) === '\n') b--;
+        const placeholder = ph || '';
         ta.focus();
-        document.execCommand('insertText', false, pre + mid + suf);
+        if (b <= a){
+          ta.setSelectionRange(s, s);
+          document.execCommand('insertText', false, pre + placeholder + suf);
+          ta.dispatchEvent(new Event('input'));
+          return;
+        }
+        const inner = value.slice(a, b);
+        const mid = inner.includes('\n')
+          ? inner.split('\n').map(line => line ? pre + line + suf : line).join('\n')
+          : pre + inner + suf;
+        ta.setSelectionRange(a, b);
+        document.execCommand('insertText', false, mid);
         ta.dispatchEvent(new Event('input'));
       };
       const linePrefix = prefix => {
