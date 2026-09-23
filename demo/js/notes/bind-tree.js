@@ -313,8 +313,15 @@ S.bindTree = function () {/* ---------- 桌面拖拽 .md 文件 / 文件夹 → 
         if (!S.selNotes.has(id)) S.selNotes = new Set([id]);
         S.selFolders.clear();
         S.dragState = { kind: 'note', ids: [...S.selNotes] };
-        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.effectAllowed = 'copyMove';
         e.dataTransfer.setData('text/plain', id);
+        try {
+          const metas = S.dragState.ids.map(nid => S.idx.find(n => n.id === nid)).filter(Boolean);
+          e.dataTransfer.setData('text/omni-note', JSON.stringify(metas.map(n => ({
+            id: n.id,
+            title: n.title || '未命名笔记',
+          }))));
+        } catch (_) {}
         setTimeout(() => item.classList.add('dragging'), 0);
         return;
       }

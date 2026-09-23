@@ -345,6 +345,101 @@ pre.md-code.is-folded [data-md-code-act="fold"]{ transform: rotate(-90deg); }
 /* 标题 # 符号：默认隐藏，光标落在该行（或鼠标悬停）时才显示便于编辑 */
 .lm-h .lm-mk{ display: none; }
 .lm-h.lm-caret .lm-mk, .lm-h:hover .lm-mk{ display: inline; }
+/* 光标所在行：整行换成原始 Markdown（- 列表、**加粗**），离开后由脚本重新渲染 */
+.livemd .lm-line.lm-src{
+  font-size: var(--om-fs-sm);
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1.9;
+  color: var(--om-text-1);
+  background: color-mix(in oklab, var(--om-primary) 7%, transparent);
+  border: 0;
+  border-radius: 4px;
+  margin-top: 0;
+  padding-left: 2px;
+  text-decoration: none;
+}
+.livemd .lm-wiki{
+  color: var(--om-primary);
+  background: var(--om-primary-ghost);
+  border-radius: 4px;
+  padding: 0 4px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.lm-wiki-pop{
+  position: fixed;
+  z-index: 220;
+  width: min(320px, calc(100vw - 16px));
+  max-height: min(320px, 46dvh);
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  gap: 6px;
+  border: 1px solid var(--om-border);
+  border-radius: 10px;
+  background: var(--om-surface);
+  box-shadow: var(--om-shadow-md, 0 8px 24px rgba(0,0,0,.16));
+}
+.lm-wiki-pop[hidden]{ display: none; }
+.lm-wiki-q{
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--om-border);
+  border-radius: 8px;
+  background: var(--om-bg);
+  color: var(--om-text-1);
+  font-size: 16px;
+  line-height: 1.4;
+}
+.lm-wiki-q:focus{ outline: 2px solid var(--om-primary); outline-offset: 1px; }
+.lm-wiki-list{
+  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lm-wiki-item{
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 1px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--om-text-1);
+  text-align: left;
+  cursor: pointer;
+}
+.lm-wiki-item.is-on,
+.lm-wiki-item:hover{ background: var(--om-primary-ghost); }
+.lm-wiki-title{
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lm-wiki-folder{
+  font-size: 12px;
+  color: var(--om-text-3);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lm-wiki-empty{
+  padding: 12px 10px;
+  color: var(--om-text-3);
+  font-size: 13px;
+}
 /* 分割线（--- / *** / ___）渲染为虚线 */
 .lm-hrline{ min-height: 0; }
 .lm-hr{ border: 0; border-top: 1px dashed var(--om-border); margin: 8px 0; pointer-events: none; }
