@@ -128,6 +128,23 @@ import { S } from './state.js';
       uploadImage: f => S.uploadImage(f),
       onImageError: e => showToast('图片上传失败：' + (e.message || e), 'err'),
       afterRebuild: el => S.hydrateImages(el),
+      wikiNotes: () => (S.idx || []).filter(n => n && !n.deleted && S.noteVault(n) === S.currentVault).map(n => ({
+        id: n.id,
+        title: n.title || '未命名笔记',
+        folder: n.folder || '',
+      })),
+      onWiki: (target) => {
+        const t = String(target || '').trim();
+        if (!t) return;
+        const list = S.idx || [];
+        const inVault = n => S.noteVault(n) === S.currentVault;
+        const label = n => (n.folder ? n.folder + '/' : '') + (n.title || '未命名笔记');
+        let n = list.find(x => inVault(x) && label(x) === t);
+        if (!n) n = list.find(x => inVault(x) && (x.title || '未命名笔记') === t);
+        if (!n) n = list.find(x => (x.title || '未命名笔记') === t || label(x) === t);
+        if (n) S.open(n.id);
+        else showToast('未找到笔记：' + t);
+      },
     });
     S.liveEd.hide();   // 默认显示状态由 setMode 决定
   };

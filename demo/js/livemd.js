@@ -1,8 +1,10 @@
 /* ============================================================
    OmniHome · LiveMD 原地实时渲染 Markdown 编辑器
    ------------------------------------------------------------
-   零外部依赖：输入 `- 123` 立即原地渲染为列表项；删除回退到
-   语法标记处时自动还原为原始文本，可继续逐字编辑。
+   零外部依赖：输入 `- 123` 立即原地渲染为列表项。光标所在行改为
+   显示原始 Markdown 标记（`- 列表`、`**加粗**`），光标离开后恢复渲染。
+   选中文本后直接输入 * / _ / ~ / ` 会按层包裹修饰。输入 [[ 弹出笔记
+   模糊搜索并补全双链；从目录拖入笔记也会插入 [[标题]]。
    隐藏的原 textarea 仍是数据源，本组件每次变更回写并派发
    'input' 事件，原有自动保存/统计/待办解析逻辑无需改动。
 
@@ -52,14 +54,35 @@ export const LiveMD = (() => {
         const one = !two && s.slice(i).match(/^\*([^*\s][^*]*)\*/);
         const m = two || one, tag = two ? 'b' : 'i', mk = two ? '**' : '*';
         if (m){ out += `<${tag} data-pre="${mk}" data-post="${mk}">${inlineHtml(m[1])}</${tag}>`; i += m[0].length; continue; }
+      } else if (ch === '_' && (i === 0 || !/[A-Za-z0-9]/.test(s[i - 1]))){
+        const two = s.slice(i).match(/^__(.+?)__/);
+        const one = !two && s.slice(i).match(/^_([^_\s][^_]*?)_(?![A-Za-z0-9])/);
+        const m = two || one, tag = two ? 'b' : 'i', mk = two ? '__' : '_';
+        if (m){ out += `<${tag} data-pre="${mk}" data-post="${mk}">${inlineHtml(m[1])}</${tag}>`; i += m[0].length; continue; }
       } else if (ch === '~'){
         const m = s.slice(i).match(/^~~(.+?)~~/);
         if (m){ out += `<s data-pre="~~" data-post="~~">${inlineHtml(m[1])}</s>`; i += m[0].length; continue; }
       } else if (ch === '['){
+        /* Obsidian 式笔记引用 [[标题]] / [[标题|别名]]：整段 data-raw 无损还原 */
+        if (s[i + 1] === '['){
+          const wiki = s.slice(i).match(/^\[\[([^\[\]\n]+?)\]\]/);
+          if (wiki){
+            const body = wiki[1];
+            const pipe = body.indexOf('|');
+            const target = (pipe >= 0 ? body.slice(0, pipe) : body).trim();
+            const alias = (pipe >= 0 ? body.slice(pipe + 1) : target).trim() || target;
+            if (target){
+              out += `<a class="lm-wiki" href="#" data-raw="${escAttr(wiki[0])}" data-wiki="${escAttr(target)}" contenteditable="false">${esc(alias)}</a>`;
+              i += wiki[0].length; continue;
+            }
+          }
+        }
         /* 行内链接 [text](url)（文本可编辑，序列化经 data-pre/post 无损还原） */
-        const m = s.slice(i).match(/^\[([^\]]+)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/);
+        const m = s.slice(i).match(/^\[([^\]]+)\]\(([^)\s]+)(\s+["'][^"']*["'])?\)/);
         if (m){
-          out += `<a class="lm-a" href="${escAttr(m[2])}" target="_blank" rel="noopener noreferrer" data-pre="[${escAttr(m[1])}](${escAttr(m[2])})" data-post="">${esc(m[1])}</a>`;
+          /* 前缀/后缀分开存，行内改文字或光标行展开原文时都能无损还原 */
+          const post = '](' + m[2] + (m[3] || '') + ')';
+          out += `<a class="lm-a" href="${escAttr(m[2])}" target="_blank" rel="noopener noreferrer" data-pre="[" data-post="${escAttr(post)}">${esc(m[1])}</a>`;
           i += m[0].length; continue;
         }
       } else if (ch === '<'){
@@ -116,6 +139,33 @@ export const LiveMD = (() => {
     ? tableLiveRaw(el)
     : Array.from(el.childNodes).map(rawOfNode).join('');
   const fragRaw = f => Array.from(f.childNodes).map(rawOfNode).join('');
+  /* 走到 (container, offset) 为止的原始长度。半截行内标记只计已越过的 data-pre，
+     未走到元素结尾时不计 data-post，避免选区把闭合 ** 算进起点。 */
+  function rawUntil(scope, container, offset){
+    let count = 0;
+    const walk = node => {
+      if (node === container){
+        if (node.nodeType === 3){ count += Math.min(offset, node.data.length); return true; }
+        const kids = node.childNodes;
+        const n = Math.min(offset, kids.length);
+        for (let i = 0; i < n; i++) count += rawOfNode(kids[i]).length;
+        return true;
+      }
+      if (node.nodeType === 3){ count += node.data.length; return false; }
+      if (!node.tagName || node.tagName === 'BR') return false;
+      if (node.dataset && node.dataset.raw !== undefined){
+        count += node.dataset.raw.length;
+        return false;
+      }
+      const hasPre = !!(node.dataset && node.dataset.pre !== undefined);
+      if (hasPre) count += node.dataset.pre.length;
+      for (const ch of node.childNodes){ if (walk(ch)) return true; }
+      if (hasPre) count += (node.dataset.post || '').length;
+      return false;
+    };
+    walk(scope);
+    return count;
+  }
 
   /* ---------- 代码块语法高亮（纯视觉：对已转义文本包 token span，不影响序列化回写） ---------- */
   /* 分组：注释 → 字符串 → 数字 → 关键字；`.` 不匹配换行，天然按行止住 */
@@ -271,6 +321,7 @@ export const LiveMD = (() => {
     ta.parentNode.insertBefore(root, ta.nextSibling);
     ta.style.setProperty('display', 'none', 'important');
     let composing = false, alive = true;
+    let activeSrc = null, srcLock = false, pointerDown = false, wikiHold = false, wikiPress = null;
     root.dataset.placeholder = ta.getAttribute('placeholder') || '';
 
     const lines = () => Array.from(root.children);
@@ -565,9 +616,7 @@ export const LiveMD = (() => {
         if (!cell || !tbl.contains(cell)) return rawFull.length;
         const tr = cell.closest('tr');
         const ci = Array.from(tr.children).filter(c => c.tagName === 'TD' || c.tagName === 'TH').indexOf(cell);
-        const pre = document.createRange();
-        pre.selectNodeContents(cell); pre.setEnd(container, offset);
-        const inCell = fragRaw(pre.cloneContents());
+        const inCell = rawUntil(cell, container, offset);
         const rawRows = rawFull.split('\n');
         const rowIdx = tr.parentNode.tagName === 'THEAD' ? 0
           : 2 + Array.from(tbl.querySelectorAll('tbody tr')).indexOf(tr);
@@ -635,9 +684,31 @@ export const LiveMD = (() => {
       }
     }
 
+    /* ---------- 单行渲染（非围栏、非表格）：离开光标行时按原文重新渲染 ---------- */
+    function singleLineHtml(line, i){
+      const mk = parseMarker(line);
+      if (mk){
+        if (mk.type === 'hr'){
+          return `<div class="lm-line lm-hrline" data-src-i="${i}"><hr class="lm-hr" data-raw="${esc(mk.raw)}" contenteditable="false"></div>`;
+        }
+        const rest = line.slice(mk.raw.length);
+        let inner;
+        if (mk.type === 'todo'){
+          inner = `<span class="lm-cb${mk.checked ? ' on' : ''}" data-checked="${mk.checked ? 1 : 0}" data-raw="${esc(mk.raw)}" contenteditable="false">${mk.checked ? '☑' : '☐'}</span>`;
+        } else {
+          const glyph = mk.type === 'li' ? '&bull;' : mk.type === 'h' ? '#'.repeat(mk.level)
+                      : mk.type === 'quote' ? '&gt;' : esc(mk.raw.trim());
+          inner = `<span class="lm-mk" data-raw="${esc(mk.raw)}" contenteditable="false">${glyph}</span>`;
+        }
+        return `<div class="lm-line lm-${mk.type}${mk.type === 'h' ? ' lm-h lm-h' + mk.level : ''}" data-src-i="${i}">${inner}${inlineHtml(rest) || '<br>'}</div>`;
+      }
+      return `<div class="lm-line" data-src-i="${i}">${inlineHtml(line) || '<br>'}</div>`;
+    }
+
     /* ---------- 全量重建（含代码围栏状态） ---------- */
     function rebuild(raw){
       clearBr();   // 重建前清除括号高亮包裹，避免残留节点
+      activeSrc = null;
       snapCodeFolds();
       const st = root.scrollTop;
       const srcLines = raw === '' ? [''] : raw.split('\n');
@@ -665,25 +736,7 @@ export const LiveMD = (() => {
           html.push(renderTable(rows, t0));
           continue;
         }
-        const mk = parseMarker(line);
-        if (mk){
-          if (mk.type === 'hr'){
-            html.push(`<div class="lm-line lm-hrline" data-src-i="${i}"><hr class="lm-hr" data-raw="${esc(mk.raw)}" contenteditable="false"></div>`);
-            continue;
-          }
-          const rest = line.slice(mk.raw.length);
-          let inner;
-          if (mk.type === 'todo'){
-            inner = `<span class="lm-cb${mk.checked ? ' on' : ''}" data-checked="${mk.checked ? 1 : 0}" data-raw="${esc(mk.raw)}" contenteditable="false">${mk.checked ? '☑' : '☐'}</span>`;
-          } else {
-            const glyph = mk.type === 'li' ? '&bull;' : mk.type === 'h' ? '#'.repeat(mk.level)
-                        : mk.type === 'quote' ? '&gt;' : esc(mk.raw.trim());
-            inner = `<span class="lm-mk" data-raw="${esc(mk.raw)}" contenteditable="false">${glyph}</span>`;
-          }
-          html.push(`<div class="lm-line lm-${mk.type}${mk.type === 'h' ? ' lm-h lm-h' + mk.level : ''}" data-src-i="${i}">${inner}${inlineHtml(rest) || '<br>'}</div>`);
-        } else {
-          html.push(`<div class="lm-line" data-src-i="${i}">${inlineHtml(line) || '<br>'}</div>`);
-        }
+        html.push(singleLineHtml(line, i));
       }
       root.innerHTML = html.join('');
       applyCodeFolds();
@@ -742,34 +795,16 @@ export const LiveMD = (() => {
         }
         return base + rawOffsetInTable(node, container, offset);
       }
-      const pre = document.createRange();
-      pre.selectNodeContents(node);
-      pre.setEnd(container, offset);
-      let off = fragRaw(pre.cloneContents()).length;
+      let base = 0;
       for (const ln of lines()){
         if (ln === node) break;
-        off += lineRaw(ln).length + 1;
+        base += lineRaw(ln).length + 1;
       }
-      return off;
+      return base + rawUntil(node, container, offset);
     }
     function offsetOfRange(r){
-      if (!root.contains(r.startContainer) && r.startContainer !== root) return null;
-      if (r.startContainer === root){
-        let off = 0; const ls = lines();
-        for (let i = 0; i < Math.min(r.startOffset, ls.length); i++) off += lineRaw(ls[i]).length + 1;
-        return off;
-      }
-      let node = r.startContainer;
-      while (node.parentNode !== root) node = node.parentNode;
-      const pre = document.createRange();
-      pre.selectNodeContents(node);
-      pre.setEnd(r.startContainer, r.startOffset);
-      let off = fragRaw(pre.cloneContents()).length;
-      for (const ln of lines()){
-        if (ln === node) break;
-        off += lineRaw(ln).length + 1;
-      }
-      return off;
+      if (!r || (r.startContainer !== root && !root.contains(r.startContainer))) return null;
+      return rawOffset(r.startContainer, r.startOffset);
     }
     function globalOffset(){
       const sel = window.getSelection();
@@ -942,13 +977,83 @@ export const LiveMD = (() => {
     function restoreCaret(off){
       if (off == null) return;
       let pos = 0;
-      for (const ln of lines()){
+      let placed = false;
+      const ls = lines();
+      for (const ln of ls){
         const len = lineRaw(ln).length;
-        if (off <= pos + len){ restoreInLine(ln, off - pos); return; }
+        if (off <= pos + len){ placeOnLine(ln, off - pos); placed = true; break; }
         pos += len + 1;
       }
-      const ls = lines();
-      if (ls.length) caretEndOf(ls[ls.length - 1]);
+      if (!placed && ls.length) caretEndOf(ls[ls.length - 1]);
+      /* 光标落定后立刻判断 [[ ，不必等 selectionchange（程序化选区有时不派发） */
+      if (!composing && !pointerDown) syncWiki();
+    }
+
+    /* 可编辑且非表格/代码行：光标落在该行时整行改为原文，便于直接改标记符号 */
+    function canSource(line){
+      if (!line || !line.classList) return false;
+      if (root.getAttribute('contenteditable') === 'false') return false;
+      if (line.dataset && line.dataset.tableRaw !== undefined) return false;
+      if (line.classList.contains('lm-code') || line.classList.contains('lm-fence')) return false;
+      return true;
+    }
+    function leaveSource(line){
+      if (!line || !line.isConnected || !line.classList.contains('lm-src')) return;
+      const raw = lineRaw(line);
+      const i = line.getAttribute('data-src-i') || '0';
+      const box = document.createElement('div');
+      box.innerHTML = singleLineHtml(raw, i);
+      const neu = box.firstElementChild;
+      if (neu) line.replaceWith(neu);
+      if (activeSrc === line) activeSrc = null;
+    }
+    /* 把一行换成原始 Markdown 文本，并把光标放到行内偏移 localOff */
+    function sourceifyLine(line, localOff){
+      if (!line || !canSource(line)) return;
+      if (activeSrc && activeSrc !== line && activeSrc.isConnected) leaveSource(activeSrc);
+      if (!line.classList.contains('lm-src')){
+        const raw = lineRaw(line);
+        line.classList.add('lm-src');
+        line.dataset.lmSrc = '1';
+        while (line.firstChild) line.removeChild(line.firstChild);
+        if (!raw) line.appendChild(document.createElement('br'));
+        else line.appendChild(document.createTextNode(raw));
+      }
+      activeSrc = line;
+      if (localOff != null) restoreInLine(line, localOff);
+    }
+    function placeOnLine(line, localOff){
+      if (!canSource(line)){
+        if (activeSrc && activeSrc.isConnected) leaveSource(activeSrc);
+        activeSrc = null;
+        restoreInLine(line, localOff);
+        return;
+      }
+      const sel = window.getSelection();
+      const collapsed = !sel || !sel.rangeCount || sel.isCollapsed;
+      if (collapsed && !pointerDown && !composing) sourceifyLine(line, localOff);
+      else restoreInLine(line, localOff);
+    }
+    /* 折叠光标移到新行时，把上一行渲染回去、当前行展开为原文 */
+    function syncSourceFromSelection(){
+      if (!alive || composing || srcLock || pointerDown || wikiHold) return;
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || !sel.isCollapsed) return;
+      const el = caretLineEl();
+      if (!el || !canSource(el)){
+        if (activeSrc && activeSrc.isConnected){
+          srcLock = true;
+          try { leaveSource(activeSrc); } finally { srcLock = false; }
+        }
+        activeSrc = null;
+        return;
+      }
+      if (el.classList.contains('lm-src')){ activeSrc = el; return; }
+      const off = globalOffset();
+      if (off == null) return;
+      srcLock = true;
+      try { restoreCaret(off); }
+      finally { srcLock = false; }
     }
 
     /* ---------- 输入管线：序列化 → 回写 textarea → 重建 → 还原光标 ---------- */
@@ -984,10 +1089,7 @@ export const LiveMD = (() => {
       let line = r.startContainer;
       while (line && line.parentNode !== root) line = line.parentNode;
       if (!line) return null;
-      const pre = document.createRange();
-      pre.selectNodeContents(line);
-      pre.setEnd(r.startContainer, r.startOffset);
-      return { line, r, sel, textBefore: fragRaw(pre.cloneContents()) };
+      return { line, r, sel, textBefore: lineRaw(line).slice(0, rawUntil(line, r.startContainer, r.startOffset)) };
     }
 
     /* ---------- 按键：Enter 续行 / Backspace 还原与并段 ---------- */
@@ -1430,28 +1532,282 @@ export const LiveMD = (() => {
     }
     let selTimer = 0;
     function onSelChange(){
-      if (!root.isConnected || selTimer) return;
+      if (!root.isConnected || selTimer || srcLock) return;
       selTimer = requestAnimationFrame(() => {
         selTimer = 0;
-        const el = caretLineEl();
-        for (const x of root.querySelectorAll('.lm-caret'))
-          if (x !== el) x.classList.remove('lm-caret');
-        if (el) el.classList.add('lm-caret');
-        updateFencePairFocus();
-        caretBrackets();
+        if (!alive || srcLock) return;
+        if (wikiHold || (wikiPop && wikiPop.contains(document.activeElement))) return;
         /* 光标离开表格后，把刚才编辑过的表格刷新一次内联渲染（加粗/链接等） */
+        let el = caretLineEl();
         if (tblDirty && (!el || !el.dataset || el.dataset.tableRaw === undefined)){
           tblDirty = false;
           const off = globalOffset();
           rebuild(serializeAll());
           restoreCaret(off);
+          el = caretLineEl();
         }
+        if (!pointerDown && !composing) syncSourceFromSelection();
+        el = caretLineEl();
+        for (const x of root.querySelectorAll('.lm-caret'))
+          if (x !== el) x.classList.remove('lm-caret');
+        if (el) el.classList.add('lm-caret');
+        updateFencePairFocus();
+        if (!pointerDown && !composing) caretBrackets();
+        if (!pointerDown && !composing) syncWiki();
       });
+    }
+
+    /* ---------- 选区上直接输入修饰符：* 斜体、再按加粗、~ 删除线、` 行内代码 ---------- */
+    const MARK_MAX = { '*': 3, '_': 2, '~': 2, '`': 1 };
+    function applyMarkerText(text){
+      if (!text || root.getAttribute('contenteditable') === 'false') return false;
+      const ch = text[0];
+      const max = MARK_MAX[ch];
+      if (!max || [...text].some(c => c !== ch)) return false;
+      const rng = selectionRawRange();
+      if (!rng || rng.end <= rng.start) return false;
+      let raw = serializeAll();
+      let start = rng.start, end = rng.end;
+      const inner = raw.slice(start, end);
+      let outside = 0;
+      while (outside < max
+          && start - (outside + 1) >= 0
+          && end + outside < raw.length
+          && raw[start - 1 - outside] === ch
+          && raw[end + outside] === ch) outside++;
+      if (outside >= max){
+        raw = raw.slice(0, start - outside) + inner + raw.slice(end + outside);
+        start -= outside;
+        end = start + inner.length;
+      } else {
+        const add = Math.min(text.length, max - outside);
+        const mk = ch.repeat(add);
+        raw = raw.slice(0, start) + mk + inner + mk + raw.slice(end);
+        start += mk.length;
+        end = start + inner.length;
+      }
+      ta.value = raw;
+      try { ta.dispatchEvent(new Event('input')); } catch (_) {}
+      rebuild(raw);
+      selectRawRange(start, end);
+      return true;
+    }
+
+    /* ---------- [[ 笔记引用：模糊搜索弹层 ---------- */
+    const wikiPop = document.createElement('div');
+    wikiPop.className = 'lm-wiki-pop';
+    wikiPop.hidden = true;
+    wikiPop.innerHTML = '<input class="lm-wiki-q" type="text" enterkeyhint="search" autocomplete="off" spellcheck="false" placeholder="搜索笔记，回车插入引用" aria-label="搜索笔记">'
+      + '<div class="lm-wiki-list" role="listbox"></div>';
+    document.body.appendChild(wikiPop);
+    const wikiInput = wikiPop.querySelector('.lm-wiki-q');
+    const wikiList = wikiPop.querySelector('.lm-wiki-list');
+    let wikiSession = null, wikiActive = 0, wikiDismissedAt = 0;
+
+    function wikiScore(q, title, folder){
+      const query = String(q || '').trim().toLowerCase();
+      if (!query) return 1;
+      const hay = (title + '\n' + folder).toLowerCase();
+      const at = hay.indexOf(query);
+      if (at >= 0) return 300 - Math.min(at, 200) + (title.toLowerCase().startsWith(query) ? 80 : 0);
+      let i = 0;
+      for (const c of hay){ if (c === query[i]) i++; if (i >= query.length) return 40; }
+      return 0;
+    }
+    function wikiItems(q){
+      if (typeof opts.wikiNotes !== 'function') return [];
+      let all = [];
+      try { all = opts.wikiNotes() || []; } catch (_) { all = []; }
+      const scored = [];
+      for (const n of all){
+        const title = String((n && n.title) || '未命名笔记');
+        const folder = String((n && n.folder) || '');
+        const score = wikiScore(q, title, folder);
+        if (score > 0) scored.push({ id: n.id, title, folder, score });
+      }
+      scored.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title, 'zh'));
+      return scored.slice(0, 20);
+    }
+    function wikiLinkText(item, items){
+      const title = String(item.title || '未命名笔记').replace(/[\[\]\n]/g, '').trim() || '未命名笔记';
+      const dup = items.filter(n => n.title === item.title).length > 1;
+      if (dup && item.folder) return (item.folder + '/' + title).replace(/[\[\]\n]/g, '');
+      return title;
+    }
+    function renderWikiList(){
+      const items = wikiItems(wikiInput.value);
+      wikiList.replaceChildren();
+      if (!items.length){
+        const empty = document.createElement('div');
+        empty.className = 'lm-wiki-empty';
+        empty.textContent = wikiInput.value.trim() ? '没有匹配的笔记' : '没有可引用的笔记';
+        wikiList.appendChild(empty);
+        wikiActive = 0;
+        return items;
+      }
+      if (wikiActive >= items.length) wikiActive = items.length - 1;
+      if (wikiActive < 0) wikiActive = 0;
+      items.forEach((it, idx) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'lm-wiki-item' + (idx === wikiActive ? ' is-on' : '');
+        btn.setAttribute('role', 'option');
+        const t = document.createElement('span');
+        t.className = 'lm-wiki-title';
+        t.textContent = it.title;
+        btn.appendChild(t);
+        const sub = document.createElement('span');
+        sub.className = 'lm-wiki-folder';
+        sub.textContent = it.folder || '根目录';
+        btn.appendChild(sub);
+        btn.addEventListener('pointerdown', ev => ev.preventDefault());
+        btn.addEventListener('click', () => acceptWiki(it, items));
+        wikiList.appendChild(btn);
+      });
+      const on = wikiList.querySelector('.is-on');
+      if (on) on.scrollIntoView({ block: 'nearest' });
+      return items;
+    }
+    function positionWiki(rect){
+      const margin = 8;
+      wikiPop.style.left = '0px';
+      wikiPop.style.top = '0px';
+      const w = wikiPop.offsetWidth || 280;
+      const h = wikiPop.offsetHeight || 200;
+      let left = rect.left;
+      let top = rect.bottom + 6;
+      if (left + w > window.innerWidth - margin) left = window.innerWidth - margin - w;
+      if (left < margin) left = margin;
+      if (top + h > window.innerHeight - margin) top = Math.max(margin, rect.top - h - 6);
+      wikiPop.style.left = left + 'px';
+      wikiPop.style.top = top + 'px';
+    }
+    function caretClientRect(){
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount){
+        const r = sel.getRangeAt(0).cloneRange();
+        r.collapse(true);
+        const rect = r.getBoundingClientRect();
+        if (rect && (rect.width || rect.height)) return rect;
+      }
+      const el = caretLineEl();
+      if (el) return el.getBoundingClientRect();
+      return { left: 16, top: 80, bottom: 100, width: 0, height: 20 };
+    }
+    function hideWiki(silent){
+      wikiHold = false;
+      wikiSession = null;
+      wikiPop.hidden = true;
+      if (silent) wikiDismissedAt = Date.now();
+    }
+    function wikiQueryAtCaret(){
+      const info = caretLineInfo();
+      if (!info) return null;
+      const m = info.textBefore.match(/\[\[([^\]\n]*)$/);
+      if (!m) return null;
+      const off = globalOffset();
+      if (off == null) return null;
+      return { q: m[1], start: off - m[0].length, end: off };
+    }
+    function openWiki(hit){
+      const rect = caretClientRect();
+      wikiSession = { start: hit.start, end: hit.end, rect };
+      wikiActive = 0;
+      wikiPop.hidden = false;
+      wikiInput.value = hit.q || '';
+      renderWikiList();
+      positionWiki(rect);
+      wikiHold = true;
+      wikiInput.focus();
+      const n = wikiInput.value.length;
+      try { wikiInput.setSelectionRange(n, n); } catch (_) {}
+    }
+    function syncWiki(){
+      if (typeof opts.wikiNotes !== 'function') return;
+      if (root.getAttribute('contenteditable') === 'false'){ hideWiki(); return; }
+      if (Date.now() - wikiDismissedAt < 280) return;
+      if (!wikiPop.hidden && wikiHold) return;
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && !sel.isCollapsed){ hideWiki(); return; }
+      const cur = caretLineEl();
+      if (cur && (cur.classList.contains('lm-code') || cur.classList.contains('lm-fence'))){ hideWiki(); return; }
+      const hit = wikiQueryAtCaret();
+      if (!hit){ hideWiki(); return; }
+      if (!wikiPop.hidden && wikiSession && wikiSession.start === hit.start) return;
+      openWiki(hit);
+    }
+    function acceptWiki(item, items){
+      if (!wikiSession || !item) return;
+      const list = items || wikiItems(wikiInput.value);
+      const text = '[[' + wikiLinkText(item, list) + ']]';
+      const start = wikiSession.start, end = wikiSession.end;
+      hideWiki(true);
+      root.focus();
+      insertRawAt(start, text, end);
+    }
+    function closeWikiToEditor(){
+      const end = wikiSession ? wikiSession.end : null;
+      hideWiki(true);
+      root.focus();
+      if (end != null) restoreCaret(end);
+    }
+    wikiInput.addEventListener('input', () => {
+      wikiActive = 0;
+      renderWikiList();
+      if (wikiSession && wikiSession.rect) positionWiki(wikiSession.rect);
+    });
+    wikiInput.addEventListener('keydown', e => {
+      const items = wikiItems(wikiInput.value);
+      if (e.key === 'ArrowDown'){
+        e.preventDefault();
+        wikiActive = Math.min(items.length - 1, wikiActive + 1);
+        renderWikiList();
+      } else if (e.key === 'ArrowUp'){
+        e.preventDefault();
+        wikiActive = Math.max(0, wikiActive - 1);
+        renderWikiList();
+      } else if (e.key === 'Enter'){
+        e.preventDefault();
+        if (items[wikiActive]) acceptWiki(items[wikiActive], items);
+      } else if (e.key === 'Escape'){
+        e.preventDefault();
+        closeWikiToEditor();
+      }
+    });
+    function onDocPointerDown(e){
+      const t = e.target;
+      if (!wikiPop.hidden && t && !wikiPop.contains(t)) hideWiki(true);
+      if (!t || !root.contains(t)) return;
+      const wiki = t.closest && t.closest('.lm-wiki');
+      if (wiki){
+        e.preventDefault();
+        wikiPress = wiki;
+        return;
+      }
+      pointerDown = true;
+    }
+    function onPointerUp(e){
+      if (wikiPress){
+        const wiki = wikiPress;
+        wikiPress = null;
+        if (root.contains(wiki) && typeof opts.onWiki === 'function')
+          opts.onWiki(wiki.dataset.wiki || wiki.textContent || '');
+        return;
+      }
+      if (!pointerDown) return;
+      pointerDown = false;
+      syncSourceFromSelection();
     }
 
     root.addEventListener('input', (e) => {
       if (e && e.target && e.target.closest && e.target.closest('img')) return;
       pipeline();
+    });
+    root.addEventListener('beforeinput', e => {
+      if (composing || e.isComposing) return;
+      if (!e.data || e.inputType !== 'insertText') return;
+      if (!applyMarkerText(e.data)) return;
+      e.preventDefault();
     });
     root.addEventListener('keydown', onKeydown);
     root.addEventListener('paste', onPaste);
@@ -1462,27 +1818,49 @@ export const LiveMD = (() => {
       if (e.target.closest && e.target.closest('.lm-code-tools, [data-lm-code-act]'))
         e.preventDefault();
     });
-    /* 本机图片拖入编辑区 → 上传并插入 */
+    /* 本机图片拖入编辑区 → 上传并插入；笔记目录拖入 → [[标题]] */
+    function dragTypes(dt){ return Array.from((dt && dt.types) || []); }
     root.addEventListener('dragover', e => {
-      if (opts.uploadImage && e.dataTransfer
-          && Array.from(e.dataTransfer.types).includes('Files')){
-        e.preventDefault();
-        root.classList.add('lm-drop');
-      }
+      const types = dragTypes(e.dataTransfer);
+      const note = types.includes('text/omni-note');
+      const file = opts.uploadImage && types.includes('Files');
+      if (!note && !file) return;
+      if (note && root.getAttribute('contenteditable') === 'false') return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      root.classList.add('lm-drop');
     });
     root.addEventListener('dragleave', e => {
       if (e.relatedTarget && root.contains(e.relatedTarget)) return;
       root.classList.remove('lm-drop');
     });
     root.addEventListener('drop', e => {
+      root.classList.remove('lm-drop');
+      const types = dragTypes(e.dataTransfer);
+      if (types.includes('text/omni-note') && root.getAttribute('contenteditable') !== 'false'){
+        e.preventDefault();
+        e.stopPropagation();
+        let items = [];
+        try { items = JSON.parse(e.dataTransfer.getData('text/omni-note') || '[]'); } catch (_) { items = []; }
+        if (!Array.isArray(items) || !items.length) return;
+        const md = items.map(n => {
+          const title = String((n && n.title) || '未命名笔记').replace(/[\[\]\n]/g, '').trim() || '未命名笔记';
+          return '[[' + title + ']]';
+        }).join(' ');
+        const pos = offsetFromPoint(e.clientX, e.clientY);
+        insertRawAt(pos, md);
+        root.focus();
+        return;
+      }
       const files = Array.from((e.dataTransfer || {}).files || [])
         .filter(f => /^image\//.test(f.type));
       if (!files.length || !opts.uploadImage) return;
       e.preventDefault();
-      root.classList.remove('lm-drop');
       insertFiles(files, { x: e.clientX, y: e.clientY });
     });
     document.addEventListener('selectionchange', onSelChange);
+    document.addEventListener('pointerdown', onDocPointerDown, true);
+    document.addEventListener('pointerup', onPointerUp);
     root.addEventListener('compositionstart', () => { composing = true; });
     root.addEventListener('compositionend', () => { composing = false; pipeline(); });
 
@@ -1577,8 +1955,13 @@ export const LiveMD = (() => {
       isShown(){ return root.style.display !== 'none'; },
       focus(){ root.focus(); },
       destroy(){
-        alive = false; root.remove(); ta.style.removeProperty('display');
+        alive = false;
+        hideWiki();
+        wikiPop.remove();
+        root.remove(); ta.style.removeProperty('display');
         document.removeEventListener('selectionchange', onSelChange);
+        document.removeEventListener('pointerdown', onDocPointerDown, true);
+        document.removeEventListener('pointerup', onPointerUp);
       },
       el: root
     };
