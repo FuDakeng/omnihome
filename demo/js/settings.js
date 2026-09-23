@@ -686,7 +686,7 @@
     return (list || []).map(v => `
       <div class="cl-ver">
         <div class="cl-head">
-          <span class="chip primary no-dot num">v${App.esc(v.version)}</span>
+          <span class="chip primary no-dot num">v${App.esc(v.version || '—')}</span>
           <span class="num" style="font-size:11px;color:var(--om-text-3)">${App.esc(v.date || '')}</span>
         </div>
         <ul class="cl-items">${(v.items || []).map(i => `<li>${App.esc(i)}</li>`).join('')}</ul>
@@ -703,7 +703,7 @@
       $('#aboutBuild').textContent = a.build;
       $('#aboutUp').textContent = a.uptime;
       $('#aboutPy').textContent = 'Python ' + a.python;
-      $('#aboutVerChip').textContent = 'v' + a.version;
+      $('#aboutVerChip').textContent = a.version ? ('v' + a.version) : '—';
       $('#aboutChangelog').innerHTML = changelogHtml(a.changelog);
       $('#aboutDevName').textContent = a.developer || 'JeanLaw';
       /* 系统信息：存储引擎从数据统计接口取 */

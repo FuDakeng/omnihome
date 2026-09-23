@@ -14,8 +14,35 @@
 
         <!-- ========== 系统监控区 ========== -->
         <div class="mon-zone-title"><svg class="ic"><use href="#i-activity"/></svg>系统监控</div>
-        <div class="grid12">
-          <article class="card col-12" id="monHwCard">
+        <div class="mon-top">
+          <div class="mon-metrics">
+          <article class="card lift"><div class="stat">
+            <div class="stat-ic tint-primary"><svg class="ic"><use href="#i-cpu"/></svg></div>
+            <div><div class="stat-val num" id="monCpuVal">--<small>%</small></div><div class="stat-label">CPU 使用率</div><div class="stat-sub" id="monCpuSub">加载中…</div></div>
+          </div></article>
+          <article class="card lift"><div class="stat">
+            <div class="stat-ic tint-warning"><svg class="ic"><use href="#i-db"/></svg></div>
+            <div><div class="stat-val num" id="monMemVal">--<small>%</small></div><div class="stat-label" id="monMemLbl">内存</div><div class="stat-sub">实时读取 · 缓存计入已用</div></div>
+          </div></article>
+          <article class="card lift"><div class="stat">
+            <div class="stat-ic tint-success"><svg class="ic"><use href="#i-box"/></svg></div>
+            <div class="mon-disk-body">
+              <div class="stat-val num" id="monDiskVal">--<small>%</small></div>
+              <div class="mon-disk-line">
+                <div class="stat-label" id="monDiskLbl">存储</div>
+                <select id="monDiskPick" class="mon-disk-pick" aria-label="选择硬盘">
+                  <option value="">全部硬盘</option>
+                </select>
+              </div>
+              <div class="stat-sub" id="monDiskSub">全部硬盘合计</div>
+            </div>
+          </div></article>
+          <article class="card lift"><div class="stat">
+            <div class="stat-ic tint-info"><svg class="ic"><use href="#i-zap"/></svg></div>
+            <div><div class="stat-val num" id="monNetVal">--<small>MB/s</small></div><div class="stat-label">网络 · 下载</div><div class="stat-sub" id="monNetSub">↑ -- MB/s</div></div>
+          </div></article>
+          </div>
+          <article class="card mon-hw-card" id="monHwCard">
             <div class="card-head">
               <h3 class="card-title"><svg class="ic"><use href="#i-cpu"/></svg>系统信息</h3>
             </div>
@@ -30,23 +57,8 @@
               </dl>
             </div>
           </article>
-          <article class="card lift col-3"><div class="stat">
-            <div class="stat-ic tint-primary"><svg class="ic"><use href="#i-cpu"/></svg></div>
-            <div><div class="stat-val num" id="monCpuVal">--<small>%</small></div><div class="stat-label">CPU 使用率</div><div class="stat-sub" id="monCpuSub">加载中…</div></div>
-          </div></article>
-          <article class="card lift col-3"><div class="stat">
-            <div class="stat-ic tint-warning"><svg class="ic"><use href="#i-db"/></svg></div>
-            <div><div class="stat-val num" id="monMemVal">--<small>%</small></div><div class="stat-label" id="monMemLbl">内存</div><div class="stat-sub">实时读取 · 缓存计入已用</div></div>
-          </div></article>
-          <article class="card lift col-3"><div class="stat">
-            <div class="stat-ic tint-success"><svg class="ic"><use href="#i-box"/></svg></div>
-            <div><div class="stat-val num" id="monDiskVal">--<small>%</small></div><div class="stat-label" id="monDiskLbl">存储</div><div class="stat-sub" id="monDiskSub">全部硬盘合计</div></div>
-          </div></article>
-          <article class="card lift col-3"><div class="stat">
-            <div class="stat-ic tint-info"><svg class="ic"><use href="#i-zap"/></svg></div>
-            <div><div class="stat-val num" id="monNetVal">--<small>MB/s</small></div><div class="stat-label">网络 · 下载</div><div class="stat-sub" id="monNetSub">↑ -- MB/s</div></div>
-          </div></article>
-
+        </div>
+        <div class="grid12">
           <article class="card col-8">
             <div class="card-head">
               <h3 class="card-title">资源监控</h3>

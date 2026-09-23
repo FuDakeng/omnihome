@@ -160,16 +160,18 @@ const App = (() => {
     try {
       const a = await API.get('/api/about');
       const seen = localStorage.getItem(SEEN_KEY);
-      if (a.version && a.version !== seen){
+      if (a.version && a.version !== seen && showChangelog(a)){
         localStorage.setItem(SEEN_KEY, a.version);
-        showChangelog(a);
       }
     } catch (e) { /* 后端不可达时跳过 */ }
   }
 
   function showChangelog(a){
-    $('#changelogSub').textContent = `v${a.version} · ${a.stage}`;
-    $('#changelogBody').innerHTML = (a.changelog || []).map(v => `
+    const sub = $('#changelogSub');
+    const body = $('#changelogBody');
+    if (!sub || !body || !a) return false;
+    sub.textContent = `v${a.version || '—'} · ${a.stage || ''}`;
+    body.innerHTML = (a.changelog || []).map(v => `
       <div class="cl-ver">
         <div class="cl-head">
           <span class="chip primary no-dot num">v${esc(v.version)}</span>
@@ -179,6 +181,7 @@ const App = (() => {
       </div>`).join('') ||
       '<div style="font-size:12px;color:var(--om-text-3)">暂无更新记录</div>';
     openModal('changelogMask');
+    return true;
   }
 
   async function logout(){

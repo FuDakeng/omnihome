@@ -97,16 +97,44 @@ def test_gpu_metrics_shape_is_json_safe():
     json.dumps(data)
 
 
+def test_container_id_is_not_used_as_device_name(monkeypatch):
+    assert mon._is_container_id("715fbcad427")
+    assert mon._is_container_id("715fbcad427ab")
+    assert mon._is_container_id("a" * 64)
+    assert not mon._is_container_id("JeansNAS")
+    monkeypatch.setattr(mon, "_HOST_ROOT", Path("/no/such/omnihome-host"))
+    monkeypatch.setattr(mon, "_docker_host_facts", lambda: {"name": "JeansNAS", "os": "UGOS 1.9"})
+    assert mon._host_hostname() == "JeansNAS"
+
+
+def test_about_json_is_not_cut_by_markup_closers():
+    import json
+    sys.path.insert(0, str(ROOT / "backend"))
+    from app_version import dumps_for_http
+    raw = dumps_for_http({"note": "before </body> and </script> end"})
+    assert "</body>" not in raw
+    assert "</script>" not in raw
+    assert json.loads(raw)["note"] == "before </body> and </script> end"
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "</body>" not in text
+    assert "</script>" not in text.lower()
+
+
 def test_monitor_page_exposes_hardware_card_and_filter_opens_right():
     html = (ROOT / "demo" / "views" / "monitor.html").read_text(encoding="utf-8")
     for field in ("monHwHost", "monHwCpu", "monHwGpu", "monHwOs", "monHwMem", "monHwUp"):
         assert f'id="{field}"' in html
     js = (ROOT / "demo" / "js" / "monitor.js").read_text(encoding="utf-8")
+    assert 'id="monDiskPick"' in html
+    assert 'class="mon-top"' in html
     assert "renderHwCard" in js
+    assert "monitorVisible" in js
     assert "未检测到可监控的 GPU（NVIDIA / Intel / AMD）" in js
     assert "gpuName" in js
     css = (ROOT / "demo" / "css" / "components" / "monitor.css").read_text(encoding="utf-8")
     assert ".ct-filter .drop-panel" in css
     assert "left: 0" in css
     mobile = (ROOT / "demo" / "css" / "mobile.css").read_text(encoding="utf-8")
-    assert ".mon-hw" in mobile
+    assert ".mon-top" in css
+    assert "max-width: 1280px" in css
+    assert ".mon-metrics" in mobile

@@ -177,7 +177,7 @@ def about():
     import platform
     days = int((time.time() - START_TIME) // 86400)
     hours = int((time.time() - START_TIME) % 86400 // 3600)
-    return {
+    payload = {
         "name": "万事屋", "version": app_version.VERSION,
         "stage": app_version.STAGE,
         "build": BUILD_TIME, "python": platform.python_version(),
@@ -185,6 +185,11 @@ def about():
         "changelog": app_version.CHANGELOG,
         "developer": "JeanLaw",
     }
+    return Response(
+        content=app_version.dumps_for_http(payload),
+        media_type="application/json; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/about/logs")
