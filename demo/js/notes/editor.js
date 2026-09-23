@@ -1,5 +1,33 @@
 import { mdRender, mdFallback, mdOutline, outlineItemHtml, outlineBodyHtml, mdLineDiff, renderRevDiffHtml, _mdSlug } from './md.js';
 import { S } from './state.js';
+import { isMermaidLang, scheduleMermaid } from '../mermaid.js';
+
+  function mermaidViewMap(box){
+    if (!box) return new Map();
+    if (!S.previewMermaidView.has(box)) S.previewMermaidView.set(box, new Map());
+    return S.previewMermaidView.get(box);
+  }
+  function setPreviewMermaidView(pre, chart){
+    pre.classList.toggle('is-mermaid-chart', chart);
+    const btn = pre.querySelector('[data-md-code-act="view"]');
+    if (btn){
+      btn.textContent = chart ? '代码' : '图表';
+      btn.title = chart ? '切换为代码' : '切换为图表';
+      btn.setAttribute('aria-pressed', chart ? 'true' : 'false');
+    }
+    if (!chart) return;
+    let host = pre.querySelector(':scope > .md-mermaid');
+    if (!host){
+      host = document.createElement('div');
+      host.className = 'md-mermaid';
+      host.setAttribute('role', 'img');
+      host.setAttribute('aria-label', 'Mermaid 图表');
+      host.innerHTML = '<div class="lm-mermaid-chart"></div><div class="lm-mermaid-msg" hidden></div>';
+      pre.appendChild(host);
+    }
+    const code = pre.querySelector('code');
+    scheduleMermaid(host, code ? code.textContent : '');
+  }
 
   S.previewFoldSet = function(box){
     if (!box) return new Set();
@@ -17,15 +45,24 @@ import { S } from './state.js';
       pre.classList.add('md-code');
       const code = pre.querySelector('code');
       const lang = (code && code.getAttribute('data-lang')) || '';
+      const mmd = isMermaidLang(lang);
+      const view = mmd && mermaidViewMap(box).get(i) === 'code' ? 'code' : 'chart';
       const tools = document.createElement('div');
       tools.className = 'md-code-tools';
       tools.innerHTML =
         (lang ? '<span class="md-code-lang">' + (window.App ? App.esc(lang) : lang) + '</span>' : '')
+        + (mmd
+          ? '<button type="button" class="lm-code-btn lm-view-btn" data-md-code-act="view" title="'
+            + (view === 'chart' ? '切换为代码' : '切换为图表')
+            + '" aria-pressed="' + (view === 'chart' ? 'true' : 'false') + '">'
+            + (view === 'chart' ? '代码' : '图表') + '</button>'
+          : '')
         + '<button type="button" class="lm-code-btn" data-md-code-act="copy" title="复制">'
         + '<svg class="ic"><use href="#i-copy"/></svg></button>'
         + '<button type="button" class="lm-code-btn" data-md-code-act="fold" title="折叠">'
         + '<svg class="ic"><use href="#i-chev-d"/></svg></button>';
       pre.insertBefore(tools, pre.firstChild);
+      if (mmd) setPreviewMermaidView(pre, view === 'chart');
       if (folded.has(i)){
         pre.classList.add('is-folded');
         const fb = tools.querySelector('[data-md-code-act="fold"]');
@@ -63,6 +100,12 @@ import { S } from './state.js';
         const idx = Array.from(box.querySelectorAll('pre')).indexOf(pre);
         if (on) set.add(idx); else set.delete(idx);
       }
+    } else if (act === 'view'){
+      const box = pre.closest('.md-preview') || pre.parentElement;
+      const idx = Array.from(box.querySelectorAll('pre')).indexOf(pre);
+      const chart = !pre.classList.contains('is-mermaid-chart');
+      mermaidViewMap(box).set(idx, chart ? 'chart' : 'code');
+      setPreviewMermaidView(pre, chart);
     }
   });
 
@@ -73,6 +116,7 @@ import { S } from './state.js';
         .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       box.querySelectorAll('pre code').forEach(el => {
         if (el.dataset.hl === '1') return;
+        if (isMermaidLang(el.getAttribute('data-lang') || '')) return;
         el.dataset.hl = '1';
         el.innerHTML = LiveMD.highlightCode(esc(el.textContent || ''));
       });

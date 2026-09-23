@@ -4,8 +4,8 @@
 """
 from pathlib import Path
 
-VERSION = "0.3.12"
-STAGE = "实时 Markdown"
+VERSION = "0.3.13"
+STAGE = "Mermaid 图表"
 
 _CHANGELOG_FILE = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
 

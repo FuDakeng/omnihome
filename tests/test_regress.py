@@ -11,6 +11,25 @@ ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 
 
+def test_mermaid_editor_support():
+    """知识库编辑器识别 mermaid 围栏，并可在代码 / 图表之间切换。"""
+    live = (ROOT / "demo" / "js" / "livemd.js").read_text(encoding="utf-8")
+    assert "data-lm-code-act=\"view\"" in live
+    assert "is-mermaid-chart" in live
+    assert "scheduleMermaid" in live
+    preview = (ROOT / "demo" / "js" / "notes" / "editor.js").read_text(encoding="utf-8")
+    assert "data-md-code-act=\"view\"" in preview
+    assert "isMermaidLang" in preview
+    vendor = ROOT / "demo" / "js" / "vendor" / "mermaid.min.js"
+    assert vendor.is_file()
+    head = vendor.read_text(encoding="utf-8", errors="ignore")[:80]
+    assert "mermaid" in head
+    css = (ROOT / "demo" / "css" / "components" / "pages.css").read_text(encoding="utf-8")
+    assert ".lm-view-btn" in css
+    mobile = (ROOT / "demo" / "css" / "mobile.css").read_text(encoding="utf-8")
+    assert ".lm-view-btn" in mobile
+
+
 def test_changelog_and_version():
     sys.path.insert(0, str(BACKEND))
     import app_version

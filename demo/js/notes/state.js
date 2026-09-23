@@ -94,6 +94,8 @@ S._revCache = null;
 
 S.previewFolded = new WeakMap();
 
+S.previewMermaidView = new WeakMap();
+
 S.shareTarget = null;
 
 S.shareView = { token: '', canEdit: false, nid: '', mode: 'edit' };

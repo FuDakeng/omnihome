@@ -249,7 +249,33 @@
 .md-preview pre.md-code.is-folded{
   padding-bottom: 6px; min-height: 32px;
 }
-.md-preview pre.md-code.is-folded > code{ display: none; }
+.md-preview pre.md-code.is-folded > code,
+.md-preview pre.md-code.is-folded > .md-mermaid{ display: none; }
+.md-preview pre.md-code.is-mermaid-chart{
+  white-space: normal;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.md-preview pre.md-code.is-mermaid-chart > code{ display: none; }
+.md-preview pre.md-code:not(.is-mermaid-chart) > .md-mermaid{ display: none; }
+.md-mermaid{
+  user-select: none;
+  box-sizing: border-box;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--om-border);
+  border-radius: 8px;
+  background: var(--om-surface);
+  overflow-x: auto;
+  white-space: normal;
+  color: var(--om-text-1);
+}
+.md-mermaid .lm-mermaid-chart:empty::after{
+  content: '正在渲染图表…';
+  color: var(--om-text-3);
+  font-size: 12px;
+}
 
 /* ---------- 查找 / 替换条 ---------- */
 .md-findbar{

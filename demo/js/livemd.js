@@ -1,10 +1,13 @@
 /* ============================================================
    OmniHome · LiveMD 原地实时渲染 Markdown 编辑器
    ------------------------------------------------------------
-   零外部依赖：输入 `- 123` 立即原地渲染为列表项。光标所在行改为
+   输入 `- 123` 立即原地渲染为列表项。光标所在行改为
    显示原始 Markdown 标记（`- 列表`、`**加粗**`），光标离开后恢复渲染。
    选中文本后直接输入 * / _ / ~ / ` 会按层包裹修饰。输入 [[ 弹出笔记
    模糊搜索并补全双链；从目录拖入笔记也会插入 [[标题]]。
+   ```mermaid 围栏会渲染为流程图 / 时序图 / 甘特图等。光标在块内时显示
+   源码便于修改，离开后显示图表；工具条可锁定「代码 / 图表」视图。
+   切换只改展示，不改 Markdown 原文，也不挪动已记住的编辑位置。
    隐藏的原 textarea 仍是数据源，本组件每次变更回写并派发
    'input' 事件，原有自动保存/统计/待办解析逻辑无需改动。
 
@@ -14,6 +17,8 @@
      inst.show()/hide() 编辑模式与其它模式切换
      inst.focus() / inst.destroy()
    ============================================================ */
+import { isMermaidLang, scheduleMermaid, mermaidThemeName } from './mermaid.js';
+
 export const LiveMD = (() => {
   const E = s => { const d = document.createElement('div'); d.innerHTML = s; return d.firstChild; };
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -178,12 +183,17 @@ export const LiveMD = (() => {
       : `<span class="hl-kw">${m}</span>`);
   }
 
-  const CODE_TOOLS =
-    '<span class="lm-code-tools" data-raw="" contenteditable="false">'
-    + '<button type="button" class="lm-code-btn" data-lm-code-act="copy" title="复制">'
-    + '<svg class="ic"><use href="#i-copy"/></svg></button>'
-    + '<button type="button" class="lm-code-btn" data-lm-code-act="fold" title="折叠">'
-    + '<svg class="ic"><use href="#i-chev-d"/></svg></button></span>';
+  function codeToolsHtml(lang){
+    const view = isMermaidLang(lang)
+      ? '<button type="button" class="lm-code-btn lm-view-btn" data-lm-code-act="view" title="切换为图表" aria-pressed="false">图表</button>'
+      : '';
+    return '<span class="lm-code-tools" data-raw="" contenteditable="false">'
+      + view
+      + '<button type="button" class="lm-code-btn" data-lm-code-act="copy" title="复制">'
+      + '<svg class="ic"><use href="#i-copy"/></svg></button>'
+      + '<button type="button" class="lm-code-btn" data-lm-code-act="fold" title="折叠">'
+      + '<svg class="ic"><use href="#i-chev-d"/></svg></button></span>';
+  }
 
   function copyText(s){
     const t = String(s == null ? '' : s);
@@ -651,6 +661,8 @@ export const LiveMD = (() => {
         n = n.nextElementSibling;
       }
       if (n && n.classList.contains('lm-fence-close')) n.classList.toggle('is-folded', on);
+      const panel = openEl.querySelector(':scope > .lm-mermaid');
+      if (panel) panel.classList.toggle('is-folded', on);
     }
     function applyCodeFolds(){
       let i = 0;
@@ -668,6 +680,121 @@ export const LiveMD = (() => {
       }
       return parts.join('\n');
     }
+
+    /* ---------- Mermaid：代码视图 / 图表视图。锁定状态按块序号记住，重建后还原 ---------- */
+    const mermaidMode = new Map();
+    const mermaidCaret = new Map();
+    function listMermaidBlocks(){
+      const out = [];
+      root.querySelectorAll('.lm-fence-open').forEach(el => {
+        if (!isMermaidLang(el.dataset.lang || '')) return;
+        let n = el.nextElementSibling, closed = false;
+        while (n){
+          if (n.classList.contains('lm-fence-open')) break;
+          if (n.classList.contains('lm-fence-close')){ closed = true; break; }
+          n = n.nextElementSibling;
+        }
+        if (closed) out.push(el);
+      });
+      return out;
+    }
+    function blockOffsets(openEl){
+      let start = 0;
+      for (const ln of lines()){
+        if (ln === openEl) break;
+        start += lineRaw(ln).length + 1;
+      }
+      const openLen = lineRaw(openEl).length;
+      let end = start + openLen;
+      let bodyStart = end;
+      let n = openEl.nextElementSibling;
+      if (n && (n.classList.contains('lm-code') || n.classList.contains('lm-fence-close')))
+        bodyStart = end + 1;
+      while (n && (n.classList.contains('lm-code') || n.classList.contains('lm-fence-close'))){
+        end += 1 + lineRaw(n).length;
+        if (n.classList.contains('lm-fence-close')) break;
+        n = n.nextElementSibling;
+      }
+      return { start, end, bodyStart, openEnd: start + openLen };
+    }
+    function mermaidViewFor(el, ord, caretOff){
+      const locked = mermaidMode.get(ord);
+      if (locked === 'code' || locked === 'chart') return locked;
+      if (caretOff == null) return 'chart';
+      const r = blockOffsets(el);
+      return caretOff >= r.start && caretOff <= r.end ? 'code' : 'chart';
+    }
+    function nudgeMermaidCaret(off){
+      if (off == null) return off;
+      const blocks = listMermaidBlocks();
+      const len = serializeAll().length;
+      for (let i = 0; i < blocks.length; i++){
+        const el = blocks[i];
+        const r = blockOffsets(el);
+        if (off < r.start || off > r.end) continue;
+        if (mermaidViewFor(el, i, off) !== 'chart') return off;
+        if (off <= r.openEnd) return off;
+        if (r.end < len) return r.end + 1;
+        return Math.min(r.openEnd, len);
+      }
+      return off;
+    }
+    function ensureMermaidPanel(openEl){
+      let panel = openEl.querySelector(':scope > .lm-mermaid');
+      if (panel) return panel;
+      panel = document.createElement('div');
+      panel.className = 'lm-mermaid';
+      panel.setAttribute('contenteditable', 'false');
+      panel.dataset.raw = '';
+      panel.setAttribute('role', 'img');
+      panel.setAttribute('aria-label', 'Mermaid 图表');
+      panel.innerHTML = '<div class="lm-mermaid-chart"></div><div class="lm-mermaid-msg" hidden></div>';
+      openEl.appendChild(panel);
+      return panel;
+    }
+    function setMermaidView(openEl, view){
+      const chart = view === 'chart';
+      openEl.classList.toggle('is-mermaid-chart', chart);
+      openEl.dataset.mmdView = view;
+      const btn = openEl.querySelector('[data-lm-code-act="view"]');
+      if (btn){
+        btn.textContent = chart ? '代码' : '图表';
+        btn.title = chart ? '切换为代码' : '切换为图表';
+        btn.setAttribute('aria-pressed', chart ? 'true' : 'false');
+      }
+      let panel = openEl.querySelector(':scope > .lm-mermaid');
+      if (chart){
+        panel = ensureMermaidPanel(openEl);
+        panel.hidden = false;
+        panel.classList.toggle('is-folded', openEl.classList.contains('is-folded'));
+        const src = codeBodyOf(openEl).replace(/\s+$/, '');
+        const theme = mermaidThemeName();
+        const chartBox = panel.querySelector('.lm-mermaid-chart');
+        const hasSvg = !!(chartBox && chartBox.querySelector('svg'));
+        const fresh = panel.dataset.mmdSrc === src && panel.dataset.mmdTheme === theme && hasSvg;
+        if (!fresh) scheduleMermaid(panel, src);
+      } else if (panel){
+        panel.hidden = true;
+      }
+      let n = openEl.nextElementSibling;
+      while (n && n.classList.contains('lm-code')){
+        n.classList.toggle('is-mermaid-hidden', chart);
+        n = n.nextElementSibling;
+      }
+    }
+    function applyMermaidViews(caretOff){
+      listMermaidBlocks().forEach((el, ord) => {
+        setMermaidView(el, mermaidViewFor(el, ord, caretOff));
+      });
+    }
+    function syncMermaidFromCaret(){
+      const off = globalOffset();
+      if (off == null) return;
+      const nudged = nudgeMermaidCaret(off);
+      if (nudged !== off) restoreCaret(nudged);
+      else applyMermaidViews(off);
+    }
+
     function updateFencePairFocus(){
       root.querySelectorAll('.lm-fence-pair-caret').forEach(n => n.classList.remove('lm-fence-pair-caret'));
       if (root.getAttribute('contenteditable') === 'false') return;
@@ -722,8 +849,9 @@ export const LiveMD = (() => {
           const lang = opening ? (trim.replace(/^(```|~~~)/, '').trim().split(/\s+/)[0] || '') : '';
           const langAttr = opening && /^[\w+#.-]+$/.test(lang) ? ` data-lang="${escAttr(lang)}"` : '';
           const role = opening ? 'lm-fence-open' : 'lm-fence-close';
-          const tools = opening ? CODE_TOOLS : '';
-          html.push(`<div class="lm-line lm-fence ${role}" data-src-i="${i}"${langAttr}>${esc(line) || '<br>'}${tools}</div>`);
+          const mermaidCls = opening && isMermaidLang(lang) ? ' lm-fence-mermaid' : '';
+          const tools = opening ? codeToolsHtml(lang) : '';
+          html.push(`<div class="lm-line lm-fence ${role}${mermaidCls}" data-src-i="${i}"${langAttr}>${esc(line) || '<br>'}${tools}</div>`);
           continue;
         }
         if (fence){ html.push(`<div class="lm-line lm-code" data-src-i="${i}">${highlightCode(esc(line)) || '<br>'}</div>`); continue; }
@@ -740,6 +868,7 @@ export const LiveMD = (() => {
       }
       root.innerHTML = html.join('');
       applyCodeFolds();
+      applyMermaidViews(null);
       updatePh();
       if (!histNo) histPush();          // 每次重建后记录新状态（供 Ctrl+Z 回退）
       root.scrollTop = st;
@@ -825,6 +954,7 @@ export const LiveMD = (() => {
       return { start: a, end: b };
     }
     function selectRawRange(start, end){
+      applyMermaidViews(start);
       const sel = window.getSelection();
       sel.removeAllRanges();
       const raw = serializeAll();
@@ -976,6 +1106,7 @@ export const LiveMD = (() => {
 
     function restoreCaret(off){
       if (off == null) return;
+      off = nudgeMermaidCaret(off);
       let pos = 0;
       let placed = false;
       const ls = lines();
@@ -987,6 +1118,7 @@ export const LiveMD = (() => {
       if (!placed && ls.length) caretEndOf(ls[ls.length - 1]);
       /* 光标落定后立刻判断 [[ ，不必等 selectionchange（程序化选区有时不派发） */
       if (!composing && !pointerDown) syncWiki();
+      applyMermaidViews(off);
     }
 
     /* 可编辑且非表格/代码行：光标落在该行时整行改为原文，便于直接改标记符号 */
@@ -1061,6 +1193,8 @@ export const LiveMD = (() => {
     function pipeline(){
       if (!alive || composing) return;
       const cur = caretLineEl();
+      /* 图表 SVG 插进只读区也会冒泡 input。源码没变就不要重建，否则会把刚画好的图清掉再画。 */
+      if (!(cur && cur.dataset && cur.dataset.tableRaw !== undefined) && serializeAll() === ta.value) return;
       if (cur && cur.dataset && cur.dataset.tableRaw !== undefined){
         /* 表格单元格内：只回写源码不重建（重建会丢单元格内光标），
            光标离开表格后由 onSelChange 统一刷新内联渲染 */
@@ -1332,6 +1466,28 @@ export const LiveMD = (() => {
           const on = !open.classList.contains('is-folded');
           setCodeFold(open, on);
           snapCodeFolds();
+        } else if (act === 'view'){
+          const blocks = listMermaidBlocks();
+          const ord = blocks.indexOf(open);
+          if (ord < 0) return;
+          const range = blockOffsets(open);
+          const showingChart = open.classList.contains('is-mermaid-chart');
+          const next = showingChart ? 'code' : 'chart';
+          if (!showingChart){
+            const cur = globalOffset();
+            if (cur != null && cur >= range.start && cur <= range.end) mermaidCaret.set(ord, cur);
+          }
+          mermaidMode.set(ord, next);
+          if (next === 'code'){
+            const off = mermaidCaret.has(ord) ? mermaidCaret.get(ord) : range.bodyStart;
+            root.focus();
+            restoreCaret(Math.max(0, Math.min(off, serializeAll().length)));
+          } else {
+            applyMermaidViews(range.end + 1);
+            const cur = globalOffset();
+            if (cur != null && cur >= range.start && cur <= range.end)
+              restoreCaret(Math.min(range.end + 1, serializeAll().length));
+          }
         }
         return;
       }
@@ -1552,6 +1708,7 @@ export const LiveMD = (() => {
           if (x !== el) x.classList.remove('lm-caret');
         if (el) el.classList.add('lm-caret');
         updateFencePairFocus();
+        if (!pointerDown && !composing) syncMermaidFromCaret();
         if (!pointerDown && !composing) caretBrackets();
         if (!pointerDown && !composing) syncWiki();
       });
@@ -1815,7 +1972,11 @@ export const LiveMD = (() => {
     root.addEventListener('cut', onCut);
     root.addEventListener('click', onClick);
     root.addEventListener('mousedown', e => {
-      if (e.target.closest && e.target.closest('.lm-code-tools, [data-lm-code-act]'))
+      const t = e.target;
+      if (t.closest && t.closest('.lm-code-tools, [data-lm-code-act], .lm-mermaid'))
+        e.preventDefault();
+      const fence = t.closest && t.closest('.lm-fence-open.is-mermaid-chart');
+      if (fence && root.contains(fence) && !(t.closest && t.closest('[data-lm-code-act]')))
         e.preventDefault();
     });
     /* 本机图片拖入编辑区 → 上传并插入；笔记目录拖入 → [[标题]] */

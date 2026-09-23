@@ -272,6 +272,20 @@
   .dash-grip, .dash-resize{ display: none !important; }
   button, .nav-item, .icon-btn{ touch-action: manipulation; }
   .auth-deco-1, .auth-deco-2{ opacity: .4; }
+  .lm-view-btn{
+    min-width: 44px; height: 44px; padding: 0 12px; font-size: 15px;
+  }
+  .lm-fence-open.lm-fence-mermaid{
+    display: flex; flex-wrap: wrap; align-items: center;
+    padding-right: 8px; min-height: 48px; max-width: 100%;
+  }
+  .lm-fence-open.lm-fence-mermaid .lm-code-tools{
+    position: static; transform: none; margin-left: auto; flex: none;
+  }
+  .lm-fence-open.is-mermaid-chart .lm-mermaid{
+    flex: 1 0 100%; width: 100%; margin-top: 8px;
+  }
+  .md-preview pre.md-code:has(.lm-view-btn){ padding-top: 52px; }
   .modal{ max-height: calc(var(--om-app-h) - 24px); }
   .modal.kb-share-view, .modal-settings{
     width: 100vw; max-width: none;
