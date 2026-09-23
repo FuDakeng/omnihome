@@ -49,13 +49,31 @@ window.addEventListener('hashchange', () => {
   if (n) goView(n, true);
 });
 
+/* 侧栏折叠写到 html 与 body：首屏脚本只能改 html，点击与登录后再同步 body。 */
+function setSidebarCollapsed(on){
+  const collapsed = !!on;
+  document.documentElement.classList.toggle('sidebar-collapsed', collapsed);
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  try { localStorage.setItem('om_sidebar_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+  return collapsed;
+}
+window.setSidebarCollapsed = setSidebarCollapsed;
+
 /* ---------- 折叠按钮：始终折叠左侧导航栏（知识库目录不由此按钮控制） ---------- */
 $('#collapseBtn').addEventListener('click', () => {
   if (window.isPhone && isPhone()){
     document.body.classList.toggle('nav-open');
     return;
   }
-  document.body.classList.toggle('sidebar-collapsed');
+  const collapsed = setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+  if (window.App && App.prefs){
+    App.prefs.layout = Object.assign({}, App.prefs.layout, { sidebarCollapsed: collapsed });
+  }
+  if (window.API && API.getToken()){
+    API.put('/api/settings', { layout: { sidebarCollapsed: collapsed } }).catch(e => {
+      showToast('导航栏状态没能保存：' + (e && e.message ? e.message : '请稍后重试'), 'err');
+    });
+  }
 });
 
 /* ---------- 明暗模式 ---------- */

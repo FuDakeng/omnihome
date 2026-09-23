@@ -46,6 +46,8 @@ def put_settings(body: PrefsIn, authorization: Optional[str] = Header(None)):
     for key in ("theme", "layout", "locale", "weather"):
         val = getattr(body, key)
         if val:
+            if key == "layout" and "sidebarCollapsed" in val:
+                val["sidebarCollapsed"] = bool(val["sidebarCollapsed"])
             prefs[key].update(val)
     if body.trashDays is not None:
         days = max(0, min(3650, int(body.trashDays)))   # 上限 10 年，超过视作永久保留（0）
