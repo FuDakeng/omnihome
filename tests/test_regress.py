@@ -22,8 +22,13 @@ def test_mermaid_editor_support():
     assert "isMermaidLang" in preview
     vendor = ROOT / "demo" / "js" / "vendor" / "mermaid.min.js"
     assert vendor.is_file()
-    head = vendor.read_text(encoding="utf-8", errors="ignore")[:80]
-    assert "mermaid" in head
+    vend = vendor.read_text(encoding="utf-8", errors="ignore")
+    assert "mermaid" in vend[:80]
+    # 页面底部注入（备案号等）会在 </body> 前插入 HTML。脚本里若原样出现这个标记，
+    # 整文件语法被打断，加载回调里就看不到 mermaid。
+    assert "</body>" not in vend.lower()
+    purify = (ROOT / "demo" / "js" / "vendor" / "purify.min.js").read_text(encoding="utf-8", errors="ignore")
+    assert "</body>" not in purify.lower()
     css = (ROOT / "demo" / "css" / "components" / "pages.css").read_text(encoding="utf-8")
     assert ".lm-view-btn" in css
     mobile = (ROOT / "demo" / "css" / "mobile.css").read_text(encoding="utf-8")
