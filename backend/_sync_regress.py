@@ -855,6 +855,26 @@ def run_suite(engine):
     sessions.load_sessions()
     check(f"[{engine}] 会话落盘后可恢复", sessions.get_session_user(st) == "t", "reload")
 
+    print("-- 侧栏折叠偏好 --")
+    tok, key = reset(engine)
+    r = client.get("/api/settings", headers=HA(tok))
+    layout = (r.json() or {}).get("layout") or {}
+    check(f"[{engine}] 默认侧栏展开",
+          r.status_code == 200 and layout.get("sidebarCollapsed") is False, str(layout))
+    r = client.put("/api/settings", headers=HA(tok),
+                   json={"layout": {"sidebarCollapsed": True}})
+    layout = (r.json() or {}).get("layout") or {}
+    check(f"[{engine}] 折叠写入且保留密度",
+          r.status_code == 200 and layout.get("sidebarCollapsed") is True and "compact" in layout,
+          str(layout))
+    r = client.get("/api/settings", headers=HA(tok))
+    check(f"[{engine}] 折叠读回",
+          (r.json() or {}).get("layout", {}).get("sidebarCollapsed") is True, r.text[:180])
+    r = client.put("/api/settings", headers=HA(tok), json={"layout": {"compact": True}})
+    layout = (r.json() or {}).get("layout") or {}
+    check(f"[{engine}] 改密度不冲掉折叠",
+          layout.get("compact") is True and layout.get("sidebarCollapsed") is True, str(layout))
+
 
 def main():
     try:

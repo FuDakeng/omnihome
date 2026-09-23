@@ -25,14 +25,27 @@ S.bindEditor = function () {/* ---------- 工具条：快捷格式（实时渲�
     function wrapSel(pre, suf, placeholder){
       const ph = placeholder || '';
       if (liveOn()){ S.liveEd.wrapSelection(pre, suf, ph); return; }
-      const s = ta.selectionStart, e = ta.selectionEnd;
-      const sel = ta.value.slice(s, e);
-      const mid = sel || ph;
+      let s = ta.selectionStart, e = ta.selectionEnd;
+      if (e < s){ const t = s; s = e; e = t; }
+      const value = ta.value;
+      let a = s, b = e;
+      while (a < b && value.charAt(a) === '\n') a++;
+      while (b > a && value.charAt(b - 1) === '\n') b--;
       ta.focus();
-      document.execCommand('insertText', false, pre + mid + suf);
-      const pos = s + pre.length;
-      if (!sel && ph) ta.setSelectionRange(pos, pos + ph.length);
-      else if (sel) ta.setSelectionRange(pos, pos + mid.length);
+      if (b <= a){
+        ta.setSelectionRange(s, s);
+        document.execCommand('insertText', false, pre + ph + suf);
+        if (ph) ta.setSelectionRange(s + pre.length, s + pre.length + ph.length);
+        ta.dispatchEvent(new Event('input'));
+        return;
+      }
+      const inner = value.slice(a, b);
+      const mid = inner.includes('\n')
+        ? inner.split('\n').map(line => line ? pre + line + suf : line).join('\n')
+        : pre + inner + suf;
+      ta.setSelectionRange(a, b);
+      document.execCommand('insertText', false, mid);
+      if (!inner.includes('\n')) ta.setSelectionRange(a + pre.length, a + pre.length + inner.length);
       ta.dispatchEvent(new Event('input'));
     }
     /* 当前行首插入前缀（标题 / 列表 / 引用 / 任务） */
