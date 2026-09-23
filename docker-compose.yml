@@ -11,5 +11,7 @@ services:
       - ./data:/app/data
       # 如需「系统监控」页读取宿主机 Docker 容器状态，取消下面一行注释后重建容器：
       # - /var/run/docker.sock:/var/run/docker.sock:ro
+      # 系统监控要显示宿主硬盘占用、主机名和网卡速率时，再取消下面一行（只读挂载宿主根）：
+      # - /:/host:ro
     environment:
       - TZ=Asia/Shanghai

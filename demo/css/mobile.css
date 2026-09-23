@@ -248,6 +248,15 @@
 
   .ct-filter{ flex-wrap: wrap; }
   .ct-search input{ width: 100%; font-size: 16px; }
+  /* 手机侧栏是抽屉，不占内容宽度；筛选面板按视口收，避免按桌面侧栏宽度算成一条窄缝 */
+  .ct-filter .drop-panel,
+  body.sidebar-collapsed .ct-filter .drop-panel{
+    width: min(420px, calc(100vw - 32px));
+    min-width: 0;
+    max-height: min(320px, 55vh);
+  }
+  .mon-hw{ grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+  #ctFilterBtn{ min-height: 44px; }
   .tbl-wrap, .card:has(> .tbl){ overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
   .set-item{ min-height: 44px; padding: 10px 14px; }

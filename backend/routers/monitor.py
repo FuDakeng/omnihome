@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import os
+import stat
 import hashlib
 import secrets
 import threading
@@ -42,30 +44,45 @@ def system_stats(authorization: Optional[str] = Header(None)):
     import platform
     cpu = psutil.cpu_percent(interval=0.3)
     mem = psutil.virtual_memory()
-    disk = psutil.disk_usage("/")
-    net = psutil.net_io_counters()
+    root_disk = psutil.disk_usage("/")
+    _host_net = _host_net_totals()
+    if _host_net is None:                    # 没挂宿主根时退回容器自己的网卡
+        _n = psutil.net_io_counters()
+        _host_net = (_n.bytes_recv, _n.bytes_sent)
+    net_down_bytes, net_up_bytes = _host_net
+    summary = _storage_summary(root_disk)
     cpu_temp, disk_temp = _sensor_temps()
-    boot = datetime_from_ts(psutil.boot_time())
+    boot_ts = psutil.boot_time()
+    boot = datetime_from_ts(boot_ts)
+    gpu = _gpu_metrics()
     return {
-        "host": platform.node() or "nas",
+        "host": _host_hostname(),
         "platform": f"{platform.system()} {platform.release()}",
+        "osName": _host_os_name(),
         "cpu": round(cpu),
         "cpuCount": psutil.cpu_count(logical=True),
+        "cpuName": _cpu_name(),
         "temp": cpu_temp,
         "diskTemp": disk_temp,
+        "gpuName": (gpu.get("name") or "") if gpu.get("available") else "",
+        "gpuAvailable": bool(gpu.get("available")),
         "mem": round(mem.percent),
         "memUsedGB": round(mem.used / 1073741824, 1),
         "memTotalGB": round(mem.total / 1073741824, 1),
-        "disk": round(disk.percent),
-        "diskUsedTB": round(disk.used / 1099511627776, 1),
-        "diskTotalTB": round(disk.total / 1099511627776, 1),
+        "disk": summary["percent"],
+        "diskUsedTB": summary["usedTB"],
+        "diskTotalTB": summary["totalTB"],
+        # scope=host 表示数据来自宿主真实文件系统；container=没挂宿主根，退回容器视角
+        "storageScope": summary["scope"],
+        "diskVolumes": summary["volumes"],
         # 网络：算出真正的速率（MB/s），不是累计字节。
         # 累计字节 / 1024² 会随启动时间无限增长，曾被前端错误标注为 "MB/s"。
         # 现在跨请求用 module-level 状态机保存上一次快照，按 dt 求速率。
-        "netUpMbps": round(_net_rate('up', net.bytes_sent), 2),
-        "netDownMbps": round(_net_rate('down', net.bytes_recv), 2),
-        "disks": _physical_disks(disk),
+        "netUpMbps": round(_net_rate('up', net_up_bytes), 2),
+        "netDownMbps": round(_net_rate('down', net_down_bytes), 2),
+        "disks": _physical_disks(root_disk),
         "bootTime": boot,
+        "uptime": _format_uptime(time.time() - boot_ts),
     }
 
 _NET_PREV = {
@@ -102,52 +119,203 @@ def _net_rate(direction: str, current: int) -> float:
 
 _RE_LPART_TAIL = __import__("re").compile(r"^(.*?)(\d+)$")
 
+# ---------------------------------------------------------------------------
+# 宿主信息采集（修复：监控面板把「容器视角」当成了整机真相）
+#
+# 本模块跑在容器里，直接用 psutil 读到的全是容器自己的：
+#   · psutil.disk_usage("/")   → 容器 overlay（落在 Docker data-root 那个阵列上），
+#                                于是总览只剩 0.9T，真正出数据的 RAID1 阵列根本不出现
+#   · psutil.disk_partitions() → 只有容器自己的挂载（/etc/hosts 之类），
+#                                宿主 /volume1、/volume2 一个都看不见 → 每块盘 used=0 / 0%
+#   · psutil.net_io_counters() → 只有容器自己的网卡（netns 隔离）
+# 容器里唯一没被隔离的是 /sys（块设备不随 mount namespace 隔离），
+# 所以「盘的数量/型号/裸容量」能从 /sys/block 正确读出；挂载点与使用率必须借助
+# 只读挂载的宿主根：
+#     docker run ... -v /:/host:ro        （见 omnihome_git_upgrade.sh 的 RUN_ARGS）
+# 拿不到宿主根时不再谎报 0%，而是把 usedBytes/percent 置 None，前端显示「—」。
+# ---------------------------------------------------------------------------
+
+_HOST_ROOT = Path(os.environ.get("HOST_ROOT", "/host"))
+_HOST_SKIP_MOUNTS = {"dev", "run", "tmp", "sys", "proc"}
+
+
+def _host_root_available() -> bool:
+    """宿主根是否按只读方式挂进来了（运行参数里加 -v /:/host:ro）。"""
+    try:
+        return _HOST_ROOT.is_dir() and (_HOST_ROOT / "etc").is_dir()
+    except OSError:
+        return False
+
+
+def _is_physical_disk(name: str) -> bool:
+    """真盘判定：/sys/block/<n>/device 存在。
+
+    真盘（sda / nvme0n1 / mmcblk0 …）有 device 链接指向硬件；md1、dm-0、zram0、
+    loop0、ram0 都没有 —— 比枚举驱动名通用。旧实现只排除 loop/ram/dm-，
+    于是 md1/md2/zram0-3 也被当成物理盘，4 块盘显示成 10 块。
+    """
+    if name.startswith(("loop", "ram", "zram", "dm-", "md", "sr", "fd", "nbd")):
+        return False
+    entry = Path("/sys/block") / name
+    try:
+        if not entry.exists() or (entry / "partition").exists():
+            return False
+        return (entry / "device").exists()
+    except OSError:
+        return False
+
+
 def _physical_disk_names() -> set:
-    """返回本机所有物理硬盘名（sda / nvme0n1 / mmcblk0 …），跨平台。
-       用于过滤 psutil 那些"包山包海"的总览（分区、回环、dm-*、ram）。"""
-    from pathlib import Path
-    names = set()
+    """本机所有物理硬盘名（sda / nvme0n1 / mmcblk0 …）。"""
     sb = Path("/sys/block")
     if not sb.exists():
-        return names
-    for entry in sb.iterdir():
-        n = entry.name
-        if n.startswith(("loop", "ram", "dm-")):
-            continue
-        if (entry / "partition").exists():          # 分区，而非物理盘
-            continue
-        names.add(n)
-    return names
+        return set()
+    return {e.name for e in sb.iterdir() if _is_physical_disk(e.name)}
 
-def _physical_disks(root_disk):
-    """列出每块物理硬盘的容量与占用。
-       返回 [{name, device, model, sizeBytes, usedBytes, totalBytes, percent, mountpoint?}]。
-       跳过分区、回环、ram、dm-*；未挂载时 used/percent 留空。"""
-    import psutil as _psu
-    import re
-    from pathlib import Path
+
+def _device_name_of(dev_id: int) -> str:
+    """st_dev → 块设备名（sda2 / dm-0 / md1 …）。"""
+    maj, minr = os.major(dev_id), os.minor(dev_id)
+    link = Path("/sys/dev/block/%d:%d" % (maj, minr))
+    try:
+        if link.exists():
+            return link.resolve().name
+    except OSError:
+        pass
+    return "%d:%d" % (maj, minr)
+
+
+def _parent_device_name(name: str) -> str:
+    """分区名 → 父设备名：sda2→sda、nvme0n1p7→nvme0n1、mmcblk0p1→mmcblk0。
+
+    不能直接用 ^(.*?)(\\d+)$ 这种懒惰正则：nvme0n1p7 会被切成 "nvme0n1p"
+    （`p` 不是数字但会被留在前缀里），于是 NVMe 盘上的分区永远找不到父盘 ——
+    这也是旧实现里 nvme 盘占用一直显示 0 的原因之一。必须显式吃掉 p 分隔符。
+    """
+    m = __import__("re").match(r"^(.*?)p?(\d+)$", name)
+    return m.group(1) if m else name
+
+
+def _resolve_physical_disks(name: str, depth: int = 0) -> set:
+    """沿 sysfs 的 slaves 链回溯到物理盘。
+
+    dm-1 → md2 → nvme1n1p2 → nvme1n1（RAID / LVM / 加密一层层剥到真盘）
+    sda2 → sda
+    """
+    if depth > 4 or not name:
+        return set()
+    entry = Path("/sys/class/block") / name
+    try:
+        if not entry.exists():
+            return set()
+        slaves = entry / "slaves"
+        if slaves.exists():
+            subs = [s.name for s in slaves.iterdir()]
+            if subs:
+                out = set()
+                for s in subs:
+                    out |= _resolve_physical_disks(s, depth + 1)
+                return out
+        if (entry / "partition").exists():
+            parent = _parent_device_name(name)
+            return _resolve_physical_disks(parent, depth + 1) if parent != name else set()
+    except OSError:
+        return set()
+    return {name} if _is_physical_disk(name) else set()
+
+
+def _host_volumes() -> list:
+    """宿主真实文件系统明细。
+
+    容器内 /proc/mounts 是容器自己的，读不到宿主挂载表，所以改成
+    「扫描只读挂载的宿主根顶层 + 用 st_dev 判断哪些是真挂载点」。
+    同一设备被挂载多次（UGOS 上 /volume1 与 /home 同源）合并成一条，
+    mountpoints 里列出全部挂载点，避免容量被重复累加。
+    """
+    if not _host_root_available():
+        return []
+    try:
+        base_dev = os.stat(_HOST_ROOT).st_dev
+    except OSError:
+        return []
+    vols = {}
+    for entry in sorted(_HOST_ROOT.iterdir()):
+        try:
+            st = os.stat(entry, follow_symlinks=False)
+        except OSError:
+            continue
+        if not stat.S_ISDIR(st.st_mode) or st.st_dev == base_dev:
+            continue
+        if entry.name in _HOST_SKIP_MOUNTS:
+            continue
+        if os.major(st.st_dev) == 0:            # tmpfs / devtmpfs 等虚拟文件系统
+            continue
+        devname = _device_name_of(st.st_dev)
+        disks = sorted(_resolve_physical_disks(devname))
+        if not disks:                            # 不落在物理盘上（overlay 叠层、nfs 共享…）
+            continue
+        try:
+            sv = os.statvfs(entry)
+        except OSError:
+            continue
+        total = sv.f_blocks * sv.f_frsize
+        if total <= 0:
+            continue
+        used = total - sv.f_bfree * sv.f_frsize
+        free = sv.f_bavail * sv.f_frsize
+        if devname in vols:
+            vols[devname]["mountpoints"].append("/" + entry.name)
+            continue
+        vols[devname] = {
+            "mountpoint": "/" + entry.name,
+            "mountpoints": ["/" + entry.name],
+            "device": devname,
+            "disks": disks,
+            "totalBytes": total,
+            "usedBytes": used,
+            "freeBytes": free,
+            "percent": round(used / total * 100) if total else 0,
+        }
+    return list(vols.values())
+
+
+def _storage_summary(root_disk) -> dict:
+    """总览存储：宿主所有真实卷合计；拿不到宿主信息才退回容器自身（并标 scope）。"""
+    vols = _host_volumes()
+    if vols:
+        total = sum(v["totalBytes"] for v in vols)
+        used = sum(v["usedBytes"] for v in vols)
+        return {
+            "scope": "host",
+            "percent": round(used / total * 100) if total else 0,
+            "usedTB": round(used / 1099511627776, 1),
+            "totalTB": round(total / 1099511627776, 1),
+            "volumes": vols,
+        }
+    return {
+        "scope": "container",
+        "percent": round(root_disk.percent),
+        "usedTB": round(root_disk.used / 1099511627776, 1),
+        "totalTB": round(root_disk.total / 1099511627776, 1),
+        "volumes": [],
+    }
+
+
+def _physical_disks(root_disk=None) -> list:
+    """每块物理硬盘的容量与占用。
+
+    占用由「这块盘承载的宿主文件系统」汇总得出（sda+sdb 组成 RAID1 → 两块盘都显示
+    该阵列的 33%）；拿不到宿主信息时不谎报 0%，usedBytes/percent 留 None。
+    返回 [{name, device, model, sizeBytes, usedBytes, totalBytes, percent, mountpoint?,
+          volumes: [{mountpoint, percent, usedBytes, totalBytes, device}]}]
+    """
     disks = []
     sb = Path("/sys/block")
-    # 把已挂载分区按"父磁盘"归类（处理 sda1→sda、nvme0n1p1→nvme0n1、mmcblk0p1→mmcblk0 等）
-    parts_by_parent = {}
-    if hasattr(_psu, "disk_partitions"):
-        for p in _psu.disk_partitions(all=False):
-            dev = (p.device or "").replace("/dev/", "")
-            if not dev:
-                continue
-            m = _RE_LPART_TAIL.match(dev)
-            parent = m.group(1) if m else dev
-            entry = parts_by_parent.setdefault(parent, [])
-            entry.append((p.mountpoint, dev))
-    seen = set()
+    vols = _host_volumes()
     if sb.exists():
         for entry in sorted(sb.iterdir(), key=lambda p: p.name):
             name = entry.name
-            if name in seen:
-                continue
-            if name.startswith(("loop", "ram", "dm-")):
-                continue
-            if (entry / "partition").exists():
+            if not _is_physical_disk(name):
                 continue
             try:
                 size_bytes = int((entry / "size").read_text().strip()) * 512
@@ -156,52 +324,169 @@ def _physical_disks(root_disk):
             model = ""
             try:
                 m = (entry / "device" / "model").read_text().strip()
-                if m: model = m
+                if m:
+                    model = m
             except OSError:
                 pass
-            item = {"name": name, "device": "/dev/" + name,
-                    "model": model, "sizeBytes": size_bytes}
-            # 取该盘下第一个可挂载分区的占用
-            mountpoint = None
-            for mp, _ in parts_by_parent.get(name, []):
-                try:
-                    u = _psu.disk_usage(mp)
-                    item["mountpoint"] = mp
-                    item["usedBytes"] = u.used
-                    item["totalBytes"] = u.total
-                    item["percent"] = round(u.percent)
-                    mountpoint = mp
-                    break
-                except (PermissionError, OSError):
-                    continue
-            if not mountpoint:
-                item["usedBytes"] = 0
-                item["totalBytes"] = size_bytes
-                item["percent"] = 0
+            related = [v for v in vols if name in v.get("disks", [])]
+            item = {
+                "name": name, "device": "/dev/" + name, "model": model,
+                "sizeBytes": size_bytes,
+                "volumes": [{
+                    "mountpoint": v["mountpoint"], "mountpoints": v["mountpoints"],
+                    "percent": v["percent"], "usedBytes": v["usedBytes"],
+                    "totalBytes": v["totalBytes"], "device": v["device"],
+                } for v in related],
+            }
+            if related:
+                total = sum(v["totalBytes"] for v in related)
+                used = sum(v["usedBytes"] for v in related)
+                item.update({
+                    "mountpoint": related[0]["mountpoint"],
+                    "totalBytes": total,
+                    "usedBytes": used,
+                    "percent": round(used / total * 100) if total else 0,
+                })
+            else:
+                item.update({"mountpoint": None, "totalBytes": size_bytes,
+                             "usedBytes": None, "percent": None})
             disks.append(item)
-            seen.add(name)
-    # 兜底：非 Linux（如开发机 macOS）仍能拿到主分区，避免界面完全没数据
-    if not disks:
-        # sdiskusage 没有 mountpoint 属性；用 psutil 在挂载点字典里找 /，找不到就固定 "/"
-        mp = "/"
-        try:
-            for p in _psu.disk_partitions(all=False):
-                if p.mountpoint == "/":
-                    mp = "/"
-                    break
-        except Exception:
-            pass
+    # 兜底：非 Linux（开发机 macOS）没有 /sys/block，退回容器根分区，界面不至于空
+    if not disks and root_disk is not None:
         disks.append({
-            "name": mp,
-            "device": "/",
-            "model": "",
+            "name": "/", "device": "/", "model": "",
             "sizeBytes": root_disk.total,
             "usedBytes": root_disk.used,
             "totalBytes": root_disk.total,
             "percent": round(root_disk.percent),
-            "mountpoint": mp,
+            "mountpoint": "/",
         })
     return disks
+
+
+def _host_hostname() -> str:
+    """宿主主机名（容器里 platform.node() 返回的是容器 ID 如 b0c3b5531620）。"""
+    import platform
+    for cand in (_HOST_ROOT / "etc" / "hostname", Path("/etc/hostname")):
+        try:
+            val = cand.read_text().strip()
+            if val:
+                return val
+        except OSError:
+            continue
+    return platform.node() or "nas"
+
+
+def _os_release_pretty(text: str) -> str:
+    """从 os-release 文本取出「名称 + 版本」（优先 PRETTY_NAME）。"""
+    info = {}
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        info[key.strip()] = val.strip().strip('"').strip("'")
+    pretty = info.get("PRETTY_NAME") or ""
+    if pretty:
+        return pretty
+    name = info.get("NAME") or ""
+    ver = info.get("VERSION") or info.get("VERSION_ID") or ""
+    return (name + (" " + ver if ver else "")).strip()
+
+
+def _host_os_name() -> str:
+    """操作系统名称及版本。
+
+    容器里的 /etc/os-release 是镜像发行版，不能当成这台机器的系统。
+    优先读只读挂载的宿主 /host/etc/os-release；开发机没有 /host 时才读本机文件。
+    """
+    import platform
+    host_file = _HOST_ROOT / "etc" / "os-release"
+    try:
+        pretty = _os_release_pretty(host_file.read_text(errors="replace"))
+        if pretty:
+            return pretty
+    except OSError:
+        pass
+    # /.dockerenv 存在说明当前是容器：没挂宿主根时不要把镜像系统报成宿主机系统
+    if not Path("/.dockerenv").exists():
+        try:
+            pretty = _os_release_pretty(Path("/etc/os-release").read_text(errors="replace"))
+            if pretty:
+                return pretty
+        except OSError:
+            pass
+    return f"{platform.system()} {platform.release()}".strip() or "—"
+
+
+def _cpu_model_from_cpuinfo(text: str) -> str:
+    """从 /proc/cpuinfo 取 CPU 型号（x86 的 model name，ARM 的 Hardware）。"""
+    hardware = ""
+    for line in (text or "").splitlines():
+        if ":" not in line:
+            continue
+        key, val = line.split(":", 1)
+        key, val = key.strip().lower(), val.strip()
+        if key == "model name" and val:
+            return val
+        if key == "hardware" and val:
+            hardware = val
+    return hardware
+
+
+def _cpu_name() -> str:
+    """CPU 型号。容器内 /proc/cpuinfo 仍是宿主 CPU（cpuinfo 不随命名空间隔离）。"""
+    import platform
+    try:
+        name = _cpu_model_from_cpuinfo(Path("/proc/cpuinfo").read_text(errors="replace"))
+        if name:
+            return name
+    except OSError:
+        pass
+    return (platform.processor() or "").strip() or "—"
+
+
+def _format_uptime(seconds: float) -> str:
+    """把秒数格式化成「N 天 N 小时」。"""
+    if seconds is None or seconds < 0:
+        return "—"
+    total = int(seconds)
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    if days:
+        return f"{days} 天 {hours} 小时"
+    if hours:
+        return f"{hours} 小时 {minutes} 分钟"
+    return f"{minutes} 分钟"
+
+
+def _host_net_totals():
+    """宿主网卡累计 (下行字节, 上行字节)；拿不到返回 None。
+
+    容器内 psutil.net_io_counters() 只统计容器自己的网卡（netns 隔离）。
+    宿主网络统计在宿主 PID 1 的 /proc/<pid>/net/dev，需只读挂载宿主根；
+    拿不到就返回 None，由调用方退回 psutil。
+    """
+    try:
+        text = (_HOST_ROOT / "proc" / "1" / "net" / "dev").read_text()
+    except OSError:
+        return None
+    rx = tx = 0
+    for line in text.splitlines()[2:]:
+        if ":" not in line:
+            continue
+        iface, rest = line.split(":", 1)
+        if iface.strip() == "lo":
+            continue
+        cols = rest.split()
+        if len(cols) >= 9:
+            try:
+                rx += int(cols[0])
+                tx += int(cols[8])
+            except ValueError:
+                continue
+    return (rx, tx) if (rx or tx) else None
 
 def datetime_from_ts(ts):
     return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
@@ -411,14 +696,205 @@ def put_monitor_config(body: dict,
     storage.save_config(cfg)
     return {"ok": True, "enabled": cfg["monitorEnabled"]}
 
+def _drm_cards() -> list:
+    """列出 DRM 显卡（card0/card1…，跳过 card0-HDMI-A-1 这类连接器节点）。
+
+    返回 [{card, vendor, device, driver, path}]，vendor 形如 0x8086(Intel)/0x10de(NVIDIA)/0x1002(AMD)。
+    """
+    cards = []
+    base = Path("/sys/class/drm")
+    if not base.exists():
+        return cards
+    for c in sorted(base.glob("card[0-9]*")):
+        if "-" in c.name:                      # 连接器（HDMI/DP）节点，不是显卡本体
+            continue
+        dev = c / "device"
+
+        def _rd(name):
+            try:
+                return (dev / name).read_text().strip()
+            except OSError:
+                return ""
+
+        driver = ""
+        try:
+            driver = (dev / "driver").resolve().name
+        except OSError:
+            pass
+        cards.append({"card": c.name, "vendor": _rd("vendor"), "device": _rd("device"),
+                      "driver": driver, "path": c})
+    return cards
+
+
+def _i915_pmu_type():
+    try:
+        return int((Path("/sys/bus/event_source/devices/i915/type")).read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _pmu_event_config(name: str):
+    """从 sysfs 读事件的 config 值。
+
+    必须按文件读，不能硬编码：i915 的取值不规则
+    （rcs0-busy=0x0、bcs0-busy=0x1000、actual-frequency=0x100000…），
+    猜错只会得到 EINVAL（实测踩过）。
+    """
+    f = Path("/sys/bus/event_source/devices/i915/events") / name
+    try:
+        for part in f.read_text().strip().split(","):
+            k, _, v = part.partition("=")
+            if k.strip() == "config":
+                return int(v, 0)
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _perf_event_open(ev_type: int, config: int) -> int:
+    """perf_event_open 系统调用（只依赖标准库的 ctypes）。"""
+    import ctypes
+    import ctypes.util
+    libc = ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6", use_errno=True)
+
+    class _Attr(ctypes.Structure):
+        _fields_ = [("type", ctypes.c_uint), ("size", ctypes.c_uint),
+                    ("config", ctypes.c_ulonglong),
+                    ("sample_period", ctypes.c_ulonglong),
+                    ("sample_type", ctypes.c_ulonglong),
+                    ("read_format", ctypes.c_ulonglong),
+                    ("flags", ctypes.c_ulonglong),
+                    ("wakeup_events", ctypes.c_uint), ("bp_type", ctypes.c_uint),
+                    ("bp_addr", ctypes.c_ulonglong), ("bp_len", ctypes.c_ulonglong)]
+    a = _Attr()
+    a.type = ev_type
+    a.size = ctypes.sizeof(_Attr)
+    a.config = config
+    a.read_format = 0x1 | 0x2                  # TOTAL_TIME_ENABLED | TOTAL_TIME_RUNNING
+    nr = 298 if os.uname().machine in ("x86_64", "amd64") else 241
+    fd = libc.syscall(nr, ctypes.byref(a), 0, -1, -1, 0)
+    if fd < 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+    return fd
+
+
+_GPU_PMU_PREV = {}          # {engine: (ts, count, enabled, running)}
+_GPU_PMU_FDS = {}           # 常开的 perf fd，避免每次请求重复打开
+_GPU_RC6_PREV = {}          # {"ts":…, "ms":…}
+
+
+def _intel_gpu_util_pmu() -> Optional[dict]:
+    """用 i915 PMU 的引擎忙计数算真实利用率（与 intel_gpu_top 同源）。
+
+    需要容器的 capabilities（实测：默认权限 EPERM；--cap-add SYS_ADMIN 可通过权限检查，
+    --cap-add PERFMON 仍被拒）。任何一步失败都返回 None，由调用方降级。
+    取各引擎里最忙的那个作为「GPU 利用率」。
+    """
+    import struct
+    ev_type = _i915_pmu_type()
+    if not ev_type:
+        return None
+    engines = ("rcs0-busy", "bcs0-busy", "vcs0-busy", "vecs0-busy")
+    now = time.time()
+    for name in engines:
+        if name in _GPU_PMU_FDS:
+            continue
+        cfg = _pmu_event_config(name)
+        if cfg is None:
+            return None
+        try:
+            _GPU_PMU_FDS[name] = _perf_event_open(ev_type, cfg)
+        except OSError:
+            _GPU_PMU_FDS.clear()
+            return None
+    busiest = 0.0
+    for name in engines:
+        fd = _GPU_PMU_FDS.get(name)
+        if fd is None:
+            continue
+        try:
+            buf = os.read(fd, 24)
+        except OSError:
+            continue
+        if len(buf) < 24:
+            continue
+        count, enabled, running = struct.unpack("<QQQ", buf[:24])
+        prev = _GPU_PMU_PREV.get(name)
+        _GPU_PMU_PREV[name] = (now, count, enabled, running)
+        if not prev:
+            continue
+        dt = now - prev[0]
+        dc, de, dr = count - prev[1], enabled - prev[2], running - prev[3]
+        if dt <= 0.5 or dr <= 0 or de <= 0 or dc < 0:
+            continue                            # 首次采样/时间太短/计数器回绕
+        busy_ns = dc * (de / dr)                # 按实际运行时间换算，避免被抢占时低估
+        busy_pct = max(0.0, min(100.0, busy_ns / (dt * 1e9) * 100.0))
+        busiest = max(busiest, busy_pct)
+    return {"util": round(busiest), "source": "i915-pmu"}
+
+
+def _intel_gpu_util_rc6() -> Optional[dict]:
+    """降级方案：用 RC6 空闲驻留反推「GPU 活动占比」= 100 - RC6%。
+
+    只需 /sys/class/drm 可读（默认权限即可，实测可通过）。
+    它不等于引擎利用率，但对「显卡有没有在干活」是可靠的，且总能拿到。
+    """
+    p = Path("/sys/class/drm/card0/power/rc6_residency_ms")
+    try:
+        ms = int(p.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    now = time.time()
+    prev = _GPU_RC6_PREV.get("v")
+    _GPU_RC6_PREV["v"] = (now, ms)
+    if not prev:
+        return None
+    dt_ms = (now - prev[0]) * 1000.0
+    d_ms = ms - prev[1]
+    if dt_ms <= 500 or d_ms < 0:
+        return None
+    idle_pct = max(0.0, min(100.0, d_ms / dt_ms * 100.0))
+    return {"util": round(100.0 - idle_pct), "source": "i915-rc6"}
+
+
+def _intel_gpu_freq() -> dict:
+    """GT 频率（当前/上限/最低），并给出「频率占位」作为最后的兜底利用率。"""
+    out = {"freqMhz": None, "freqMaxMhz": None, "util": None}
+    base = Path("/sys/class/drm/card0")
+
+    def _num(name):
+        try:
+            return int((base / name).read_text().strip())
+        except (OSError, ValueError):
+            return None
+
+    act, rp0, rpn = _num("gt_act_freq_mhz"), _num("gt_RP0_freq_mhz"), _num("gt_RPn_freq_mhz")
+    out["freqMhz"], out["freqMaxMhz"] = act, rp0
+    if act is not None and rp0:
+        lo = rpn if (rpn and rpn < rp0) else 0
+        pct = (act - lo) / max(1, (rp0 - lo)) * 100.0
+        out["util"] = round(max(0.0, min(100.0, pct)))
+    return out
+
+
 def _gpu_metrics():
-    """NVIDIA GPU：调 nvidia-smi，无卡 / 无驱动时 available=false（结果缓存 2 秒）。"""
+    """GPU 指标（结果缓存 2 秒）。
+
+    依次尝试：NVIDIA(nvidia-smi) → Intel 核显(i915 PMU → RC6 活动占比 → GT 频率)
+    → AMD(预留)。找不到可用数据源时 available=false，前端显示「未检测到可监控的 GPU」。
+    返回 {available, util, temp, name, vendor, source, freqMhz, freqMaxMhz}
+    """
     import shutil
     import subprocess
     now = time.time()
     if _GPU_CACHE["data"] is not None and now - _GPU_CACHE["ts"] < 2:
         return _GPU_CACHE["data"]
-    data = {"available": False, "util": None, "temp": None, "name": ""}
+
+    data = {"available": False, "util": None, "temp": None, "name": "",
+            "vendor": "", "source": None, "freqMhz": None, "freqMaxMhz": None}
+
+    # ---- 1) NVIDIA：有 nvidia-smi 就用它（原有逻辑保留）----
     exe = shutil.which("nvidia-smi")
     if exe:
         try:
@@ -429,14 +905,62 @@ def _gpu_metrics():
             if out:
                 parts = [p.strip() for p in out.splitlines()[0].split(",")]
                 if len(parts) >= 2:
-                    data = {"available": True,
-                            "util": int(float(parts[0])),
-                            "temp": int(float(parts[1])),
-                            "name": parts[2] if len(parts) > 2 else ""}
+                    data.update({"available": True, "util": int(float(parts[0])),
+                                 "temp": int(float(parts[1])), "vendor": "nvidia",
+                                 "source": "nvidia-smi",
+                                 "name": parts[2] if len(parts) > 2 else "NVIDIA GPU"})
+                    _GPU_CACHE.update({"ts": now, "data": data})
+                    return data
         except Exception:
             pass
+
+    # ---- 2) Intel 核显（i915）----
+    for card in _drm_cards():
+        if card.get("vendor") != "0x8086":
+            continue
+        util = _intel_gpu_util_pmu() or _intel_gpu_util_rc6()
+        freq = _intel_gpu_freq()
+        if util is None and freq["util"] is not None:
+            util = {"util": freq["util"], "source": "i915-freq"}
+        temp = None
+        try:
+            for hw in sorted((card["path"] / "device" / "hwmon").glob("hwmon*")):
+                t = hw / "temp1_input"
+                if t.exists():
+                    temp = round(int(t.read_text().strip()) / 1000)
+                    break
+        except OSError:
+            temp = None
+        data.update({
+            "available": True,
+            "util": util["util"] if util else None,
+            "temp": temp,
+            "vendor": "intel",
+            "source": util["source"] if util else None,
+            "name": "Intel 核显（%s）" % (card.get("driver") or "i915"),
+            "freqMhz": freq["freqMhz"],
+            "freqMaxMhz": freq["freqMaxMhz"],
+        })
+        _GPU_CACHE.update({"ts": now, "data": data})
+        return data
+
+    # ---- 3) AMD（amdgpu 的 gpu_busy_percent，预留；本机无此卡）----
+    for card in _drm_cards():
+        if card.get("vendor") != "0x1002":
+            continue
+        busy = card["path"] / "device" / "gpu_busy_percent"
+        try:
+            util = int(busy.read_text().strip())
+        except (OSError, ValueError):
+            continue
+        data.update({"available": True, "util": util, "vendor": "amd",
+                     "source": "amdgpu-sysfs", "name": "AMD GPU（amdgpu）"})
+        _GPU_CACHE.update({"ts": now, "data": data})
+        return data
+
     _GPU_CACHE.update({"ts": now, "data": data})
     return data
+
 
 @router.get("/api/system/metrics")
 def system_metrics(authorization: Optional[str] = Header(None)):
@@ -451,11 +975,15 @@ def system_metrics(authorization: Optional[str] = Header(None)):
     cpu = psutil.cpu_percent(interval=None if prev["ts"] else 0.2)
     cpu_temp, disk_temp = _sensor_temps()
     mem = psutil.virtual_memory()
-    net = psutil.net_io_counters()
+    _host_net = _host_net_totals()
+    if _host_net is None:                    # 没挂宿主根时退回容器自己的网卡
+        _n = psutil.net_io_counters()
+        _host_net = (_n.bytes_recv, _n.bytes_sent)
+    net_recv, net_sent = _host_net
     net_down = net_up = 0.0
     if prev["ts"] and dt > 0.5:
-        net_down = max(net.bytes_recv - prev["net"][0], 0) / dt / 1048576
-        net_up = max(net.bytes_sent - prev["net"][1], 0) / dt / 1048576
+        net_down = max(net_recv - prev["net"][0], 0) / dt / 1048576
+        net_up = max(net_sent - prev["net"][1], 0) / dt / 1048576
     try:
         io_all = psutil.disk_io_counters(perdisk=True) or {}
     except Exception:
@@ -475,7 +1003,7 @@ def system_metrics(authorization: Optional[str] = Header(None)):
         disks.append({"name": name, "read": round(r, 2), "write": round(w, 2)})
     _METRIC_LAST = {
         "ts": now,
-        "net": (net.bytes_recv, net.bytes_sent),
+        "net": (net_recv, net_sent),
         "disk": {n: (io.read_bytes, io.write_bytes) for n, io in io_all.items()},
     }
     return {
