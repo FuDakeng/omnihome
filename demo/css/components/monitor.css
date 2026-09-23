@@ -103,10 +103,51 @@
 .mon-zone-title .ic{ width: 16px; height: 16px; color: var(--om-primary); }
 .mon-zone-title .chip{ margin-left: var(--om-space-2); }
 
+/* ---------- 系统 / 硬件信息卡 ---------- */
+.mon-hw{
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 28px;
+  margin: 0;
+}
+.mon-hw > div{ min-width: 0; }
+.mon-hw dt{
+  margin: 0 0 4px;
+  font-size: 11px; font-weight: 600; letter-spacing: .4px;
+  color: var(--om-text-3);
+}
+.mon-hw dd{
+  margin: 0;
+  font-size: 14px; font-weight: 600; line-height: 1.45;
+  color: var(--om-text-1);
+  overflow-wrap: anywhere;
+}
+
 /* ---------- Docker 筛选栏：多选下拉 + 搜索 + 结果提示 ---------- */
 .ct-filter{
   display: flex; align-items: center; gap: var(--om-space-2);
   margin-bottom: var(--om-space-3);
+}
+/* 筛选按钮在内容区左侧。面板若按通用 .drop-panel 的 right:0 向左展开，
+   折叠成图标栏时会伸进侧栏下面，名称左侧被裁掉。改为向右展开，并限制在内容宽度内。 */
+.ct-filter .dropdown{ z-index: 40; }
+.ct-filter .drop-panel{
+  left: 0; right: auto;
+  width: min(420px, calc(100vw - var(--om-sidebar-w) - 56px));
+  min-width: min(280px, calc(100vw - var(--om-sidebar-w) - 56px));
+  max-width: none;
+  max-height: min(360px, 70vh);
+}
+body.sidebar-collapsed .ct-filter .drop-panel{
+  width: min(420px, calc(100vw - var(--om-sidebar-w-rail) - 56px));
+  min-width: min(280px, calc(100vw - var(--om-sidebar-w-rail) - 56px));
+}
+.ct-filter .ct-f-name,
+.ct-filter .ct-f-name i{
+  overflow: visible;
+  white-space: normal;
+  text-overflow: unset;
+  overflow-wrap: anywhere;
 }
 .ct-filter .ct-search{ margin-left: 0; }
 .ct-f-ops{ display: flex; gap: 6px; padding: 4px 6px 8px; border-bottom: 1px solid var(--om-border); margin-bottom: 6px; }

@@ -15,6 +15,21 @@
         <!-- ========== 系统监控区 ========== -->
         <div class="mon-zone-title"><svg class="ic"><use href="#i-activity"/></svg>系统监控</div>
         <div class="grid12">
+          <article class="card col-12" id="monHwCard">
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-cpu"/></svg>系统信息</h3>
+            </div>
+            <div class="card-pad">
+              <dl class="mon-hw">
+                <div><dt>设备名称</dt><dd id="monHwHost">—</dd></div>
+                <div><dt>CPU</dt><dd id="monHwCpu">—</dd></div>
+                <div><dt>GPU</dt><dd id="monHwGpu">—</dd></div>
+                <div><dt>操作系统</dt><dd id="monHwOs">—</dd></div>
+                <div><dt>内存</dt><dd id="monHwMem">—</dd></div>
+                <div><dt>运行时间</dt><dd id="monHwUp">—</dd></div>
+              </dl>
+            </div>
+          </article>
           <article class="card lift col-3"><div class="stat">
             <div class="stat-ic tint-primary"><svg class="ic"><use href="#i-cpu"/></svg></div>
             <div><div class="stat-val num" id="monCpuVal">--<small>%</small></div><div class="stat-label">CPU 使用率</div><div class="stat-sub" id="monCpuSub">加载中…</div></div>
@@ -25,7 +40,7 @@
           </div></article>
           <article class="card lift col-3"><div class="stat">
             <div class="stat-ic tint-success"><svg class="ic"><use href="#i-box"/></svg></div>
-            <div><div class="stat-val num" id="monDiskVal">--<small>%</small></div><div class="stat-label" id="monDiskLbl">存储</div><div class="stat-sub" id="monDiskSub">根分区实时占用</div></div>
+            <div><div class="stat-val num" id="monDiskVal">--<small>%</small></div><div class="stat-label" id="monDiskLbl">存储</div><div class="stat-sub" id="monDiskSub">全部硬盘合计</div></div>
           </div></article>
           <article class="card lift col-3"><div class="stat">
             <div class="stat-ic tint-info"><svg class="ic"><use href="#i-zap"/></svg></div>

@@ -45,6 +45,26 @@
   }
   function barCls(v){ return v < 70 ? 'ok' : v < 90 ? 'warn' : ''; }
 
+  function renderHwCard(s){
+    const set = (id, text) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text || '—';
+    };
+    set('monHwHost', s.host);
+    set('monHwCpu', s.cpuName
+      ? s.cpuName + (s.cpuCount ? ' · ' + s.cpuCount + ' 线程' : '')
+      : (s.cpuCount ? s.cpuCount + ' 线程' : '—'));
+    set('monHwGpu', s.gpuName || '未检测到');
+    set('monHwOs', s.osName || s.platform);
+    set('monHwMem', (s.memTotalGB != null)
+      ? `${s.memUsedGB} / ${s.memTotalGB} GB（${s.mem}%）` : '—');
+    const up = document.getElementById('monHwUp');
+    if (up){
+      up.textContent = s.uptime || '—';
+      up.title = s.bootTime ? '开机于 ' + s.bootTime : '';
+    }
+  }
+
   async function loadStats(){
     if (!allowed) return;
     try {
@@ -57,26 +77,13 @@
       setGauge($('#dashMemGauge'), s.mem);
       $('#dashMemNum').textContent = s.mem + '%';
       $('#dashMemLbl').textContent = `内存 · ${s.memUsedGB}/${s.memTotalGB} GB`;
-      setGauge($('#dashDiskGauge'), s.disk);
-      $('#dashDiskNum').textContent = s.disk + '%';
+      const diskPct = (s.disk == null || s.disk === '') ? null : s.disk;
+      const scopeHint = s.storageScope === 'host' ? '全部硬盘合计' : '当前环境存储';
+      setGauge($('#dashDiskGauge'), diskPct == null ? 0 : diskPct);
+      $('#dashDiskNum').textContent = diskPct == null ? '—' : diskPct + '%';
       $('#dashDiskLbl').textContent = `存储 · ${s.diskUsedTB}/${s.diskTotalTB} TB`;
       $('#dashNet').textContent = `↓ ${s.netDownMbps} · ↑ ${s.netUpMbps} MB/s`;
-      /* 存储：以前只看根分区，多盘 NAS 看不到其它硬盘。现按物理盘列表显示，
-         优先选 root 所在盘作为顶部指标卡（与原来等价） */
-      const rootDisk = (s.disks || []).find(d => d.mountpoint === '/')
-                    || (s.disks || [])[0] || null;
-      if (rootDisk){
-        const usedGB = rootDisk.usedBytes / 1073741824;
-        const totalGB = rootDisk.totalBytes / 1073741824;
-        const usedLabel = totalGB >= 1024
-          ? (usedGB / 1024).toFixed(1) + ' TB'
-          : usedGB.toFixed(0) + ' GB';
-        const totalLabel = totalGB >= 1024
-          ? (totalGB / 1024).toFixed(1) + ' TB'
-          : totalGB.toFixed(0) + ' GB';
-        $('#dashDiskLbl').textContent = `存储 · ${usedLabel} / ${totalLabel}（${App.esc(rootDisk.name)}）`;
-      }
-      /* 监控视图四卡 */
+      /* 监控视图四卡。存储总览用宿主全部真实卷合计，不再拿单块盘冒充根分区。 */
       $('#monCpuVal').innerHTML = s.cpu + '<small>%</small>';
       $('#monCpuSub').innerHTML = `<svg class="ic" style="width:11px;height:11px"><use href="#i-thermo"/></svg>` +
         (s.temp !== null && s.temp !== undefined
@@ -84,28 +91,26 @@
           : `温度 — · ${s.cpuCount} 逻辑核心`);
       $('#monMemVal').innerHTML = s.mem + '<small>%</small>';
       $('#monMemLbl').textContent = `内存 ${s.memUsedGB} / ${s.memTotalGB} GB`;
-      if (rootDisk){
-        $('#monDiskVal').innerHTML = rootDisk.percent + '<small>%</small>';
-        const uGB = rootDisk.usedBytes / 1073741824;
-        const tGB = rootDisk.totalBytes / 1073741824;
-        const uLbl = tGB >= 1024 ? (uGB/1024).toFixed(1)+' TB' : uGB.toFixed(0)+' GB';
-        const tLbl = tGB >= 1024 ? (tGB/1024).toFixed(1)+' TB' : tGB.toFixed(0)+' GB';
-        $('#monDiskLbl').textContent = `存储 ${uLbl} / ${tLbl}（${App.esc(rootDisk.name)}）`;
-      }
-      $('#monDiskSub').textContent = s.diskTemp !== null && s.diskTemp !== undefined
-        ? `硬盘温度 ${s.diskTemp}°C · 根分区实时占用` : '硬盘温度 — · 根分区实时占用';
+      $('#monDiskVal').innerHTML = diskPct == null ? '—' : diskPct + '<small>%</small>';
+      $('#monDiskLbl').textContent = `存储 ${s.diskUsedTB} / ${s.diskTotalTB} TB`;
+      const diskTempTxt = s.diskTemp !== null && s.diskTemp !== undefined
+        ? `硬盘温度 ${s.diskTemp}°C（NVMe）` : '硬盘温度 —';
+      $('#monDiskSub').textContent = `${diskTempTxt} · ${scopeHint}`;
+      renderHwCard(s);
       /* 网络：以前显示的是累计字节、还把"实时上传"标成"累计下载"。
          现在是真速率 + 文案对应：主值 = 下载速率，副值 = 上传速率 */
       $('#monNetVal').innerHTML = (s.netDownMbps || 0).toFixed(1) + '<small>MB/s</small>';
       $('#monNetSub').innerHTML =
         `<span class="up">↑ ${(s.netUpMbps || 0).toFixed(1)} MB/s</span> · 当前上传速率`;
       /* 资源占用条 */
-      [[s.cpu, $('#barCpu')], [s.mem, $('#barMem')], [s.disk, $('#barDisk')]].forEach(([v, box]) => {
+      [[s.cpu, $('#barCpu')], [s.mem, $('#barMem')], [diskPct, $('#barDisk')]].forEach(([v, box]) => {
         if (!box) return;
+        const known = v != null && v !== '';
+        const n = known ? v : 0;
         const fill = $('.bar-fill', box);
-        fill.style.width = v + '%';
-        fill.className = 'bar-fill ' + barCls(v);
-        $('.num', box.parentElement).textContent = v + '%';
+        fill.style.width = n + '%';
+        fill.className = 'bar-fill ' + (known ? barCls(n) : '');
+        $('.num', box.parentElement).textContent = known ? n + '%' : '—';
       });
       $('#monHost').textContent = `${s.host} · ${s.platform} · 开机于 ${s.bootTime}`;
     } catch (e) { /* 保持占位 */ }
@@ -237,7 +242,7 @@
       { k: 'cpu', label: '利用率', colorVar: '--om-primary', unit: '%', get: s => s.cpu },
       { k: 'cpuTemp', label: '温度', colorVar: '--om-warning', unit: '°C', get: s => s.cpuTemp },
     ]},
-    gpu: { empty: '未检测到 NVIDIA GPU（nvidia-smi 不可用）', series: [
+    gpu: { empty: '未检测到可监控的 GPU（NVIDIA / Intel / AMD）', series: [
       { k: 'gpuUtil', label: '利用率', colorVar: '--om-success', unit: '%', get: s => s.gpuUtil },
       { k: 'gpuTemp', label: '温度', colorVar: '--om-danger', unit: '°C', get: s => s.gpuTemp },
     ]},
@@ -272,6 +277,8 @@
         netDown: m.netDown, netUp: m.netUp, diskTemp: m.diskTemp,
         gpuUtil: m.gpu && m.gpu.available ? m.gpu.util : null,
         gpuTemp: m.gpu && m.gpu.available ? m.gpu.temp : null,
+        gpuName: m.gpu && m.gpu.available ? (m.gpu.name || '') : '',
+        gpuSource: m.gpu && m.gpu.available ? (m.gpu.source || '') : '',
         disks: m.disks || [],
       });
       if (samples.length > MAX_POINTS) samples.shift();
