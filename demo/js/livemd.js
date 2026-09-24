@@ -28,7 +28,12 @@ export const LiveMD = (() => {
   function parseMarker(line){
     let m;
     if ((m = line.match(/^ {0,3}(-{3,}|\*{3,}|_{3,}) *$/))) return { raw: m[0], type: 'hr' };
-    if ((m = line.match(/^- \[([ xX])\] /))) return { raw: m[0], type: 'todo', checked: m[1] !== ' ' };
+    /* 任务：行首可缩进；- / * / +；「-」和「[」之间的空格可省（-[ ]） */
+    if ((m = line.match(/^([ \t]*)([-*+])[ \t]?\[([ xX])\]/))) {
+      let raw = m[0];
+      if (line[raw.length] === ' ' || line[raw.length] === '\t') raw += line[raw.length];
+      return { raw, type: 'todo', checked: m[3] !== ' ', indent: m[1] };
+    }
     if ((m = line.match(/^[-*+] /)))         return { raw: m[0], type: 'li' };
     if ((m = line.match(/^#{1,6} /)))        return { raw: m[0], type: 'h', level: m[0].length - 1 };
     if ((m = line.match(/^> /)))             return { raw: m[0], type: 'quote' };
@@ -36,7 +41,7 @@ export const LiveMD = (() => {
     return null;
   }
   const contPrefix = mk =>
-    mk ? (mk.type === 'todo' ? '- [ ] ' : mk.type === 'li' ? '- '
+    mk ? (mk.type === 'todo' ? (mk.indent || '') + '- [ ] ' : mk.type === 'li' ? '- '
         : mk.type === 'oli' ? (mk.num + 1) + '. ' : mk.type === 'quote' ? '> ' : '') : '';
 
   /* ---------- 行内语法渲染（行内代码内不再解析） ---------- */
@@ -827,7 +832,8 @@ export const LiveMD = (() => {
                       : mk.type === 'quote' ? '&gt;' : esc(mk.raw.trim());
           inner = `<span class="lm-mk" data-raw="${esc(mk.raw)}" contenteditable="false">${glyph}</span>`;
         }
-        return `<div class="lm-line lm-${mk.type}${mk.type === 'h' ? ' lm-h lm-h' + mk.level : ''}" data-src-i="${i}">${inner}${inlineHtml(rest) || '<br>'}</div>`;
+        const ind = mk.indent && mk.indent.length ? ` style="--lm-ind:${mk.indent.length}"` : '';
+        return `<div class="lm-line lm-${mk.type}${mk.type === 'h' ? ' lm-h lm-h' + mk.level : ''}" data-src-i="${i}"${ind}>${inner}${inlineHtml(rest) || '<br>'}</div>`;
       }
       return `<div class="lm-line" data-src-i="${i}">${inlineHtml(line) || '<br>'}</div>`;
     }
@@ -1130,7 +1136,7 @@ export const LiveMD = (() => {
       return true;
     }
     function leaveSource(line){
-      if (!line || !line.isConnected || !line.classList.contains('lm-src')) return;
+      if (!line || !line.isConnected || !line.classList.contains('lm-src')) return line;
       const raw = lineRaw(line);
       const i = line.getAttribute('data-src-i') || '0';
       const box = document.createElement('div');
@@ -1138,6 +1144,7 @@ export const LiveMD = (() => {
       const neu = box.firstElementChild;
       if (neu) line.replaceWith(neu);
       if (activeSrc === line) activeSrc = null;
+      return neu || line;
     }
     /* 把一行换成原始 Markdown 文本，并把光标放到行内偏移 localOff */
     function sourceifyLine(line, localOff){
@@ -1161,6 +1168,22 @@ export const LiveMD = (() => {
         restoreInLine(line, localOff);
         return;
       }
+      const mk = parseMarker(lineRaw(line));
+      /* 任务行：光标进入「- [ ]」标记内部才展开源码；点复选框或编辑正文保持勾选框 */
+      if (mk && mk.type === 'todo'){
+        if (activeSrc && activeSrc !== line && activeSrc.isConnected) leaveSource(activeSrc);
+        if (localOff < mk.raw.length){
+          const sel = window.getSelection();
+          const collapsed = !sel || !sel.rangeCount || sel.isCollapsed;
+          if (collapsed && !pointerDown && !composing) sourceifyLine(line, localOff);
+          else restoreInLine(line, localOff);
+          return;
+        }
+        const shown = line.classList.contains('lm-src') ? leaveSource(line) : line;
+        if (activeSrc === line) activeSrc = null;
+        restoreInLine(shown, localOff);
+        return;
+      }
       const sel = window.getSelection();
       const collapsed = !sel || !sel.rangeCount || sel.isCollapsed;
       if (collapsed && !pointerDown && !composing) sourceifyLine(line, localOff);
@@ -1180,7 +1203,10 @@ export const LiveMD = (() => {
         activeSrc = null;
         return;
       }
-      if (el.classList.contains('lm-src')){ activeSrc = el; return; }
+      if (el.classList.contains('lm-src')){
+        const mk = parseMarker(lineRaw(el));
+        if (!(mk && mk.type === 'todo')){ activeSrc = el; return; }
+      }
       const off = globalOffset();
       if (off == null) return;
       srcLock = true;
@@ -1543,14 +1569,23 @@ export const LiveMD = (() => {
       const cb = e.target.closest('.lm-cb');
       if (!cb || !root.contains(cb)) return;
       e.preventDefault();
+      toggleCheckbox(cb);
+    }
+    let cbToggleAt = 0;
+    function toggleCheckbox(cb){
+      const now = Date.now();
+      if (now - cbToggleAt < 350) return;
+      cbToggleAt = now;
       const line = cb.closest('.lm-line');
       const idx = lines().indexOf(line);
       if (idx < 0) return;
       const off = globalOffset();
       const arr = serializeAll().split('\n');
-      arr[idx] = /- \[[xX]\] /.test(arr[idx])
-        ? arr[idx].replace(/- \[[xX]\] /, '- [ ] ')
-        : arr[idx].replace(/- \[ \] /, '- [x] ');
+      const cur = arr[idx] || '';
+      const mk = parseMarker(cur);
+      if (!mk || mk.type !== 'todo') return;
+      const nextBox = mk.checked ? '[ ]' : '[x]';
+      arr[idx] = cur.slice(0, mk.raw.length).replace(/\[[ xX]\]/, nextBox) + cur.slice(mk.raw.length);
       const nraw = arr.join('\n');
       ta.value = nraw;
       try { ta.dispatchEvent(new Event('input')); } catch (er) {}
@@ -1980,6 +2015,12 @@ export const LiveMD = (() => {
       const t = e.target;
       if (!wikiPop.hidden && t && !wikiPop.contains(t)) hideWiki(true);
       if (!t || !root.contains(t)) return;
+      const cb = t.closest && t.closest('.lm-cb');
+      if (cb){
+        e.preventDefault();
+        toggleCheckbox(cb);
+        return;
+      }
       const wiki = t.closest && t.closest('.lm-wiki');
       if (wiki){
         e.preventDefault();
@@ -2018,6 +2059,11 @@ export const LiveMD = (() => {
     root.addEventListener('click', onClick);
     root.addEventListener('mousedown', e => {
       const t = e.target;
+      /* 点复选框只切换勾选，不把光标送进「- [ ]」以免整行变成源码 */
+      if (t.closest && t.closest('.lm-cb')){
+        e.preventDefault();
+        return;
+      }
       if (t.closest && t.closest('.lm-code-tools, [data-lm-code-act], .lm-mermaid'))
         e.preventDefault();
       const fence = t.closest && t.closest('.lm-fence-open.is-mermaid-chart');

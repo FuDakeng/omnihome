@@ -261,11 +261,19 @@
 .lm-line{ min-height: 1.9em; }
 .lm-mk, .lm-cb{ cursor: text; }
 .lm-li, .lm-oli, .lm-todo{ padding-left: 2px; }
+.lm-todo{ padding-left: calc(2px + var(--lm-ind, 0) * 1ch); }
 .lm-li .lm-mk, .lm-oli .lm-mk{
   color: var(--om-primary); font-weight: 700;
   display: inline-block; min-width: 16px; margin-right: 6px; text-align: center;
 }
-.lm-todo .lm-cb{ display: inline-block; min-width: 16px; margin-right: 6px; color: var(--om-text-3); cursor: pointer; }
+.lm-todo .lm-cb{
+  display: inline-flex; align-items: center; justify-content: center;
+  box-sizing: border-box;
+  min-width: 22px; min-height: 22px; padding: 2px;
+  margin-right: 6px; font-size: 18px; line-height: 1;
+  vertical-align: -3px; color: var(--om-text-3); cursor: pointer;
+  user-select: none;
+}
 .lm-todo .lm-cb.on{ color: var(--om-success); }
 .lm-todo:has(.lm-cb.on){ color: var(--om-text-3); }
 .lm-quote{
