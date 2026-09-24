@@ -7,7 +7,7 @@ alwaysApply: true
 
 完成功能交付时（用户要求发版/上传/推送，或本轮改动已完成待上线）：
 
-1. 按项目 Skill `.cursor/skills/omnihome-test/SKILL.md` 跑本轮相关测试（默认 `cd backend && python3 _sync_regress.py`）。失败不得发版。
+1. 按项目 Skill `.cursor/skills/omnihome-test/SKILL.md` 跑本轮相关测试（默认 `cd backend && python3 _sync_regress.py`）。失败不得发版。用户能感知的功能变化须已按 `.cursor/rules/omnihome-readme.mdc` 更新 `README.md`（界面变了则一并更新 `docs/images/`）。
 2. 递增 `backend/app_version.py` 的 `VERSION`，同步置顶 `CHANGELOG` 与 `STAGE`。
 3. 只提交本次相关源码。禁止 `git add .` 若工作区有无关文件（如 `obsidian-plugin` 副本目录、`*.pem`）。
 4. 提交说明：`vX.Y.Z: 简述`。
