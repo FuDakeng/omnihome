@@ -65,6 +65,30 @@
     if (kb >= 0.05) return trimNum(kb) + ' KB/s';
     return '0 KB/s';
   }
+  /* 只用于轨道填充宽度，不改变展示文案。百分比直接映射，温度按 0–100℃，速率按对数压到 0–100。 */
+  function fillRatio(key, d){
+    if (!d) return null;
+    const gpu = d.gpu || {};
+    let n = null;
+    if (key === 'cpu') n = finite(d.cpu);
+    else if (key === 'mem') n = finite(d.mem);
+    else if (key === 'disk') n = finite(d.diskPercent);
+    else if (key === 'gpu') n = gpu.available ? finite(gpu.util) : null;
+    else if (key === 'cpuTemp') n = finite(d.cpuTemp);
+    else if (key === 'diskRead') n = finite(d.diskRead);
+    else if (key === 'diskWrite') n = finite(d.diskWrite);
+    else if (key === 'netUp') n = finite(d.netUp);
+    else if (key === 'netDown') n = finite(d.netDown);
+    if (n == null || n < 0) return null;
+    if (key === 'cpu' || key === 'mem' || key === 'disk' || key === 'gpu'){
+      return n > 100 ? null : n;
+    }
+    if (key === 'cpuTemp') return Math.max(0, Math.min(100, n));
+    if (n === 0) return 0;
+    const kb = n * 1024;
+    return Math.max(0, Math.min(100, Math.log10(kb + 1) / Math.log10(100 * 1024) * 100));
+  }
+
   function valueOf(key, d){
     if (!d) return null;
     const gpu = d.gpu || {};
@@ -91,7 +115,8 @@
       row.dataset.key = key;
       row.innerHTML = sel.map(k => {
         const m = META[k];
-        return `<span class="sys-m" data-k="${k}"><span class="sys-m-k">${m.short}</span><b class="sys-m-v num">—</b></span>`;
+        const kind = (k === 'diskWrite' || k === 'diskRead' || k === 'netUp' || k === 'netDown') ? 'is-rate' : 'is-pct';
+        return `<span class="sys-m ${kind}" data-k="${k}"><span class="sys-m-k">${m.short}</span><span class="sys-m-slot"><span class="sys-m-track" aria-hidden="true"><span class="sys-m-fill"></span></span><b class="sys-m-v num">—</b></span></span>`;
       }).join('') + '<span class="sys-more" id="sysMore" hidden>…</span>';
     }
     sel.forEach(k => {
@@ -102,6 +127,11 @@
       el.classList.toggle('is-miss', miss);
       const v = el.querySelector('.sys-m-v');
       if (v) v.textContent = miss ? '—' : text;
+      const fill = el.querySelector('.sys-m-fill');
+      if (fill){
+        const ratio = fillRatio(k, last);
+        fill.style.width = (ratio == null ? 0 : ratio) + '%';
+      }
       el.title = META[k].full + (miss ? ' · 暂无数据' : ' ' + text);
     });
     const strip = $('#sysStrip');
@@ -128,7 +158,10 @@
       const gap = parseFloat(getComputedStyle(slot).columnGap) || 0;
       const weatherW = weather ? weather.getBoundingClientRect().width : 0;
       const available = Math.max(40, Math.floor(slot.clientWidth - weatherW - gap));
-      strip.style.maxWidth = available + 'px';
+      /* 外层不超过按钮左侧的剩余宽度；槽位本身已固定，不再按文案改 width */
+      const cap = available + 'px';
+      if (strip.style.maxWidth !== cap) strip.style.maxWidth = cap;
+      if (strip.style.width) strip.style.width = '';
       const items = [...row.querySelectorAll('.sys-m')];
       const more = $('#sysMore');
       items.forEach(el => {
@@ -137,12 +170,7 @@
       });
       if (more) more.hidden = true;
       /* 手机：指标在横条内横向滚动，不换行、不顶到下一行的按钮 */
-      if (window.matchMedia('(max-width: 768px)').matches){
-        strip.style.width = '';
-        return;
-      }
-      /* 测量时先拉到上限，避免「随内容收缩」导致 clientWidth 跟着指标一起变 */
-      strip.style.width = available + 'px';
+      if (window.matchMedia('(max-width: 768px)').matches) return;
       const overflow = () => row.scrollWidth > row.clientWidth + 1;
       let guard = items.length + 2;
       while (guard-- && overflow()){
@@ -161,7 +189,6 @@
       if (more && !more.hidden){
         more.title = items.filter(el => el.hidden).map(el => el.title).filter(Boolean).join(' · ');
       }
-      strip.style.width = '';
     } finally {
       fitting = false;
     }
