@@ -53,9 +53,12 @@ docker build -t omnihome:latest .
 docker run -d --name omnihome --restart unless-stopped \
   -p 8000:8000 \
   -v $(pwd)/data:/app/data \
+  -v /:/host:ro \
   -e TZ=Asia/Shanghai \
   omnihome:latest
 ```
+
+`-v /:/host:ro` 让系统监控读取宿主硬盘占用、主机名和网卡。不挂这一项时，存储卡显示「—」并提示补挂载，不会把容器磁盘当成整机容量。
 
 需要容器监控时再加 `-v /var/run/docker.sock:/var/run/docker.sock:ro`。
 
@@ -92,6 +95,7 @@ docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d
 |---|---|
 | 系统监控入口不显示 | 该功能仅管理员可见且默认关闭：管理员在「设置 → 功能设置」中开启 |
 | 监控页提示"无法连接 Docker" | 默认不挂 docker.sock。需要时在 compose 里取消注释后重建；无 socket 时容器监控自动降级，其余功能不受影响 |
+| 存储卡显示「—」或「未挂载宿主根」 | 容器缺少 `-v /:/host:ro`。compose 已默认包含；若是手工 `docker run`，补上该只读挂载后重建。不要把容器自己的磁盘容量当成整机 |
 | 忘记管理员密码 | 停止容器后删除 `data/config.json` 与对应用户目录，重新注册（会清空全部数据，请先备份） |
 | 天气城市修改 | 仪表盘天气横条 → 位置设置 → 手动搜索城市；或一键定位（需 HTTPS / localhost） |
 | 会话全部失效 | 会话在 `data/sessions.sqlite`，随数据卷持久化；若整卷丢失才需重新登录 |

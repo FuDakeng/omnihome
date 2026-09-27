@@ -159,6 +159,11 @@
   overflow-wrap: anywhere;
 }
 .mon-disk-body{ min-width: 0; }
+.mon-disk-body .stat-sub{
+  display: block;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
 .mon-disk-line{
   display: flex;
   align-items: center;

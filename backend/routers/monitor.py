@@ -51,6 +51,8 @@ def system_stats(authorization: Optional[str] = Header(None)):
         _host_net = (_n.bytes_recv, _n.bytes_sent)
     net_down_bytes, net_up_bytes = _host_net
     summary = _storage_summary(root_disk)
+    if summary.get("storageFallback"):
+        _warn_storage_fallback(summary.get("hint") or "")
     cpu_temp, disk_temp = _sensor_temps()
     boot_ts = psutil.boot_time()
     boot = datetime_from_ts(boot_ts)
@@ -72,8 +74,11 @@ def system_stats(authorization: Optional[str] = Header(None)):
         "disk": summary["percent"],
         "diskUsedTB": summary["usedTB"],
         "diskTotalTB": summary["totalTB"],
-        # scope=host 表示数据来自宿主真实文件系统；container=没挂宿主根，退回容器视角
+        # scope=host 表示数据来自宿主真实文件系统。
+        # container 且 storageFallback：没挂 -v /:/host:ro，容量字段为 null，禁止拿容器 overlay 冒充整机。
         "storageScope": summary["scope"],
+        "storageFallback": bool(summary.get("storageFallback")),
+        "storageHint": summary.get("hint") or "",
         "diskVolumes": summary["volumes"],
         # 网络：算出真正的速率（MB/s），不是累计字节。
         # 累计字节 / 1024² 会随启动时间无限增长，曾被前端错误标注为 "MB/s"。
@@ -145,6 +150,43 @@ def _host_root_available() -> bool:
         return _HOST_ROOT.is_dir() and (_HOST_ROOT / "etc").is_dir()
     except OSError:
         return False
+
+
+def _in_container() -> bool:
+    """当前进程是否跑在容器里。
+
+    容器里的根分区是 overlay，不是 NAS 整机。
+    开发机直接跑后端时这里为 False，根分区可以当作本机磁盘。
+    """
+    if Path("/.dockerenv").is_file() or Path("/run/.containerenv").is_file():
+        return True
+    try:
+        text = Path("/proc/1/cgroup").read_text(errors="replace")
+    except OSError:
+        return False
+    return any(mark in text for mark in ("docker", "containerd", "kubepods", "podman", "lxc"))
+
+
+def _withhold_container_storage() -> bool:
+    """容器没挂宿主根时，不能把容器磁盘容量当成整机存储。"""
+    return _in_container() and not _host_root_available()
+
+
+_STORAGE_FALLBACK_HINT = (
+    "存储（容器视角，未挂载宿主根）。请为容器添加 -v /:/host:ro 后重建"
+)
+_STORAGE_EMPTY_HINT = "已挂载宿主根，但没有读到可用的文件系统"
+_storage_fallback_logged = False
+
+
+def _warn_storage_fallback(hint: str) -> None:
+    """每个进程只打一次，避免监控轮询把日志刷满。"""
+    global _storage_fallback_logged
+    if _storage_fallback_logged:
+        return
+    _storage_fallback_logged = True
+    import logging
+    logging.getLogger("omnihome.monitor").warning("%s", hint or _STORAGE_FALLBACK_HINT)
 
 
 def _is_physical_disk(name: str) -> bool:
@@ -279,8 +321,25 @@ def _host_volumes() -> list:
     return list(vols.values())
 
 
+def _storage_unavailable(scope: str, hint: str) -> dict:
+    """容量未知。percent / usedTB / totalTB 必须是 null，前端只能显示「—」。"""
+    return {
+        "scope": scope,
+        "percent": None,
+        "usedTB": None,
+        "totalTB": None,
+        "volumes": [],
+        "storageFallback": True,
+        "hint": hint,
+    }
+
+
 def _storage_summary(root_disk) -> dict:
-    """总览存储：宿主所有真实卷合计；拿不到宿主信息才退回容器自身（并标 scope）。"""
+    """总览存储：宿主所有真实卷合计。
+
+    容器里没挂 -v /:/host:ro 时，不再把 overlay（常见约 0.9T）当成整机容量。
+    非容器的开发机没有 /host，根分区就是本机磁盘，仍返回真实占用。
+    """
     vols = _host_volumes()
     if vols:
         total = sum(v["totalBytes"] for v in vols)
@@ -291,13 +350,21 @@ def _storage_summary(root_disk) -> dict:
             "usedTB": round(used / 1099511627776, 1),
             "totalTB": round(total / 1099511627776, 1),
             "volumes": vols,
+            "storageFallback": False,
+            "hint": "",
         }
+    if _host_root_available():
+        return _storage_unavailable("host", _STORAGE_EMPTY_HINT)
+    if _withhold_container_storage():
+        return _storage_unavailable("container", _STORAGE_FALLBACK_HINT)
     return {
-        "scope": "container",
+        "scope": "local",
         "percent": round(root_disk.percent),
         "usedTB": round(root_disk.used / 1099511627776, 1),
         "totalTB": round(root_disk.total / 1099511627776, 1),
         "volumes": [],
+        "storageFallback": False,
+        "hint": "",
     }
 
 
@@ -351,8 +418,9 @@ def _physical_disks(root_disk=None) -> list:
                 item.update({"mountpoint": None, "totalBytes": size_bytes,
                              "usedBytes": None, "percent": None})
             disks.append(item)
-    # 兜底：非 Linux（开发机 macOS）没有 /sys/block，退回容器根分区，界面不至于空
-    if not disks and root_disk is not None:
+    # 兜底：非 Linux（开发机）没有 /sys/block，退回本机根分区。
+    # 容器没挂宿主根时不要走这条：那会把 overlay 容量填成一块名为 / 的盘。
+    if not disks and root_disk is not None and not _withhold_container_storage():
         disks.append({
             "name": "/", "device": "/", "model": "",
             "sizeBytes": root_disk.total,

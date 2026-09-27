@@ -41,12 +41,45 @@ def test_os_release_and_cpuinfo_and_uptime():
     assert mon._format_uptime(-1) == "—"
 
 
-def test_storage_summary_without_host_does_not_invent_zero_disks(monkeypatch):
+def test_container_without_host_does_not_report_overlay(monkeypatch):
+    """容器没挂 -v /:/host:ro 时，禁止把 overlay（约 0.9T）当成整机容量。"""
     monkeypatch.setattr(mon, "_host_volumes", lambda: [])
-    summary = mon._storage_summary(SimpleNamespace(percent=10, used=100, total=1000))
+    monkeypatch.setattr(mon, "_in_container", lambda: True)
+    monkeypatch.setattr(mon, "_host_root_available", lambda: False)
+    overlay = SimpleNamespace(percent=10, used=97 * 1024 ** 3, total=900 * 1024 ** 3)
+    summary = mon._storage_summary(overlay)
     assert summary["scope"] == "container"
+    assert summary["storageFallback"] is True
+    assert summary["percent"] is None
+    assert summary["usedTB"] is None
+    assert summary["totalTB"] is None
+    assert summary["volumes"] == []
+    assert "/:/host:ro" in summary["hint"]
+    assert "容器视角" in summary["hint"]
+
+
+def test_bare_metal_without_host_mount_uses_local_root(monkeypatch):
+    """开发机不是容器：没有 /host 时，根分区就是本机磁盘。"""
+    monkeypatch.setattr(mon, "_host_volumes", lambda: [])
+    monkeypatch.setattr(mon, "_in_container", lambda: False)
+    monkeypatch.setattr(mon, "_host_root_available", lambda: False)
+    summary = mon._storage_summary(SimpleNamespace(percent=10, used=100, total=1000))
+    assert summary["scope"] == "local"
+    assert summary["storageFallback"] is False
     assert summary["percent"] == 10
     assert summary["volumes"] == []
+
+
+def test_host_volumes_sum_without_double_counting_scope(monkeypatch):
+    monkeypatch.setattr(mon, "_host_volumes", lambda: [
+        {"totalBytes": 1000, "usedBytes": 300},
+        {"totalBytes": 500, "usedBytes": 100},
+    ])
+    summary = mon._storage_summary(SimpleNamespace(percent=99, used=1, total=1))
+    assert summary["scope"] == "host"
+    assert summary["storageFallback"] is False
+    assert summary["percent"] == 27
+    assert summary["hint"] == ""
 
 
 def test_without_host_volumes_disk_percent_is_null(monkeypatch):
@@ -62,8 +95,25 @@ def test_without_host_volumes_disk_percent_is_null(monkeypatch):
     json.dumps(disks)
 
 
+def test_container_without_sysfs_does_not_invent_root_disk(monkeypatch):
+    monkeypatch.setattr(mon, "_host_volumes", lambda: [])
+    monkeypatch.setattr(mon, "_in_container", lambda: True)
+    monkeypatch.setattr(mon, "_host_root_available", lambda: False)
+    real_exists = mon.Path.exists
+
+    def exists(self):
+        if self == mon.Path("/sys/block"):
+            return False
+        return real_exists(self)
+
+    monkeypatch.setattr(mon.Path, "exists", exists)
+    disks = mon._physical_disks(SimpleNamespace(percent=10, used=9, total=90))
+    assert disks == []
+
+
 def test_no_sysfs_falls_back_to_root_partition(monkeypatch):
     monkeypatch.setattr(mon, "_host_volumes", lambda: [])
+    monkeypatch.setattr(mon, "_in_container", lambda: False)
     real_exists = mon.Path.exists
 
     def exists(self):
@@ -131,6 +181,10 @@ def test_monitor_page_exposes_hardware_card_and_filter_opens_right():
     assert "monitorVisible" in js
     assert "未检测到可监控的 GPU（NVIDIA / Intel / AMD）" in js
     assert "gpuName" in js
+    assert "storageFallback" in js
+    assert "未挂载宿主根" in js
+    assert "所选硬盘占用" in js
+    assert "fmtTb" in js
     css = (ROOT / "demo" / "css" / "components" / "monitor.css").read_text(encoding="utf-8")
     assert ".ct-filter .drop-panel" in css
     assert "left: 0" in css

@@ -48,6 +48,12 @@ docker compose -f docker-compose.nas.yml up -d     # 已有镜像，不加 --bui
 - 升级：重新构建/导入新镜像后 `docker compose up -d` 重建容器，`data/` 不动则不丢数据。
 - 存储引擎默认为文件（每用户一个目录）。可在「设置 → 数据与存储」切换为 SQLite / MySQL / PostgreSQL，切换时自动双向迁移。
 
+## 系统监控要读整机硬盘
+
+`docker-compose.nas.yml` 默认只读挂载宿主根（`/:/host:ro`）。这样存储合计、各盘占用、主机名和网卡速率才是 NAS 本机的数。
+
+如果部署时去掉了这项挂载，监控页的存储卡会显示「—」，并提示补上 `-v /:/host:ro` 后重建。页面不会再用容器磁盘（常见约 0.9T）冒充整机容量。
+
 ## 可选：Docker 容器监控
 
 「系统监控」页的 Docker 监控区需要读取宿主机 Docker 接口，且**仅管理员可见、默认关闭**
