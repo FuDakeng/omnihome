@@ -129,13 +129,14 @@
 .vh-strips .wxs-city{ flex: 0 1 auto; min-width: 0; }
 .vh-strips .wxs-ops{ flex: none; }
 
-/* ---------- 系统监控横条：高度、边框、圆角与天气横条一致 ---------- */
+/* ---------- 系统监控横条：高度、边框、圆角、间距与天气横条一致 ----------
+   每项数值槽是固定宽度的轨道，只有槽底填充随数值变化。
+   整条按这些固定槽位排开，刷新时不跟着数字变长。 */
 .sys-strip{
   position: relative;
   display: flex; align-items: center; gap: 2px;
   height: 40px; padding: 0 4px 0 8px;
-  flex: 0 1 auto; min-width: 40px;
-  width: max-content; max-width: 100%;
+  flex: 0 1 auto; width: max-content; min-width: 0; max-width: 100%;
   border: 1px solid var(--om-border);
   border-radius: var(--om-radius-md);
   background: var(--om-surface-2);
@@ -149,25 +150,59 @@
   display: flex; align-items: center;
   min-width: 0; overflow: hidden;
   flex: 1 1 auto;
+  height: 100%;
 }
 .sys-m{
-  display: inline-flex; align-items: baseline; gap: 4px;
+  display: inline-flex; align-items: center; gap: 6px;
   flex: none; white-space: nowrap;
-  color: var(--om-text-3);
+  height: 100%; padding: 0 6px;
+  color: var(--om-text-2);
 }
 .sys-m + .sys-m::before{
   content: "·";
-  margin: 0 8px 0 2px;
+  margin: 0 2px 0 0;
   color: var(--om-text-3);
-  font-weight: 400;
+  font-size: 12px; font-weight: 500; line-height: 16px;
 }
-.sys-m-k{ font-size: 11px; color: var(--om-text-3); flex: none; }
-.sys-m-v{ font-size: 15px; font-weight: 700; color: var(--om-text-1); flex: none; }
-.sys-m.is-miss .sys-m-v{ font-weight: 600; color: var(--om-text-3); }
+/* 名称与数值同一套字号、字重、颜色、行高 */
+.sys-m-k,
+.sys-m-v{
+  font-family: inherit;
+  font-size: 12px; font-weight: 500; line-height: 16px;
+  color: var(--om-text-2);
+  flex: none;
+}
+/* 数值槽即固定轨道：百分比与速率各用一个宽度，刷新不改槽宽 */
+.sys-m-slot{
+  position: relative;
+  display: inline-flex; align-items: flex-end; justify-content: flex-end;
+  flex: none;
+  height: 18px; padding-bottom: 3px;
+  box-sizing: border-box;
+}
+.sys-m.is-pct .sys-m-slot{ width: 5.6ch; }
+.sys-m.is-rate .sys-m-slot{ width: 8.8ch; }
+.sys-m-v{
+  display: block;
+  width: 100%;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sys-m-track{
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--om-surface-3);
+  overflow: hidden;
+}
+.sys-m-fill{
+  display: block;
+  height: 100%; width: 0%;
+  border-radius: inherit;
+  background: var(--om-primary);
+}
 .sys-m.is-clip{ flex: 0 1 auto; min-width: 0; overflow: hidden; }
-.sys-m.is-clip .sys-m-v{
-  min-width: 0; overflow: hidden; text-overflow: ellipsis;
-}
 .sys-more{
   flex: none; margin-left: 4px;
   font-size: 14px; line-height: 1; color: var(--om-text-3);
