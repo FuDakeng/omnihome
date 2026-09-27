@@ -189,6 +189,22 @@
 
   /* 仪表盘 / 书签 / 保险库 / 监控 / 设置 */
   .wx-strip{ max-width: none; width: 100%; }
+  /* 手机：编辑按钮整行在横条下方，两条横条同一行，监控条可收缩 */
+  .view[data-view="dashboard"] > .view-head{ flex-wrap: wrap; align-items: flex-end; }
+  .vh-strips{ width: 100%; min-width: 0; flex: 1 1 100%; }
+  .vh-strips .wx-strip{ width: auto; max-width: 58%; min-width: 0; flex: 0 1 auto; }
+  .vh-strips:not(:has(#sysStrip:not([hidden]))) .wx-strip{
+    max-width: none; width: 100%;
+  }
+  .sys-strip{ min-width: 44px; }
+  .sys-metrics{
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sys-metrics::-webkit-scrollbar{ display: none; }
+  .sys-strip .wxs-pop{ min-width: 0; width: min(280px, calc(100vw - 32px)); }
   .wxs-pop, .wxs-pop-loc{ min-width: 0; width: min(280px, calc(100vw - 32px)); }
   .wxs-op{ width: 36px; height: 36px; }
   .dash-spark{ min-width: 0 !important; }

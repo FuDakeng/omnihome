@@ -6,6 +6,7 @@ import { App } from './app.js';
 import { Auth } from './auth.js';
 import './weather.js';
 import './monitor.js';
+import './sysbar.js';
 import './word.js';
 import './calendar.js';
 import { Bookmarks } from './bookmarks.js';

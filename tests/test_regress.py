@@ -61,6 +61,8 @@ def test_render_index_injects_version():
     assert 'id="collapseBtn"' in html
     assert "css/mobile.css" in html
     assert 'id="i-menu"' in html
+    assert 'id="sysStrip"' in html
+    assert "sysbar.js" in (ROOT / "demo" / "js" / "boot.js").read_text(encoding="utf-8")
     assert "__VER__" not in html
     assert "<!--VIEWS-->" not in html
     assert "<!--ICONS-->" not in html

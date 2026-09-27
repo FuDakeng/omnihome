@@ -1120,6 +1120,7 @@ def system_metrics(authorization: Optional[str] = Header(None)):
         "net": (net_recv, net_sent),
         "disk": {n: (io.read_bytes, io.write_bytes) for n, io in io_all.items()},
     }
+    disk_read, disk_write = _sum_disk_rates(disks)
     return {
         "ts": int(now),
         "cpu": round(cpu, 1),
@@ -1128,7 +1129,49 @@ def system_metrics(authorization: Optional[str] = Header(None)):
         "netDown": round(net_down, 2),
         "netUp": round(net_up, 2),
         "disks": disks,
+        "diskRead": disk_read,
+        "diskWrite": disk_write,
+        "diskPercent": _disk_percent_for_strip(),
         "diskTemp": disk_temp,
         "gpu": _gpu_metrics(),
     }
+
+
+def _sum_disk_rates(disks: list) -> tuple:
+    """物理盘读写速率合计（MB/s）。缺字段或非数字按 0，不把异常值传给横条。"""
+    read = write = 0.0
+    for d in disks or []:
+        if not isinstance(d, dict):
+            continue
+        try:
+            read += max(float(d.get("read") or 0), 0)
+            write += max(float(d.get("write") or 0), 0)
+        except (TypeError, ValueError):
+            continue
+    return round(read, 2), round(write, 2)
+
+
+_DISK_PCT_CACHE = {"ts": 0.0, "val": None}
+
+
+def _disk_percent_for_strip():
+    """存储占用百分比。未知、容器回退或超出 0–100 时返回 None，前端显示「—」。"""
+    now = time.time()
+    if _DISK_PCT_CACHE["ts"] and now - _DISK_PCT_CACHE["ts"] < 10:
+        return _DISK_PCT_CACHE["val"]
+    val = None
+    try:
+        import psutil
+        summary = _storage_summary(psutil.disk_usage("/"))
+        if not summary.get("storageFallback"):
+            pct = summary.get("percent")
+            if isinstance(pct, (int, float)) and not isinstance(pct, bool):
+                pct = float(pct)
+                if 0 <= pct <= 100:
+                    val = round(pct, 1)
+    except Exception:
+        val = None
+    _DISK_PCT_CACHE["ts"] = now
+    _DISK_PCT_CACHE["val"] = val
+    return val
 

@@ -1,6 +1,7 @@
       <!-- ==================== 视图：仪表盘 ==================== -->
       <section class="view active" data-view="dashboard">
         <div class="view-head">
+          <div class="vh-strips">
           <!-- 天气横条：信息区（点按看详情） + 操作区（显示内容 / 位置 / 刷新） -->
           <div class="wx-strip" id="wxStrip">
             <button class="wxs-info" id="wxStripInfo" title="点击查看天气详情">
@@ -30,6 +31,19 @@
               </div>
               <div id="wxCityResults" style="margin-top:6px"></div>
             </div>
+          </div>
+          <!-- 系统监控横条：与天气横条同高；指标可勾选，窄时从右侧收起 -->
+          <div class="sys-strip" id="sysStrip" hidden>
+            <svg class="ic sys-ic" aria-hidden="true"><use href="#i-activity"/></svg>
+            <div class="sys-metrics" id="sysMetrics"></div>
+            <div class="sys-ops">
+              <button type="button" class="wxs-op" id="sysFieldsBtn" title="横条显示内容"><svg class="ic"><use href="#i-sliders"/></svg></button>
+            </div>
+            <div class="wxs-pop" id="sysFieldsPop" hidden>
+              <div class="sp-label">横条显示内容</div>
+              <div id="sysFieldsList"></div>
+            </div>
+          </div>
           </div>
           <div class="vh-actions">
             <button class="btn btn-primary btn-sm" id="dashAddBtn" hidden><svg class="ic"><use href="#i-plus"/></svg>添加组件</button>

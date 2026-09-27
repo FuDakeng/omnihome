@@ -49,6 +49,9 @@ DEFAULT_PREFS = {
     "layout": {"compact": False, "reduceMotion": False, "sidebarCollapsed": False},
     "locale": {"lang": "zh-CN", "weekStart": "mon", "tempUnit": "c"},
     "weather": {"city": "", "lat": 30.2741, "lon": 120.1552},
+    # 仪表盘监控横条：缺省全选；空列表表示用户主动全部关掉
+    "sysbar": {"fields": ["cpu", "cpuTemp", "gpu", "mem", "disk",
+                          "diskWrite", "diskRead", "netUp", "netDown"]},
     "trashDays": 30,        # v0.2.15 增：回收站文件保留天数，0 = 永久（需手工清空）
     "obsidianSync": False,  # 功能设置：Obsidian 插件同步
     "activeVault": "default",

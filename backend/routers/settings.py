@@ -31,11 +31,25 @@ from routers.common import _require_admin  # noqa: F401
 def get_settings(authorization: Optional[str] = Header(None)):
     return storage.get_prefs(require_user(authorization))
 
+# 监控横条可选项（顺序即横条从左到右的展示顺序）
+SYS_BAR_ORDER = ("cpu", "cpuTemp", "gpu", "mem", "disk",
+                 "diskWrite", "diskRead", "netUp", "netDown")
+
+
+def clean_sysbar_fields(fields):
+    """只保留已知指标，并按固定顺序去重。非列表返回 None（调用方不改原值）。"""
+    if not isinstance(fields, list):
+        return None
+    got = {k for k in fields if isinstance(k, str)}
+    return [k for k in SYS_BAR_ORDER if k in got]
+
+
 class PrefsIn(BaseModel):
     theme: Optional[dict] = None
     layout: Optional[dict] = None
     locale: Optional[dict] = None
     weather: Optional[dict] = None
+    sysbar: Optional[dict] = None
     trashDays: Optional[int] = None   # v0.2.15 增：回收站文件保留天数（0=永久保留，需手动清）
     obsidianSync: Optional[bool] = None  # 功能设置：Obsidian 插件同步开关
 
@@ -49,6 +63,15 @@ def put_settings(body: PrefsIn, authorization: Optional[str] = Header(None)):
             if key == "layout" and "sidebarCollapsed" in val:
                 val["sidebarCollapsed"] = bool(val["sidebarCollapsed"])
             prefs[key].update(val)
+    if body.sysbar is not None and isinstance(body.sysbar, dict):
+        cur = prefs.get("sysbar")
+        if not isinstance(cur, dict):
+            cur = {}
+            prefs["sysbar"] = cur
+        if "fields" in body.sysbar:
+            cleaned = clean_sysbar_fields(body.sysbar.get("fields"))
+            if cleaned is not None:
+                cur["fields"] = cleaned
     if body.trashDays is not None:
         days = max(0, min(3650, int(body.trashDays)))   # 上限 10 年，超过视作永久保留（0）
         prefs["trashDays"] = days
