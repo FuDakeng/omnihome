@@ -39,9 +39,14 @@
 
   /* ---------- 摘要数据（仪表盘仪表 + 监控视图四卡） ---------- */
   function setGauge(circle, pct){
-    const v = Math.max(0, Math.min(100, pct));
-    circle.setAttribute('stroke-dasharray', `${(v / 100 * RING).toFixed(1)} ${RING}`);
+    if (!circle) return;
     circle.classList.remove('ok', 'warn');
+    if (pct == null || pct === '' || !isFinite(Number(pct))){
+      circle.setAttribute('stroke-dasharray', `0 ${RING}`);
+      return;
+    }
+    const v = Math.max(0, Math.min(100, Number(pct)));
+    circle.setAttribute('stroke-dasharray', `${(v / 100 * RING).toFixed(1)} ${RING}`);
     if (v < 70) circle.classList.add('ok');
     else if (v < 90) circle.classList.add('warn');
   }
@@ -72,30 +77,45 @@
     sel.value = monDiskPick;
   }
 
-  /* 默认「全部硬盘」合计；下拉改看单块盘。返回当前占用百分比，未知为 null。 */
+  function fmtTb(v){
+    return (v == null || v === '' || !isFinite(Number(v))) ? '—' : String(v);
+  }
+
+  /* 默认「全部硬盘」合计；下拉改看单块盘。返回当前占用百分比，未知为 null。
+     percent 为 0 是真的空盘；null 才显示「—」，不能当成 0%。 */
   function renderDiskStat(s){
     syncDiskPick(s.disks);
     const picked = monDiskPick && (s.disks || []).find(d => d.name === monDiskPick);
     const tempTxt = s.diskTemp != null && s.diskTemp !== undefined
       ? ` · ${s.diskTemp}°C` : '';
-    let pct, sub;
-    if (!picked){
+    const fallback = !!s.storageFallback;
+    let pct, sub, label = '存储';
+    if (fallback && !picked){
+      pct = null;
+      sub = s.storageHint
+        || '存储（容器视角，未挂载宿主根）。请为容器添加 -v /:/host:ro 后重建';
+    } else if (!picked){
       pct = (s.disk == null || s.disk === '') ? null : s.disk;
-      const scopeHint = s.storageScope === 'host' ? '全部硬盘合计' : '当前环境存储';
-      sub = `${s.diskUsedTB} / ${s.diskTotalTB} TB · ${scopeHint}${tempTxt}`;
+      const scopeHint = s.storageScope === 'host' ? '全部硬盘合计'
+        : (s.storageScope === 'local' ? '本机根分区' : '当前环境存储');
+      sub = `${fmtTb(s.diskUsedTB)} / ${fmtTb(s.diskTotalTB)} TB · ${scopeHint}${tempTxt}`;
     } else {
-      pct = picked.percent == null ? null : picked.percent;
-      const used = picked.usedBytes == null ? '—' : fmtCap(picked.usedBytes);
+      pct = (fallback || picked.percent == null) ? null : picked.percent;
+      label = '所选硬盘占用';
+      const used = (fallback || picked.usedBytes == null) ? '—' : fmtCap(picked.usedBytes);
       const total = fmtCap(picked.totalBytes != null ? picked.totalBytes : picked.sizeBytes);
-      const mp = picked.mountpoint ? ' · ' + picked.mountpoint : '';
+      const mp = (picked.mountpoint && picked.mountpoint !== '/') ? ' · ' + picked.mountpoint : '';
       sub = `${used} / ${total} · ${picked.name}${mp}${tempTxt}`;
+      if (fallback) sub += ' · 未挂载宿主根，占用不可用';
     }
     const val = $('#monDiskVal');
     if (val) val.innerHTML = pct == null ? '—' : pct + '<small>%</small>';
     const lbl = $('#monDiskLbl');
-    if (lbl) lbl.textContent = '存储';
+    if (lbl) lbl.textContent = label;
     const subEl = $('#monDiskSub');
     if (subEl) subEl.textContent = sub;
+    const barLbl = $('#barDiskLbl');
+    if (barLbl) barLbl.textContent = picked ? '所选硬盘' : '存储';
     return pct;
   }
 
@@ -131,10 +151,12 @@
       setGauge($('#dashMemGauge'), s.mem);
       $('#dashMemNum').textContent = s.mem + '%';
       $('#dashMemLbl').textContent = `内存 · ${s.memUsedGB}/${s.memTotalGB} GB`;
-      const summaryPct = (s.disk == null || s.disk === '') ? null : s.disk;
-      setGauge($('#dashDiskGauge'), summaryPct == null ? 0 : summaryPct);
+      const summaryPct = (s.storageFallback || s.disk == null || s.disk === '') ? null : s.disk;
+      setGauge($('#dashDiskGauge'), summaryPct);
       $('#dashDiskNum').textContent = summaryPct == null ? '—' : summaryPct + '%';
-      $('#dashDiskLbl').textContent = `存储 · ${s.diskUsedTB}/${s.diskTotalTB} TB`;
+      $('#dashDiskLbl').textContent = s.storageFallback
+        ? '存储 · 未挂载宿主根'
+        : `存储 · ${fmtTb(s.diskUsedTB)}/${fmtTb(s.diskTotalTB)} TB`;
       $('#dashNet').textContent = `↓ ${s.netDownMbps} · ↑ ${s.netUpMbps} MB/s`;
       /* 监控视图四卡。存储总览用宿主全部真实卷合计，不再拿单块盘冒充根分区。 */
       $('#monCpuVal').innerHTML = s.cpu + '<small>%</small>';
@@ -340,7 +362,10 @@
   function syncDiskSelect(disks){
     const sel = $('#resDiskSel');
     if (!disks.length){ sel.hidden = true; return; }
-    if (!resState.disk || !disks.some(d => d.name === resState.disk)) resState.disk = disks[0].name;
+    if (!resState.disk || !disks.some(d => d.name === resState.disk)){
+      const rootDisk = disks.find(d => d.mountpoint === '/');
+      resState.disk = (rootDisk || disks[0]).name;
+    }
     const names = disks.map(d => d.name);
     if (sel.dataset.joined !== names.join(',')){
       sel.dataset.joined = names.join(',');
