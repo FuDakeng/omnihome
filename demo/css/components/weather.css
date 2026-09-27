@@ -98,8 +98,83 @@
 }
 .wxs-pop-loc{ min-width: 280px; }
 .wxs-pop .tag-opt{ margin-top: 4px; }
-/* 天气横条位于仪表盘头部：与「编辑布局」按钮同一行，底部对齐 */
-.view-head .wx-strip{ align-self: flex-end; margin-right: auto; }
+/* 天气横条位于仪表盘头部：与监控横条、编辑按钮同一行，底部对齐 */
+.view-head .wx-strip{ align-self: flex-end; }
+/* 两条横条占左侧剩余空间，右侧按钮不收缩，中间至少留出头部间距 */
+.vh-strips{
+  display: flex; align-items: flex-end; gap: var(--om-space-2);
+  flex: 1 1 auto; min-width: 0;
+}
+.view[data-view="dashboard"] > .view-head{
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: max(12px, var(--om-space-4));
+  min-width: 0;
+}
+.view[data-view="dashboard"] > .view-head .vh-actions{
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+}
+.view[data-view="dashboard"] > .view-head.is-dash-editing{
+  gap: max(16px, var(--om-space-4));
+}
+.vh-strips .wx-strip{
+  flex: 0 1 auto;
+  min-width: 108px;
+  max-width: min(560px, 62%);
+  margin-right: 0;
+}
+.vh-strips .wxs-info{ min-width: 0; overflow: hidden; }
+.vh-strips .wxs-city{ flex: 0 1 auto; min-width: 0; }
+.vh-strips .wxs-ops{ flex: none; }
+
+/* ---------- 系统监控横条：高度、边框、圆角与天气横条一致 ---------- */
+.sys-strip{
+  position: relative;
+  display: flex; align-items: center; gap: 2px;
+  height: 40px; padding: 0 4px 0 8px;
+  flex: 0 1 auto; min-width: 40px;
+  width: max-content; max-width: 100%;
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius-md);
+  background: var(--om-surface-2);
+  box-sizing: border-box;
+}
+/* author display 会盖过 UA 的 [hidden]，必须用 !important 才能真正不占位 */
+.sys-strip[hidden]{ display: none !important; }
+.sys-m[hidden], .sys-more[hidden]{ display: none !important; }
+.sys-ic{ width: 18px; height: 18px; color: var(--om-primary); flex: none; }
+.sys-metrics{
+  display: flex; align-items: center;
+  min-width: 0; overflow: hidden;
+  flex: 1 1 auto;
+}
+.sys-m{
+  display: inline-flex; align-items: baseline; gap: 4px;
+  flex: none; white-space: nowrap;
+  color: var(--om-text-3);
+}
+.sys-m + .sys-m::before{
+  content: "·";
+  margin: 0 8px 0 2px;
+  color: var(--om-text-3);
+  font-weight: 400;
+}
+.sys-m-k{ font-size: 11px; color: var(--om-text-3); flex: none; }
+.sys-m-v{ font-size: 15px; font-weight: 700; color: var(--om-text-1); flex: none; }
+.sys-m.is-miss .sys-m-v{ font-weight: 600; color: var(--om-text-3); }
+.sys-m.is-clip{ flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.sys-m.is-clip .sys-m-v{
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
+.sys-more{
+  flex: none; margin-left: 4px;
+  font-size: 14px; line-height: 1; color: var(--om-text-3);
+  letter-spacing: 1px;
+}
+.sys-ops{ display: flex; align-items: center; flex: none; margin-left: 2px; }
+.sys-strip .wxs-pop{ min-width: 200px; }
 /* 窄屏逐级收缩：先压附加项，再隐藏附加项（横条本体保留） */
 @media (max-width: 1280px){ .wxs-extra{ max-width: 150px; } }
 @media (max-width: 1024px){ .wxs-extra{ display: none; } }

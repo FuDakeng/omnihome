@@ -875,6 +875,31 @@ def run_suite(engine):
     check(f"[{engine}] 改密度不冲掉折叠",
           layout.get("compact") is True and layout.get("sidebarCollapsed") is True, str(layout))
 
+    print("-- 监控横条字段 --")
+    r = client.get("/api/settings", headers=HA(tok))
+    sb = (r.json() or {}).get("sysbar") or {}
+    check(f"[{engine}] 监控横条默认全选",
+          r.status_code == 200 and sb.get("fields") == [
+              "cpu", "cpuTemp", "gpu", "mem", "disk",
+              "diskWrite", "diskRead", "netUp", "netDown"],
+          str(sb)[:220])
+    r = client.put("/api/settings", headers=HA(tok),
+                   json={"sysbar": {"fields": ["mem", "nope", "cpu", "cpu"]}})
+    sb = (r.json() or {}).get("sysbar") or {}
+    check(f"[{engine}] 监控横条字段过滤并排序",
+          sb.get("fields") == ["cpu", "mem"], str(sb))
+    r = client.put("/api/settings", headers=HA(tok), json={"sysbar": {"fields": []}})
+    sb = (r.json() or {}).get("sysbar") or {}
+    check(f"[{engine}] 监控横条可全部关闭", sb.get("fields") == [], str(sb))
+    r = client.get("/api/settings", headers=HA(tok))
+    check(f"[{engine}] 监控横条空选择读回",
+          (r.json() or {}).get("sysbar", {}).get("fields") == [], r.text[:180])
+    r = client.put("/api/settings", headers=HA(tok), json={"layout": {"compact": False}})
+    sb = (r.json() or {}).get("sysbar") or {}
+    check(f"[{engine}] 改布局不冲掉监控横条",
+          sb.get("fields") == [] and (r.json() or {}).get("layout", {}).get("sidebarCollapsed") is True,
+          str(sb))
+
 
 def main():
     try:
