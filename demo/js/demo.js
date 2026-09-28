@@ -78,23 +78,90 @@ $('#collapseBtn').addEventListener('click', () => {
 
 /* ---------- 明暗模式 ---------- */
 /* persist=false 用于初始化：只同步界面状态，不覆盖已保存的偏好
-   （否则会把「跟随系统」解析出的具体值写回去，auto 就丢了） */
-function setMode(mode, persist = true){
+   （否则会把「跟随系统」解析出的具体值写回去，auto 就丢了）
+   origin 传入触发控件时，深浅真正发生变化才播放圆形扩散（约 420ms）。 */
+function motionReduced(){
+  try {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return true;
+  } catch (e) {}
+  return root.dataset.motion === 'off';
+}
+function themePoint(origin){
+  let x = window.innerWidth - 48, y = 28;
+  const el = (origin && origin.getBoundingClientRect) ? origin : $('#themeToggle');
+  if (el && el.getBoundingClientRect){
+    const r = el.getBoundingClientRect();
+    if (r.width || r.height){
+      x = r.left + r.width / 2;
+      y = r.top + r.height / 2;
+    }
+  }
+  const radius = Math.ceil(Math.hypot(
+    Math.max(x, window.innerWidth - x),
+    Math.max(y, window.innerHeight - y)
+  ));
+  return { x, y, radius };
+}
+let themeVt = null;
+function runThemeTransition(apply, origin){
+  const pt = themePoint(origin);
+  root.style.setProperty('--theme-x', pt.x + 'px');
+  root.style.setProperty('--theme-y', pt.y + 'px');
+  root.style.setProperty('--theme-r', pt.radius + 'px');
+  if (!themeVt && typeof document.startViewTransition === 'function'){
+    root.classList.add('theme-vt');
+    try {
+      const vt = document.startViewTransition(() => apply());
+      themeVt = vt;
+      const done = () => {
+        themeVt = null;
+        root.classList.remove('theme-vt');
+      };
+      vt.finished.then(done, done);
+      return;
+    } catch (e) {
+      themeVt = null;
+      root.classList.remove('theme-vt');
+    }
+  }
+  root.classList.add('theme-vt');
+  apply();
+  if (themeVt) return;
+  const wash = document.createElement('div');
+  wash.className = 'theme-wash';
+  wash.style.setProperty('--theme-x', pt.x + 'px');
+  wash.style.setProperty('--theme-y', pt.y + 'px');
+  wash.style.setProperty('--theme-r', String(pt.radius * 2));
+  document.body.appendChild(wash);
+  const clear = () => {
+    wash.remove();
+    if (!themeVt) root.classList.remove('theme-vt');
+  };
+  wash.addEventListener('animationend', clear);
+  setTimeout(clear, 500);
+}
+function setMode(mode, persist = true, origin){
   const resolved = mode === 'auto'
     ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
     : mode;
-  root.dataset.theme = resolved;
-  if (persist){
-    /* 记住选择：下次打开时 <head> 的内联脚本据此渲染首屏（含未登录的登录页） */
-    try { localStorage.setItem('om_theme_mode', mode); } catch (e) {}
-  }
-  $$('[data-ic]').forEach(ic => ic.style.display = ic.dataset.ic === resolved ? 'none' : '');
-  $$('#modeSeg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+  const prev = root.dataset.theme;
+  const apply = () => {
+    root.dataset.theme = resolved;
+    if (persist){
+      /* 记住选择：下次打开时 <head> 的内联脚本据此渲染首屏（含未登录的登录页） */
+      try { localStorage.setItem('om_theme_mode', mode); } catch (e) {}
+    }
+    $$('[data-ic]').forEach(ic => ic.style.display = ic.dataset.ic === resolved ? 'none' : '');
+    $$('#modeSeg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    document.dispatchEvent(new CustomEvent('theme-change'));
+  };
+  if (origin && prev && prev !== resolved && !motionReduced()) runThemeTransition(apply, origin);
+  else apply();
 }
-$('#themeToggle').addEventListener('click', () =>
-  setMode(root.dataset.theme === 'dark' ? 'light' : 'dark'));
+$('#themeToggle').addEventListener('click', e =>
+  setMode(root.dataset.theme === 'dark' ? 'light' : 'dark', true, e.currentTarget));
 $$('#modeSeg .seg-btn').forEach(b =>
-  b.addEventListener('click', () => setMode(b.dataset.mode)));
+  b.addEventListener('click', () => setMode(b.dataset.mode, true, b)));
 
 /* 跟随系统：系统深浅切换即时生效，用户不必刷新页面 */
 if (window.matchMedia){
@@ -102,7 +169,7 @@ if (window.matchMedia){
   const onSysChange = () => {
     let mode = 'auto';
     try { mode = localStorage.getItem('om_theme_mode') || 'auto'; } catch (e) {}
-    if (mode === 'auto') setMode('auto', false);
+    if (mode === 'auto') setMode('auto', false, $('#themeToggle'));
   };
   if (mq.addEventListener) mq.addEventListener('change', onSysChange);
   else if (mq.addListener) mq.addListener(onSysChange);

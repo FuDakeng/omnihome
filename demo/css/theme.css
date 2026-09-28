@@ -148,6 +148,61 @@ body{
 
 ::selection{ background: var(--om-primary-ghost); }
 
+/* 明暗切换：新主题从触发点圆形扩散，约 420ms。伪元素不接收点击。 */
+html.theme-vt,
+html.theme-vt body,
+html.theme-vt .card{
+  transition: none !important;
+}
+html.theme-vt::view-transition,
+html.theme-vt::view-transition-group(root),
+html.theme-vt::view-transition-old(root),
+html.theme-vt::view-transition-new(root){
+  pointer-events: none;
+}
+html.theme-vt::view-transition-group(root){
+  animation-duration: 420ms;
+}
+html.theme-vt::view-transition-old(root){
+  animation: none;
+  mix-blend-mode: normal;
+  z-index: 1;
+}
+html.theme-vt::view-transition-new(root){
+  animation: om-theme-reveal 420ms cubic-bezier(.22, .61, .36, 1) both;
+  mix-blend-mode: normal;
+  z-index: 2;
+}
+@keyframes om-theme-reveal{
+  from { clip-path: circle(0px at var(--theme-x, 50%) var(--theme-y, 8%)); }
+  to { clip-path: circle(var(--theme-r, 150vmax) at var(--theme-x, 50%) var(--theme-y, 8%)); }
+}
+.theme-wash{
+  position: fixed;
+  left: var(--theme-x, 50%);
+  top: var(--theme-y, 8%);
+  width: 1px;
+  height: 1px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 200000;
+  background: radial-gradient(circle, color-mix(in oklab, var(--om-primary) 48%, transparent) 0%, transparent 68%);
+  transform: translate(-50%, -50%) scale(0);
+  animation: theme-wash 420ms cubic-bezier(.22, .61, .36, 1) forwards;
+  will-change: transform, opacity;
+}
+@keyframes theme-wash{
+  0%{ opacity: .42; transform: translate(-50%, -50%) scale(0); }
+  100%{ opacity: 0; transform: translate(-50%, -50%) scale(var(--theme-r, 2400)); }
+}
+@media (prefers-reduced-motion: reduce){
+  html.theme-vt::view-transition-old(root),
+  html.theme-vt::view-transition-new(root),
+  .theme-wash{
+    animation: none !important;
+  }
+}
+
 a{ color: var(--om-primary); text-decoration: none; }
 
 button{ font-family: inherit; cursor: pointer; }

@@ -80,7 +80,9 @@ def put_settings(body: PrefsIn, authorization: Optional[str] = Header(None)):
     storage.save_prefs(username, prefs)
     return prefs
 
-DEFAULT_WIDGETS = ["weather", "monitor", "quicknav", "calendar", "word",
+DEFAULT_WIDGETS = ["weather", "monitor", "sysinfo", "resmon", "resuse",
+                   "dockerchart", "dockerpie", "dockerlist",
+                   "quicknav", "calendar", "word",
                    "vault", "quicknote", "plan", "translate", "passgen"]
 
 class DashboardIn(BaseModel):

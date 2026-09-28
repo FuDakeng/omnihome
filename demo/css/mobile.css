@@ -58,6 +58,11 @@
   .vh-actions .btn{ min-height: 40px; }
 
   .card-head{ flex-wrap: wrap; }
+  .res-tab{ min-height: 44px; padding: 8px 12px; }
+  .mon-dash-head .res-tabs{
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
   .card-head .tabs{
     flex: 1 1 100%;
     margin-left: 0 !important;

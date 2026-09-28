@@ -62,17 +62,17 @@
           <article class="card col-8">
             <div class="card-head">
               <h3 class="card-title">资源监控</h3>
-              <div class="res-tabs" id="resTabs">
+              <div class="res-tabs" id="resTabs" data-res-tabs>
                 <button class="res-tab active" data-res="cpu">CPU</button>
                 <button class="res-tab" data-res="gpu">GPU</button>
                 <button class="res-tab" data-res="mem">内存</button>
                 <button class="res-tab" data-res="net">网络</button>
                 <button class="res-tab" data-res="disk">硬盘</button>
               </div>
-              <select class="res-disk-sel" id="resDiskSel" hidden></select>
+              <select class="res-disk-sel" id="resDiskSel" data-res-disk hidden></select>
             </div>
             <div class="card-pad res-chart-pad">
-              <div class="res-series" id="resSeries"></div>
+              <div class="res-series" id="resSeries" data-res-series></div>
               <div class="res-chart-wrap" id="resChartWrap">
                 <canvas id="resChart"></canvas>
                 <div class="res-tip" id="resTip" hidden></div>
@@ -137,7 +137,7 @@
           <article class="card col-8">
             <div class="card-head">
               <h3 class="card-title">容器曲线</h3>
-              <div class="res-tabs" id="ctTabs">
+              <div class="res-tabs" id="ctTabs" data-ct-tabs>
                 <button class="res-tab active" data-ctab="mem">内存占用</button>
                 <button class="res-tab" data-ctab="cpu">CPU 占用</button>
                 <button class="res-tab" data-ctab="up">网络 · 上传</button>
@@ -155,7 +155,7 @@
             </div>
           </article>
 
-          <article class="card col-4" id="ctPieCard">
+          <article class="card col-4" id="ctPieCard" data-pie-card>
             <div class="card-head">
               <h3 class="card-title">内存占比</h3>
               <span class="chip no-dot num" id="ctPieHint">—</span>

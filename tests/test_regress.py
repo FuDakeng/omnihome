@@ -96,6 +96,38 @@ def test_dashboard_translate_passgen_widgets():
     assert '"toolbox"' not in block
 
 
+def test_dashboard_admin_monitor_widgets():
+    """仪表盘收进资源监控 / 系统信息 / 资源占用和只读 Docker 组件，且仅管理员可添加。"""
+    dash = (ROOT / "demo" / "views" / "dashboard.html").read_text(encoding="utf-8")
+    assert "qk-containers" not in dash
+    assert 'id="qkContainers"' not in dash
+    for wid in ("sysinfo", "resmon", "resuse", "dockerchart", "dockerpie", "dockerlist"):
+        assert f'data-widget="{wid}"' in dash
+        assert f'data-widget="{wid}" data-admin-widget' in dash or f'data-widget="{wid}" data-admin-widget ' in dash
+    assert 'data-widget="monitor" data-admin-widget' in dash
+    assert 'id="dashContainerRows"' in dash
+    assert "data-c-act" not in dash
+    assert 'id="dashCtEmpty"' in dash
+    js = (ROOT / "demo" / "js" / "dashboard.js").read_text(encoding="utf-8")
+    assert "adminOn" in js
+    assert "仅管理员可添加" in js
+    mon = (ROOT / "demo" / "js" / "monitor.js").read_text(encoding="utf-8")
+    assert "CT_POLL_MS = 5000" in mon
+    assert "POLL_MS = 3000" in mon
+    assert "setDashCtEmpty" in mon
+    assert "dashCtChart" in mon
+    theme = (ROOT / "demo" / "js" / "demo.js").read_text(encoding="utf-8")
+    assert "startViewTransition" in theme
+    assert "prefers-reduced-motion" in theme
+    css = (ROOT / "demo" / "css" / "theme.css").read_text(encoding="utf-8")
+    assert "om-theme-reveal" in css
+    assert "420ms" in css
+    settings = (ROOT / "backend" / "routers" / "settings.py").read_text(encoding="utf-8")
+    block = settings.split("DEFAULT_WIDGETS", 1)[1].split("]", 1)[0]
+    for wid in ("sysinfo", "resmon", "resuse", "dockerchart", "dockerpie", "dockerlist"):
+        assert f'"{wid}"' in block
+
+
 def test_dashboard_widget_layout_flex():
     """同行可前后互换；拉高只作用于本卡；内容随卡片长宽铺开。"""
     js = (ROOT / "demo" / "js" / "dashboard.js").read_text(encoding="utf-8")

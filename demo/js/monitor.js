@@ -32,8 +32,9 @@
     allowed = !!(App.user && App.user.role === 'admin' && App.user.monitorEnabled);
     const nav = $('.nav-item[data-nav="monitor"]');
     if (nav) nav.hidden = !allowed;
-    const widget = $('[data-widget="monitor"]');
-    if (widget) widget.style.display = allowed ? '' : 'none';
+    /* 仪表盘上的监控 / Docker 卡片由布局模块按「管理员 + 开关 + 是否收纳」决定显隐 */
+    if (window.Dash && Dash.syncAdmin) Dash.syncAdmin();
+    else $$('[data-admin-widget]').forEach(el => { el.hidden = !allowed; });
     return allowed;
   }
 
@@ -114,29 +115,52 @@
     if (lbl) lbl.textContent = label;
     const subEl = $('#monDiskSub');
     if (subEl) subEl.textContent = sub;
-    const barLbl = $('#barDiskLbl');
-    if (barLbl) barLbl.textContent = picked ? '所选硬盘' : '存储';
+    const barLabel = picked ? '所选硬盘' : '存储';
+    ['#barDiskLbl', '#dashBarDiskLbl'].forEach(sel => {
+      const barLbl = $(sel);
+      if (barLbl) barLbl.textContent = barLabel;
+    });
     return pct;
   }
 
   function renderHwCard(s){
-    const set = (id, text) => {
-      const el = document.getElementById(id);
-      if (el) el.textContent = text || '—';
-    };
-    set('monHwHost', s.host);
-    set('monHwCpu', s.cpuName
+    const cpu = s.cpuName
       ? s.cpuName + (s.cpuCount ? ' · ' + s.cpuCount + ' 线程' : '')
-      : (s.cpuCount ? s.cpuCount + ' 线程' : '—'));
-    set('monHwGpu', s.gpuName || '未检测到');
-    set('monHwOs', s.osName || s.platform);
-    set('monHwMem', (s.memTotalGB != null)
-      ? `${s.memUsedGB} / ${s.memTotalGB} GB（${s.mem}%）` : '—');
-    const up = document.getElementById('monHwUp');
-    if (up){
+      : (s.cpuCount ? s.cpuCount + ' 线程' : '—');
+    const mem = (s.memTotalGB != null)
+      ? `${s.memUsedGB} / ${s.memTotalGB} GB（${s.mem}%）` : '—';
+    const pairs = [
+      ['monHwHost', 'dashHwHost', s.host],
+      ['monHwCpu', 'dashHwCpu', cpu],
+      ['monHwGpu', 'dashHwGpu', s.gpuName || '未检测到'],
+      ['monHwOs', 'dashHwOs', s.osName || s.platform],
+      ['monHwMem', 'dashHwMem', mem],
+    ];
+    pairs.forEach(([a, b, text]) => {
+      [a, b].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text || '—';
+      });
+    });
+    ['monHwUp', 'dashHwUp'].forEach(id => {
+      const up = document.getElementById(id);
+      if (!up) return;
       up.textContent = s.uptime || '—';
       up.title = s.bootTime ? '开机于 ' + s.bootTime : '';
+    });
+  }
+
+  function paintUsageBar(box, v){
+    if (!box) return;
+    const known = v != null && v !== '';
+    const n = known ? v : 0;
+    const fill = $('.bar-fill', box);
+    if (fill){
+      fill.style.width = n + '%';
+      fill.className = 'bar-fill ' + (known ? barCls(n) : '');
     }
+    const num = $('.num', box.parentElement);
+    if (num) num.textContent = known ? n + '%' : '—';
   }
 
   async function loadStats(){
@@ -173,15 +197,11 @@
       $('#monNetVal').innerHTML = (s.netDownMbps || 0).toFixed(1) + '<small>MB/s</small>';
       $('#monNetSub').innerHTML =
         `<span class="up">↑ ${(s.netUpMbps || 0).toFixed(1)} MB/s</span> · 当前上传速率`;
-      /* 资源占用条 */
-      [[s.cpu, $('#barCpu')], [s.mem, $('#barMem')], [diskPct, $('#barDisk')]].forEach(([v, box]) => {
-        if (!box) return;
-        const known = v != null && v !== '';
-        const n = known ? v : 0;
-        const fill = $('.bar-fill', box);
-        fill.style.width = n + '%';
-        fill.className = 'bar-fill ' + (known ? barCls(n) : '');
-        $('.num', box.parentElement).textContent = known ? n + '%' : '—';
+      /* 资源占用条：监控页与仪表盘各一份 */
+      [[s.cpu, '#barCpu', '#dashBarCpu'], [s.mem, '#barMem', '#dashBarMem'],
+       [diskPct, '#barDisk', '#dashBarDisk']].forEach(([v, a, b]) => {
+        paintUsageBar($(a), v);
+        paintUsageBar($(b), v);
       });
       $('#monHost').textContent = `${s.host} · ${s.platform} · 开机于 ${s.bootTime}`;
     } catch (e) { /* 保持占位 */ }
@@ -291,6 +311,7 @@
 
   /* 悬浮：按 X 坐标吸附最近采样点 */
   function bindHover(canvas, wrap, getLen, setHover){
+    if (!canvas || !wrap) return;
     const onPoint = e => {
       const len = getLen();
       if (len < 2) return;
@@ -333,7 +354,7 @@
     ]},
   };
 
-  const resState = { tab: 'cpu', disk: '', on: {}, hover: null };
+  const resState = { tab: 'cpu', disk: '', on: {}, hover: null, dashHover: null };
   const samples = [];
   Object.keys(TAB_DEFS).forEach(t => {
     resState.on[t] = new Set(TAB_DEFS[t].series.map(s => s.k));
@@ -354,56 +375,71 @@
       });
       if (samples.length > MAX_POINTS) samples.shift();
       syncDiskSelect(m.disks || []);
-      if (monitorVisible()) drawResChart();
+      drawResChart();
     } catch (e) { /* 轮询失败静默，下个周期重试 */ }
   }
 
-  /* 多硬盘：填充选择器并记住选中盘 */
+  function resHosts(){
+    return [
+      { series: $('#resSeries'), empty: $('#resEmpty'), canvas: $('#resChart'),
+        wrap: $('#resChartWrap'), tip: $('#resTip'), hover: resState.hover },
+      { series: $('#dashResSeries'), empty: $('#dashResEmpty'), canvas: $('#dashResChart'),
+        wrap: $('#dashResChartWrap'), tip: $('#dashResTip'), hover: resState.dashHover },
+    ].filter(h => h.wrap && h.canvas);
+  }
+  function hostShown(el){
+    return !!(el && el.clientWidth > 8 && el.clientHeight > 8);
+  }
+
+  /* 多硬盘：监控页与仪表盘的下拉保持同一块盘 */
   function syncDiskSelect(disks){
-    const sel = $('#resDiskSel');
-    if (!disks.length){ sel.hidden = true; return; }
+    const sels = $$('[data-res-disk]');
+    if (!sels.length) return;
+    if (!disks.length){ sels.forEach(sel => { sel.hidden = true; }); return; }
     if (!resState.disk || !disks.some(d => d.name === resState.disk)){
       const rootDisk = disks.find(d => d.mountpoint === '/');
       resState.disk = (rootDisk || disks[0]).name;
     }
     const names = disks.map(d => d.name);
-    if (sel.dataset.joined !== names.join(',')){
-      sel.dataset.joined = names.join(',');
-      sel.innerHTML = names.map(n => `<option value="${App.esc(n)}">${App.esc(n)}</option>`).join('');
-    }
-    sel.value = resState.disk;
-    sel.hidden = names.length < 2 || resState.tab !== 'disk';
+    const joined = names.join(',');
+    const html = names.map(n => `<option value="${App.esc(n)}">${App.esc(n)}</option>`).join('');
+    const hide = names.length < 2 || resState.tab !== 'disk';
+    sels.forEach(sel => {
+      if (sel.dataset.joined !== joined){
+        sel.dataset.joined = joined;
+        sel.innerHTML = html;
+      }
+      sel.value = resState.disk;
+      sel.hidden = hide;
+    });
   }
   const diskPick = $('#monDiskPick');
   if (diskPick) diskPick.addEventListener('change', e => {
     monDiskPick = e.target.value;
     if (!lastStats) return;
     const pct = renderDiskStat(lastStats);
-    const box = $('#barDisk');
-    if (!box) return;
-    const known = pct != null && pct !== '';
-    const n = known ? pct : 0;
-    const fill = $('.bar-fill', box);
-    fill.style.width = n + '%';
-    fill.className = 'bar-fill ' + (known ? barCls(n) : '');
-    $('.num', box.parentElement).textContent = known ? n + '%' : '—';
+    paintUsageBar($('#barDisk'), pct);
+    paintUsageBar($('#dashBarDisk'), pct);
   });
-  $('#resDiskSel').addEventListener('change', e => {
+  document.addEventListener('change', e => {
+    if (!e.target.matches('[data-res-disk]')) return;
     resState.disk = e.target.value;
+    $$('[data-res-disk]').forEach(sel => { sel.value = resState.disk; });
     drawResChart();
   });
 
-  /* 图例（可勾选显隐的系列列表） */
+  /* 图例（可勾选显隐的系列列表）。监控页与仪表盘共用同一组开关。 */
   function renderResChips(){
     const def = TAB_DEFS[resState.tab];
-    $('#resSeries').innerHTML = def.series.map(s => `
+    const html = def.series.map(s => `
       <label class="res-ser-item ${resState.on[resState.tab].has(s.k) ? 'on' : ''}" data-ser="${s.k}">
         <i style="background:var(${s.colorVar})"></i>${s.label}
       </label>`).join('') +
       `<span class="res-ser-hint">采样间隔 3 秒 · 近 ${Math.round(MAX_POINTS * POLL_MS / 60000)} 分钟</span>`;
+    $$('[data-res-series]').forEach(el => { el.innerHTML = html; });
   }
-  $('#resSeries').addEventListener('click', e => {
-    const chip = e.target.closest('[data-ser]');
+  document.addEventListener('click', e => {
+    const chip = e.target.closest('[data-res-series] [data-ser]');
     if (!chip) return;
     const k = chip.dataset.ser;
     if (resState.on[resState.tab].has(k)) resState.on[resState.tab].delete(k);
@@ -412,39 +448,42 @@
     drawResChart();
   });
 
-  $('#resTabs').addEventListener('click', e => {
-    const btn = e.target.closest('[data-res]');
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-res-tabs] [data-res]');
     if (!btn || btn.dataset.res === resState.tab) return;
     resState.tab = btn.dataset.res;
     resState.hover = null;
-    $$('#resTabs .res-tab').forEach(b => b.classList.toggle('active', b === btn));
-    $('#resDiskSel').hidden = resState.tab !== 'disk' || $('#resDiskSel').dataset.joined?.split(',').length < 2;
+    resState.dashHover = null;
+    $$('[data-res-tabs] .res-tab').forEach(b =>
+      b.classList.toggle('active', b.dataset.res === resState.tab));
+    syncDiskSelect((samples[samples.length - 1] || {}).disks || []);
     renderResChips();
     drawResChart();
   });
 
-  function showResEmpty(text){
-    const empty = $('#resEmpty');
-    empty.hidden = false; empty.textContent = text;
-    $('#resTip').hidden = true;
-  }
   function drawResChart(){
     const def = TAB_DEFS[resState.tab];
     const series = def.series
       .filter(s => resState.on[resState.tab].has(s.k))
       .map(s => ({ label: s.label, color: cssVar(s.colorVar), unit: s.unit, get: s.get }));
-    if (samples.length < 2){
-      showResEmpty(samples.length ? '数据采集中…' : def.empty); return;
-    }
-    if (resState.tab === 'gpu' && samples.every(s => s.gpuUtil == null)){
-      showResEmpty(def.empty); return;
-    }
-    $('#resEmpty').hidden = true;
-    drawLine({ canvas: $('#resChart'), wrap: $('#resChartWrap'), tip: $('#resTip'),
-               samples, series, hover: resState.hover });
+    let reason = '';
+    if (samples.length < 2) reason = samples.length ? '数据采集中…' : def.empty;
+    else if (resState.tab === 'gpu' && samples.every(s => s.gpuUtil == null)) reason = def.empty;
+    resHosts().forEach(h => {
+      if (!hostShown(h.wrap)) return;
+      if (reason){
+        if (h.empty){ h.empty.hidden = false; h.empty.textContent = reason; }
+        if (h.tip) h.tip.hidden = true;
+        return;
+      }
+      if (h.empty) h.empty.hidden = true;
+      drawLine({ canvas: h.canvas, wrap: h.wrap, tip: h.tip, samples, series, hover: h.hover });
+    });
   }
   bindHover($('#resChart'), $('#resChartWrap'), () => samples.length,
     i => { resState.hover = i; drawResChart(); });
+  bindHover($('#dashResChart'), $('#dashResChartWrap'), () => samples.length,
+    i => { resState.dashHover = i; drawResChart(); });
 
   /* ---------- Docker 监控区 ---------- */
   let ctAll = [];
@@ -454,6 +493,8 @@
   const ctHist = [];         // [{ ts, items: { id: {name, cpu, memMB, up, down} } }]
   let ctTabK = 'mem';
   let ctHover = null;
+  let dashCtHover = null;
+  let ctAvailable = false;
   const ctColorIdx = new Map();
   let ctColorNext = 0;
   const PALETTE_VARS = ['--om-primary', '--om-info', '--om-success', '--om-warning', '--om-danger'];
@@ -499,40 +540,55 @@
     }
   }
 
+  function setDashCtEmpty(title, sub){
+    const empty = $('#dashCtEmpty');
+    const wrap = $('#dashCtTableWrap');
+    if (empty) empty.hidden = false;
+    if (wrap) wrap.hidden = true;
+    const t = $('#dashCtEmptyTitle');
+    const s = $('#dashCtEmptySub');
+    if (t) t.textContent = title;
+    if (s) s.textContent = sub || '';
+  }
+  function showDashCtTable(){
+    const empty = $('#dashCtEmpty');
+    const wrap = $('#dashCtTableWrap');
+    if (empty) empty.hidden = true;
+    if (wrap) wrap.hidden = false;
+  }
+
   async function loadContainers(){
     if (!allowed) return;
     try {
       const d = await API.get('/api/system/containers');
       if (!d.available){
+        ctAvailable = false;
         ctAll = [];
+        const hint = d.hint || 'Docker 未连接';
         $('#containerRows').innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--om-text-3);padding:28px">
-          ${App.esc(d.hint || 'Docker 不可用')}</td></tr>`;
-        $('#qkContainers').innerHTML = '';
+          ${App.esc(hint)}</td></tr>`;
         $('#monRunning').textContent = 'Docker 未连接';
-        $('#dashContainerChip').textContent = '';
+        const chip = $('#dashContainerChip');
+        if (chip) chip.textContent = '';
+        setDashCtEmpty('Docker 未连接', hint);
         renderCtCards(); renderCtFilter(); drawCtChart(); renderCtPie();
         return;
       }
-      ctAll = d.containers;
+      ctAvailable = true;
+      ctAll = d.containers || [];
       pushCtHist();
       const running = ctAll.filter(c => c.status === 'running');
       $('#monRunning').textContent = running.length + ' 运行中';
-      $('#dashContainerChip').textContent = running.length + ' 容器运行中';
+      const chip = $('#dashContainerChip');
+      if (chip) chip.textContent = running.length + ' 容器运行中';
       renderCtFilter();
       renderCtCards();
       renderCtTable();
       drawCtChart();
       renderCtPie();
-      /* 仪表盘容器速览（前 4 个运行中容器） */
-      $('#qkContainers').innerHTML = running.slice(0, 4).map(c => `
-        <div class="qk-row"><span class="qk-name">${App.esc(c.name)}</span>
-          <span class="chip success">运行中</span>
-          <div class="mini-bar" style="margin-left:auto"><div class="bar">
-            <div class="bar-fill ${barCls(c.cpu)}" style="width:${Math.min(c.cpu, 100)}%"></div></div></div>
-          <span class="num text-faint" style="width:34px;text-align:right">${c.cpu}%</span>
-        </div>`).join('') ||
-        '<div style="font-size:12px;color:var(--om-text-3)">暂无运行中的容器</div>';
-    } catch (e) { /* 保持占位 */ }
+    } catch (e) {
+      setDashCtEmpty('暂时没有拿到容器数据', '将按原间隔自动重试');
+    }
   }
 
   /* 容器曲线历史：仅运行中容器入库，已停止容器曲线自然断开 */
@@ -610,23 +666,16 @@
     $('#dcDownSub').textContent = n ? `${n} 个容器实时合计` : '无匹配容器';
   }
 
-  /* ---------- 容器表格（跟随筛选，表头排序） ---------- */
-  function renderCtTable(){
-    const list = ctEffective().sort((a, b) => {
-      const va = ctSortVal(a, ctSort.key), vb = ctSortVal(b, ctSort.key);
-      return (typeof va === 'string' ? va.localeCompare(vb) : va - vb) * ctSort.dir;
-    });
-    $$('.ct-tbl thead th[data-sort]').forEach(th => {
-      th.dataset.dir = th.dataset.sort === ctSort.key ? (ctSort.dir > 0 ? 'asc' : 'desc') : '';
-    });
-    if (!list.length){
-      $('#containerRows').innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--om-text-3);padding:28px">
-        ${ctQuery || ctSel !== null ? '没有符合筛选条件的容器' : '暂无容器'}</td></tr>`;
-      return;
-    }
-    $('#containerRows').innerHTML = list.map(c => {
+  function ctRowsHtml(list, actions){
+    return list.map(c => {
       const [label, cls] = STATUS[c.status] || [c.status, ''];
       const dn = fmtKBps(c.netDownKBps), up = fmtKBps(c.netUpKBps);
+      const act = actions ? `<td><div class="row-actions">
+          ${c.status === 'running'
+            ? `<button class="ct-row-btn" data-c-act="restart" data-cid="${c.id}" title="重启该容器"><svg class="ic"><use href="#i-refresh"/></svg>重启</button>
+               <button class="ct-row-btn danger" data-c-act="stop" data-cid="${c.id}" title="停止该容器"><svg class="ic"><use href="#i-close"/></svg>停止</button>`
+            : `<button class="ct-row-btn primary" data-c-act="start" data-cid="${c.id}" title="启动该容器"><svg class="ic"><use href="#i-zap"/></svg>启动</button>`}
+        </div></td>` : '';
       return `<tr>
         <td><div class="cell-name"><svg class="ic"><use href="#i-box"/></svg>${App.esc(c.name)}
           <div class="cell-sub">${App.esc(c.image)}</div></div></td>
@@ -636,73 +685,120 @@
         <td class="num">${c.memMB ? c.memMB + ' MB' + (c.memPct ? ` <span class="text-faint">(${c.memPct}%)</span>` : '') : '—'}</td>
         <td class="num text-muted">${dn || up ? `↓ ${dn || '0 KB/s'} · ↑ ${up || '0 KB/s'}` : '—'}</td>
         <td class="num text-muted">${App.esc(c.started)}</td>
-        <td><div class="row-actions">
-          ${c.status === 'running'
-            ? `<button class="ct-row-btn" data-c-act="restart" data-cid="${c.id}" title="重启该容器"><svg class="ic"><use href="#i-refresh"/></svg>重启</button>
-               <button class="ct-row-btn danger" data-c-act="stop" data-cid="${c.id}" title="停止该容器"><svg class="ic"><use href="#i-close"/></svg>停止</button>`
-            : `<button class="ct-row-btn primary" data-c-act="start" data-cid="${c.id}" title="启动该容器"><svg class="ic"><use href="#i-zap"/></svg>启动</button>`}
-        </div></td>
+        ${act}
       </tr>`;
     }).join('');
   }
-  $('.ct-tbl thead').addEventListener('click', e => {
+
+  /* ---------- 容器表格（监控页跟随筛选；仪表盘只读、无操作栏） ---------- */
+  function renderCtTable(){
+    if (!ctAvailable) return;
+    const sortList = list => list.slice().sort((a, b) => {
+      const va = ctSortVal(a, ctSort.key), vb = ctSortVal(b, ctSort.key);
+      return (typeof va === 'string' ? va.localeCompare(vb) : va - vb) * ctSort.dir;
+    });
+    $$('.ct-tbl thead th[data-sort]').forEach(th => {
+      th.dataset.dir = th.dataset.sort === ctSort.key ? (ctSort.dir > 0 ? 'asc' : 'desc') : '';
+    });
+    const page = sortList(ctEffective());
+    if (!page.length){
+      $('#containerRows').innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--om-text-3);padding:28px">
+        ${ctQuery || ctSel !== null ? '没有符合筛选条件的容器' : '暂无容器'}</td></tr>`;
+    } else {
+      $('#containerRows').innerHTML = ctRowsHtml(page, true);
+    }
+    const dashBody = $('#dashContainerRows');
+    if (!dashBody) return;
+    const all = sortList(ctAll);
+    if (!all.length){
+      setDashCtEmpty('暂无容器', '当前没有 Docker 容器。连接后会按 5 秒刷新。');
+      dashBody.innerHTML = '';
+      return;
+    }
+    showDashCtTable();
+    dashBody.innerHTML = ctRowsHtml(all, false);
+  }
+  $$('.ct-tbl thead').forEach(thead => thead.addEventListener('click', e => {
     const th = e.target.closest('th[data-sort]');
     if (!th) return;
     const key = th.dataset.sort;
     if (ctSort.key === key) ctSort.dir *= -1;
     else { ctSort.key = key; ctSort.dir = key === 'name' ? 1 : -1; }
     renderCtTable();
-  });
+  }));
 
-  /* ---------- 容器内存占比饼图（跟随筛选） ---------- */
+  /* ---------- 容器内存占比饼图（监控页跟随筛选，仪表盘看全部容器） ---------- */
   const CT_PIE_MAX = 8;        // 最多独立扇区，其余归入「其他」
   const CT_PIE_R = 54;         // 圆环半径（viewBox 140×140）
   const CT_PIE_C = 2 * Math.PI * CT_PIE_R;
-  let ctPieData = [];          // [{ id, name, mb, color }]
-  let ctPieHover = null;       // 当前悬浮的扇区序号：轮询重绘后用于恢复高亮
+  const pieHosts = [
+    { card: '#ctPieCard', segs: '#ctPieSegs', legend: '#ctPieLegend',
+      total: '#ctPieTotal', label: '#ctPieTLabel', hint: '#ctPieHint',
+      filtered: true, data: [], hover: null },
+    { card: '#dashCtPie', segs: '#dashCtPieSegs', legend: '#dashCtPieLegend',
+      total: '#dashCtPieTotal', label: '#dashCtPieLabel', hint: '#dashCtPieHint',
+      filtered: false, data: [], hover: null },
+  ];
 
-  function setPieCenter(main, sub){
-    $('#ctPieTotal').textContent = main;
-    $('#ctPieTLabel').textContent = sub;
+  function pieHostOf(el){
+    return pieHosts.find(h => { const c = $(h.card); return c && c.contains(el); });
   }
-  function pieTotal(){
-    return ctPieData.reduce((a, d) => a + d.mb, 0);
+  function setPieCenter(host, main, sub){
+    const total = $(host.total), label = $(host.label);
+    if (total) total.textContent = main;
+    if (label) label.textContent = sub;
+  }
+  function pieSum(host){
+    return host.data.reduce((a, d) => a + d.mb, 0);
   }
   /* 悬浮：高亮对应扇区，圆心改为显示该容器明细；离开还原合计 */
-  function pieHover(i){
-    ctPieHover = i;
-    $$('#ctPieSegs .ct-pie-seg').forEach((el, k) => {
+  function pieHover(host, i){
+    if (!host) return;
+    host.hover = i;
+    const card = $(host.card);
+    if (!card) return;
+    $$('.ct-pie-seg', card).forEach((el, k) => {
       el.classList.toggle('hot', i !== null && k === i);
       el.classList.toggle('dim', i !== null && k !== i);
     });
-    $$('#ctPieLegend .ct-pie-item').forEach((el, k) =>
+    $$('.ct-pie-item', card).forEach((el, k) =>
       el.classList.toggle('hot', i !== null && k === i));
-    if (i === null || !ctPieData[i]){
-      setPieCenter(fmtMemSum(pieTotal()), '合计占用');
+    if (i === null || !host.data[i]){
+      setPieCenter(host, host.data.length ? fmtMemSum(pieSum(host)) : '--',
+        host.data.length ? '合计占用' : '暂无数据');
       return;
     }
-    const d = ctPieData[i], total = pieTotal();
-    setPieCenter(fmtMemSum(d.mb),
+    const d = host.data[i], total = pieSum(host);
+    setPieCenter(host, fmtMemSum(d.mb),
       `${d.name} · ${total ? (d.mb / total * 100).toFixed(1) : 0}%`);
   }
-  /* 移到卡片空白处（非扇区 / 非图例）时同样复位，避免高亮残留 */
-  $('#ctPieCard').addEventListener('mouseover', e => {
+  document.addEventListener('mouseover', e => {
+    const card = e.target.closest('[data-pie-card]');
+    if (!card) return;
+    const host = pieHostOf(card);
     const t = e.target.closest('[data-pie]');
-    pieHover(t ? +t.dataset.pie : null);
+    pieHover(host, t ? +t.dataset.pie : null);
   });
-  $('#ctPieCard').addEventListener('mouseleave', () => pieHover(null));
+  document.addEventListener('mouseout', e => {
+    const card = e.target.closest('[data-pie-card]');
+    if (!card || card.contains(e.relatedTarget)) return;
+    pieHover(pieHostOf(card), null);
+  });
 
-  function renderCtPie(){
-    const segs = $('#ctPieSegs'), legend = $('#ctPieLegend');
-    const list = ctEffective().filter(c => c.memMB > 0)
-      .sort((a, b) => b.memMB - a.memMB);
+  function renderOnePie(host){
+    const segs = $(host.segs), legend = $(host.legend);
+    if (!segs || !legend) return;
+    const src = host.filtered ? ctEffective() : ctAll;
+    const list = src.filter(c => c.memMB > 0).sort((a, b) => b.memMB - a.memMB);
+    const hint = $(host.hint);
     if (!list.length){
-      ctPieData = [];
-      ctPieHover = null;
+      host.data = [];
+      host.hover = null;
       segs.innerHTML = '';
-      legend.innerHTML = '<div class="ct-pie-empty">暂无内存占用数据</div>';
-      $('#ctPieHint').textContent = '—';
-      setPieCenter('--', '暂无数据');
+      const empty = !ctAvailable ? 'Docker 未连接' : '暂无内存占用数据';
+      legend.innerHTML = `<div class="ct-pie-empty">${empty}</div>`;
+      if (hint) hint.textContent = '—';
+      setPieCenter(host, '--', '暂无数据');
       return;
     }
     const total = list.reduce((a, c) => a + c.memMB, 0);
@@ -715,7 +811,7 @@
                   mb: rest.reduce((a, c) => a + c.memMB, 0),
                   color: cssVar('--om-text-3') });
     }
-    ctPieData = data;
+    host.data = data;
 
     let acc = 0;
     segs.innerHTML = data.map((d, i) => {
@@ -734,55 +830,76 @@
         <span class="vl num">${(d.mb / total * 100).toFixed(1)}% · ${fmtMemSum(d.mb)}</span>
       </div>`).join('');
 
-    $('#ctPieHint').textContent = `${list.length} 个 · ${fmtMemSum(total)}`;
+    if (hint) hint.textContent = `${list.length} 个 · ${fmtMemSum(total)}`;
     /* 重绘会重建扇区与图例节点，需恢复此前的悬浮高亮，否则每 5 秒被冲掉一次 */
-    if (ctPieHover != null) pieHover(ctPieHover);
-    else setPieCenter(fmtMemSum(total), '合计占用');
+    if (host.hover != null) pieHover(host, host.hover);
+    else setPieCenter(host, fmtMemSum(total), '合计占用');
+  }
+  function renderCtPie(){
+    pieHosts.forEach(renderOnePie);
   }
 
-  /* ---------- 容器曲线（默认占用最高前 5，跟随筛选） ---------- */
-  function ctTop5(){
+  /* ---------- 容器曲线（默认占用最高前 5；监控页跟随筛选，仪表盘看全部） ---------- */
+  function ctTop5(filtered){
     const m = CT_METRICS[ctTabK];
-    return ctEffective().filter(c => c.status === 'running')
+    const src = filtered ? ctEffective() : ctAll;
+    return src.filter(c => c.status === 'running')
       .sort((a, b) => (m.get(b) || 0) - (m.get(a) || 0))
       .slice(0, 5);
   }
-  function showCtEmpty(text){
-    const empty = $('#ctEmpty');
-    empty.hidden = false; empty.textContent = text;
-    $('#ctTip').hidden = true;
+  function ctChartHosts(){
+    return [
+      { filtered: true, series: $('#ctSeries'), empty: $('#ctEmpty'),
+        canvas: $('#ctChart'), wrap: $('#ctChartWrap'), tip: $('#ctTip'),
+        hover: ctHover },
+      { filtered: false, series: $('#dashCtSeries'), empty: $('#dashCtChartEmpty'),
+        canvas: $('#dashCtChart'), wrap: $('#dashCtChartWrap'), tip: $('#dashCtTip'),
+        hover: dashCtHover },
+    ].filter(h => h.wrap && h.canvas);
   }
   function drawCtChart(){
     const m = CT_METRICS[ctTabK];
-    const top = ctAll.length ? ctTop5() : [];
-    if (!ctAll.length){ showCtEmpty('Docker 未连接'); $('#ctSeries').innerHTML = ''; return; }
-    if (!top.length){
-      showCtEmpty(ctEffective().length ? '筛选范围内暂无运行中的容器' : '没有符合筛选条件的容器');
-      $('#ctSeries').innerHTML = '';
-      return;
-    }
-    if (ctHist.length < 2){ showCtEmpty('数据采集中…'); return; }
-    $('#ctEmpty').hidden = true;
-    const series = top.map(c => ({
-      label: c.name, color: ctColorOf(c.id), unit: '',
-      get: s => { const it = s.items[c.id]; return it ? it[m.field] : null; },
-      fmt: m.fmt,
-    }));
-    $('#ctSeries').innerHTML = series.map(s => `
-      <span class="res-ser-item on" style="cursor:default"><i style="background:${s.color}"></i>${App.esc(s.label)}</span>`).join('') +
-      `<span class="res-ser-hint">${m.label}占用最高前 ${top.length} · 采样间隔 5 秒</span>`;
-    drawLine({ canvas: $('#ctChart'), wrap: $('#ctChartWrap'), tip: $('#ctTip'),
-               samples: ctHist, series, hover: ctHover });
+    ctChartHosts().forEach(h => {
+      if (!hostShown(h.wrap)) return;
+      const top = ctAvailable && ctAll.length ? ctTop5(h.filtered) : [];
+      const say = (text, clearSeries) => {
+        if (h.empty){ h.empty.hidden = false; h.empty.textContent = text; }
+        if (h.tip) h.tip.hidden = true;
+        if (clearSeries && h.series) h.series.innerHTML = '';
+      };
+      if (!ctAvailable || !ctAll.length){ say('Docker 未连接', true); return; }
+      if (!top.length){
+        if (!h.filtered) say('暂无运行中的容器', true);
+        else say(ctEffective().length ? '筛选范围内暂无运行中的容器' : '没有符合筛选条件的容器', true);
+        return;
+      }
+      if (ctHist.length < 2){ say('数据采集中…', false); return; }
+      if (h.empty) h.empty.hidden = true;
+      const series = top.map(c => ({
+        label: c.name, color: ctColorOf(c.id), unit: '',
+        get: s => { const it = s.items[c.id]; return it ? it[m.field] : null; },
+        fmt: m.fmt,
+      }));
+      if (h.series) h.series.innerHTML = series.map(s => `
+        <span class="res-ser-item on" style="cursor:default"><i style="background:${s.color}"></i>${App.esc(s.label)}</span>`).join('') +
+        `<span class="res-ser-hint">${m.label}占用最高前 ${top.length} · 采样间隔 5 秒</span>`;
+      drawLine({ canvas: h.canvas, wrap: h.wrap, tip: h.tip,
+                 samples: ctHist, series, hover: h.hover });
+    });
   }
   bindHover($('#ctChart'), $('#ctChartWrap'), () => ctHist.length,
     i => { ctHover = i; drawCtChart(); });
+  bindHover($('#dashCtChart'), $('#dashCtChartWrap'), () => ctHist.length,
+    i => { dashCtHover = i; drawCtChart(); });
 
-  $('#ctTabs').addEventListener('click', e => {
-    const btn = e.target.closest('[data-ctab]');
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-ct-tabs] [data-ctab]');
     if (!btn || btn.dataset.ctab === ctTabK) return;
     ctTabK = btn.dataset.ctab;
     ctHover = null;
-    $$('#ctTabs .res-tab').forEach(b => b.classList.toggle('active', b === btn));
+    dashCtHover = null;
+    $$('[data-ct-tabs] .res-tab').forEach(b =>
+      b.classList.toggle('active', b.dataset.ctab === ctTabK));
     drawCtChart();
   });
 
@@ -809,16 +926,21 @@
     loadStats(); loadContainers(); pollMetrics();
   });
 
-  function monitorVisible(){
-    return (document.body.dataset.view || curView) === 'monitor';
+  function redrawCharts(){
+    if (!allowed) return;
+    drawResChart();
+    drawCtChart();
   }
   document.addEventListener('view-change', e => {
     curView = e.detail;
-    if (curView === 'monitor' && allowed){ drawResChart(); drawCtChart(); }
+    requestAnimationFrame(redrawCharts);
   });
-  window.addEventListener('resize', () => {
-    if (monitorVisible() && allowed){ drawResChart(); drawCtChart(); }
+  window.addEventListener('resize', redrawCharts);
+  document.addEventListener('theme-change', () => {
+    redrawCharts();
+    if (allowed) renderCtPie();
   });
+  document.addEventListener('dash-widgets', () => requestAnimationFrame(redrawCharts));
 
   function stopTimers(){
     clearInterval(statTimer); clearInterval(metricTimer); clearInterval(ctTimer);
@@ -839,7 +961,7 @@
   document.addEventListener('monitor-gate', () => {
     if (applyGate()){
       startAll();
-      if (curView === 'monitor'){ drawResChart(); drawCtChart(); }
+      requestAnimationFrame(redrawCharts);
     } else {
       stopTimers();
       if (curView === 'monitor') goView('dashboard');   // 正停留在监控页时回仪表盘

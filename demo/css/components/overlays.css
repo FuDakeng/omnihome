@@ -229,13 +229,6 @@ html[data-motion="off"] .boot-bar i{ animation: none; width: 100%; opacity: .35;
   font-size: 12px; color: var(--om-text-2);
 }
 
-/* ---------- 监控卡片：容器速览（填充留白） ---------- */
-.qk-containers{
-  margin-top: var(--om-space-4);
-  padding-top: var(--om-space-3);
-  border-top: 1px dashed var(--om-border);
-  display: flex; flex-direction: column; gap: 2px;
-}
 .qk-row{
   display: flex; align-items: center; gap: 10px;
   padding: 7px 8px;

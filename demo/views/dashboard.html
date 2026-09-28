@@ -53,7 +53,7 @@
         <div class="grid12" id="dashGrid">
 
           <!-- 系统监控摘要 -->
-          <article class="card lift col-8" data-widget="monitor">
+          <article class="card lift col-8" data-widget="monitor" data-admin-widget>
             <div class="card-head">
               <h3 class="card-title"><svg class="ic"><use href="#i-activity"/></svg>系统监控</h3>
               <span class="chip success">运行正常</span>
@@ -95,12 +95,129 @@
                   </svg>
                 </div>
               </div>
-              <div class="qk-containers">
-                <div id="qkContainers">
-                  <div class="qk-row"><span class="qk-name text-faint">容器状态加载中…</span></div>
-                </div>
-                <button class="card-link" data-nav="monitor" style="align-self:flex-start;margin-top:6px">全部容器 <svg class="ic"><use href="#i-chev-d"/></svg></button>
+            </div>
+          </article>
+
+          <!-- 系统信息：与摘要仪表同一行，窄屏自动落到下一行 -->
+          <article class="card lift col-4 mon-hw-card" data-widget="sysinfo" data-admin-widget hidden>
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-cpu"/></svg>系统信息</h3>
+            </div>
+            <div class="card-pad">
+              <dl class="mon-hw">
+                <div><dt>设备名称</dt><dd id="dashHwHost">—</dd></div>
+                <div><dt>CPU</dt><dd id="dashHwCpu">—</dd></div>
+                <div><dt>GPU</dt><dd id="dashHwGpu">—</dd></div>
+                <div><dt>操作系统</dt><dd id="dashHwOs">—</dd></div>
+                <div><dt>内存</dt><dd id="dashHwMem">—</dd></div>
+                <div><dt>运行时间</dt><dd id="dashHwUp">—</dd></div>
+              </dl>
+            </div>
+          </article>
+
+          <!-- 资源监控曲线：宽主图 + 右侧占用条 -->
+          <article class="card lift col-8" data-widget="resmon" data-admin-widget hidden>
+            <div class="card-head mon-dash-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-activity"/></svg>资源监控</h3>
+              <div class="res-tabs" id="dashResTabs" data-res-tabs>
+                <button type="button" class="res-tab active" data-res="cpu">CPU</button>
+                <button type="button" class="res-tab" data-res="gpu">GPU</button>
+                <button type="button" class="res-tab" data-res="mem">内存</button>
+                <button type="button" class="res-tab" data-res="net">网络</button>
+                <button type="button" class="res-tab" data-res="disk">硬盘</button>
               </div>
+              <select class="res-disk-sel" id="dashResDiskSel" data-res-disk hidden aria-label="选择硬盘"></select>
+            </div>
+            <div class="card-pad res-chart-pad">
+              <div class="res-series" id="dashResSeries" data-res-series></div>
+              <div class="res-chart-wrap" id="dashResChartWrap">
+                <canvas id="dashResChart"></canvas>
+                <div class="res-tip" id="dashResTip" hidden></div>
+                <div class="res-empty" id="dashResEmpty">数据采集中…</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card lift col-4" data-widget="resuse" data-admin-widget hidden>
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-sliders"/></svg>资源占用</h3>
+              <span class="chip no-dot">实时</span>
+            </div>
+            <div class="card-pad">
+              <div class="res-bars">
+                <div><div class="res-bar-lbl"><span>CPU</span><b class="num">--%</b></div><div class="bar" id="dashBarCpu"><div class="bar-fill ok" style="width:0%"></div></div></div>
+                <div><div class="res-bar-lbl"><span>内存</span><b class="num">--%</b></div><div class="bar" id="dashBarMem"><div class="bar-fill" style="width:0%"></div></div></div>
+                <div><div class="res-bar-lbl"><span id="dashBarDiskLbl">存储</span><b class="num">--%</b></div><div class="bar" id="dashBarDisk"><div class="bar-fill" style="width:0%"></div></div></div>
+                <div><div class="res-bar-lbl"><span>Docker</span><b class="num" style="visibility:hidden">0%</b></div><div class="bar"><div class="bar-fill ok" style="width:100%;opacity:.25"></div></div><div class="res-bar-note">容器明细见下方 Docker 组件</div></div>
+              </div>
+            </div>
+          </article>
+
+          <!-- Docker：曲线 + 占比，列表去掉操作栏 -->
+          <article class="card lift col-8" data-widget="dockerchart" data-admin-widget hidden>
+            <div class="card-head mon-dash-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-box"/></svg>容器曲线</h3>
+              <div class="res-tabs" id="dashCtTabs" data-ct-tabs>
+                <button type="button" class="res-tab active" data-ctab="mem">内存占用</button>
+                <button type="button" class="res-tab" data-ctab="cpu">CPU 占用</button>
+                <button type="button" class="res-tab" data-ctab="up">网络 · 上传</button>
+                <button type="button" class="res-tab" data-ctab="down">网络 · 下载</button>
+              </div>
+            </div>
+            <div class="card-pad res-chart-pad">
+              <div class="res-series" id="dashCtSeries"></div>
+              <div class="res-chart-wrap" id="dashCtChartWrap">
+                <canvas id="dashCtChart"></canvas>
+                <div class="res-tip" id="dashCtTip" hidden></div>
+                <div class="res-empty" id="dashCtChartEmpty">数据采集中…</div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card lift col-4" id="dashCtPie" data-widget="dockerpie" data-admin-widget data-pie-card hidden>
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-db"/></svg>内存占比</h3>
+              <span class="chip no-dot num" id="dashCtPieHint">—</span>
+            </div>
+            <div class="card-pad">
+              <div class="ct-pie">
+                <div class="ct-pie-chart">
+                  <svg id="dashCtPieSvg" viewBox="0 0 140 140" role="img" aria-label="容器内存占比">
+                    <circle class="ct-pie-track" cx="70" cy="70" r="54"></circle>
+                    <g id="dashCtPieSegs" transform="rotate(-90 70 70)"></g>
+                  </svg>
+                  <div class="ct-pie-center">
+                    <div class="ct-pie-total num" id="dashCtPieTotal">--</div>
+                    <div class="ct-pie-tlabel" id="dashCtPieLabel">合计占用</div>
+                  </div>
+                </div>
+                <div class="ct-pie-legend" id="dashCtPieLegend"></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card lift col-12" data-widget="dockerlist" data-admin-widget hidden>
+            <div class="card-head">
+              <h3 class="card-title"><svg class="ic"><use href="#i-box"/></svg>Docker 容器</h3>
+              <button class="card-link" data-nav="monitor">管理 <svg class="ic"><use href="#i-chev-d"/></svg></button>
+            </div>
+            <div class="dash-empty" id="dashCtEmpty">
+              <svg class="ic" aria-hidden="true"><use href="#i-box"/></svg>
+              <div class="dash-empty-title" id="dashCtEmptyTitle">容器状态加载中…</div>
+              <div class="dash-empty-sub" id="dashCtEmptySub"></div>
+            </div>
+            <div class="tbl-wrap" id="dashCtTableWrap" hidden>
+              <table class="tbl ct-tbl dash-ct-tbl">
+                <thead><tr>
+                  <th class="sortable" data-sort="name">容器</th>
+                  <th class="sortable" data-sort="status">状态</th>
+                  <th class="sortable" data-sort="cpu">CPU</th>
+                  <th class="sortable" data-sort="memMB">内存</th>
+                  <th class="sortable" data-sort="net">网络</th>
+                  <th class="sortable" data-sort="upSecs">运行时长</th>
+                </tr></thead>
+                <tbody id="dashContainerRows"></tbody>
+              </table>
             </div>
           </article>
 
