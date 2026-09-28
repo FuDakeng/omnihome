@@ -164,8 +164,19 @@
   color: var(--om-text-3);
   font-size: 12px; font-weight: 500; line-height: 16px;
 }
-/* 名称与数值同一套字号、字重、颜色、行高 */
-.sys-m-k,
+/* 图标代替文字标题，颜色与原先的标题一致 */
+.sys-m-ic{
+  width: 14px; height: 14px;
+  color: var(--om-text-2);
+  flex: none;
+}
+.sys-m-dir{
+  width: 11px; height: 11px;
+  stroke: currentColor; fill: none;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+  color: var(--om-text-2);
+  flex: none;
+}
 .sys-m-v{
   font-family: inherit;
   font-size: 12px; font-weight: 500; line-height: 16px;
@@ -181,7 +192,26 @@
   box-sizing: border-box;
 }
 .sys-m.is-pct .sys-m-slot{ width: 5.6ch; }
-.sys-m.is-rate .sys-m-slot{ width: 8.8ch; }
+.sys-m.is-pair{ gap: 4px; }
+.sys-m.is-pair > .sys-m-ic{ margin-right: 2px; }
+.sys-m.is-pair .sys-m-slot{ width: 8.8ch; }
+.sys-m-side{
+  display: inline-flex; align-items: center; gap: 2px;
+  flex: none; height: 18px;
+}
+/* 存储：已用 / 总量，两列等宽右对齐，中间斜杠不参与数值宽度 */
+.sys-m-cap{
+  position: relative;
+  display: inline-flex; align-items: flex-end; justify-content: flex-end;
+  gap: 4px; flex: none;
+  height: 18px; padding-bottom: 3px;
+  box-sizing: border-box;
+}
+.sys-m-slash{
+  font-size: 12px; font-weight: 500; line-height: 16px;
+  color: var(--om-text-3);
+  flex: none;
+}
 .sys-m-v{
   display: block;
   width: 100%;
@@ -189,6 +219,7 @@
   font-variant-numeric: tabular-nums;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.sys-m-cap .sys-m-v{ width: 8.6ch; }
 .sys-m-track{
   position: absolute; left: 0; right: 0; bottom: 0;
   height: 2px;

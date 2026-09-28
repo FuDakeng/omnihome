@@ -1,24 +1,30 @@
 /* ============================================================
    OmniDesk · 仪表盘系统监控横条（天气横条右侧）
-   指标：CPU / 温度 / GPU / 内存 / 存储 / 磁盘读写 / 网络上下行。
+   指标：CPU / 温度 / GPU / 内存 / 存储（已用/总量）/
+         硬盘读写（写入与读取并列）/ 网络收发（上传与下载并列）。
+   横条上不写文字标题，用图标区分；名称在 tooltip 与 aria-label 里。
    勾选与天气横条一样写入账号偏好；未勾选的不渲染。
    窄宽时从右往左收起，避免换行，也避免盖住右侧布局按钮。
    传感器缺失时显示「—」，不抛错、不显示 NaN。
    ============================================================ */
 (() => {
-  const FIELDS = [
-    ['cpu', 'CPU 利用率', 'CPU'],
-    ['cpuTemp', 'CPU 温度', '温度'],
-    ['gpu', 'GPU 利用率', 'GPU'],
-    ['mem', '内存使用率', '内存'],
-    ['disk', '存储占用率', '存储'],
-    ['diskWrite', '存储写入速度', '写入'],
-    ['diskRead', '存储读取速度', '读取'],
-    ['netUp', '网络上传速度', '上传'],
-    ['netDown', '网络下载速度', '下载'],
+  /* 展示分组。parts 里的 key 仍是账号偏好里的原子字段，服务端白名单不变。 */
+  const GROUPS = [
+    { key: 'cpu', label: 'CPU 利用率', icon: 'i-cpu', kind: 'pct', parts: ['cpu'] },
+    { key: 'cpuTemp', label: 'CPU 温度', icon: 'i-thermo', kind: 'pct', parts: ['cpuTemp'] },
+    { key: 'gpu', label: 'GPU 利用率', icon: 'i-gpu', kind: 'pct', parts: ['gpu'] },
+    { key: 'mem', label: '内存使用率', icon: 'i-mem', kind: 'pct', parts: ['mem'] },
+    { key: 'disk', label: '存储', icon: 'i-hdd', kind: 'cap', parts: ['disk'] },
+    { key: 'diskIo', label: '硬盘读写', icon: 'i-diskio', kind: 'pair', parts: [
+      { key: 'diskWrite', label: '写入', dir: 'right' },
+      { key: 'diskRead', label: '读取', dir: 'left' },
+    ]},
+    { key: 'net', label: '网络收发', icon: 'i-swap', kind: 'pair', parts: [
+      { key: 'netUp', label: '上传', dir: 'up' },
+      { key: 'netDown', label: '下载', dir: 'down' },
+    ]},
   ];
-  const ORDER = FIELDS.map(f => f[0]);
-  const META = Object.fromEntries(FIELDS.map(([k, full, short]) => [k, { full, short }]));
+  const ORDER = ['cpu', 'cpuTemp', 'gpu', 'mem', 'disk', 'diskWrite', 'diskRead', 'netUp', 'netDown'];
   const DEFAULT_FIELDS = ORDER.slice();
   const POLL_MS = 2000;
   let timer = null;
@@ -32,6 +38,7 @@
     const got = new Set(raw);
     return ORDER.filter(k => got.has(k));
   };
+  const partKeys = g => g.parts.map(p => (typeof p === 'string' ? p : p.key));
   const allowed = () => !!(App.user && App.user.role === 'admin' && App.user.monitorEnabled);
   const onDash = () => (document.body.dataset.view || 'dashboard') === 'dashboard';
 
@@ -65,6 +72,33 @@
     if (kb >= 0.05) return trimNum(kb) + ' KB/s';
     return '0 KB/s';
   }
+  /* 容量：与监控页 fmtCap 同一档（≥1 TB 用 TB，否则 GB）。不足 1 GB 再降到 MB / KB / B。
+     整数不带多余小数，所以 4 TB 不会写成 4.0 TB。 */
+  function trimFixed(v, digits){
+    if (digits <= 0) return String(Math.round(v));
+    return v.toFixed(digits).replace(/\.0$/, '');
+  }
+  function fmtCap(bytes){
+    const n = finite(bytes);
+    if (n == null || n < 0) return null;
+    if (n === 0) return '0 GB';
+    const tb = n / 1099511627776;
+    if (tb >= 1) return trimFixed(tb, 1) + ' TB';
+    const gb = n / 1073741824;
+    if (gb >= 1) return (gb >= 10 ? trimFixed(gb, 0) : trimFixed(gb, 1)) + ' GB';
+    const mb = n / 1048576;
+    if (mb >= 1) return (mb >= 10 ? trimFixed(mb, 0) : trimFixed(mb, 1)) + ' MB';
+    const kb = n / 1024;
+    if (kb >= 1) return (kb >= 10 ? trimFixed(kb, 0) : trimFixed(kb, 1)) + ' KB';
+    return Math.round(n) + ' B';
+  }
+  function diskCap(d){
+    if (!d) return null;
+    const used = fmtCap(d.diskUsedBytes);
+    const total = fmtCap(d.diskTotalBytes);
+    if (used == null || total == null) return null;
+    return { used, total, text: used + ' / ' + total };
+  }
   /* 只用于轨道填充宽度，不改变展示文案。百分比直接映射，温度按 0–100℃，速率按对数压到 0–100。 */
   function fillRatio(key, d){
     if (!d) return null;
@@ -97,7 +131,6 @@
       case 'cpuTemp': return fmtTemp(d.cpuTemp);
       case 'gpu': return (gpu.available ? fmtPct(gpu.util) : null);
       case 'mem': return fmtPct(d.mem);
-      case 'disk': return fmtPct(d.diskPercent);
       case 'diskWrite': return fmtRate(d.diskWrite);
       case 'diskRead': return fmtRate(d.diskRead);
       case 'netUp': return fmtRate(d.netUp);
@@ -106,42 +139,114 @@
     }
   }
 
+  function visibleGroups(){
+    const sel = new Set(fields());
+    return GROUPS.filter(g => partKeys(g).some(k => sel.has(k)));
+  }
+  function typeIcon(id){
+    return `<svg class="ic sys-m-ic" aria-hidden="true"><use href="#${id}"/></svg>`;
+  }
+  function dirIcon(dir){
+    const paths = {
+      up: 'M6 10V2M3.2 4.7 6 2l2.8 2.7',
+      down: 'M6 2v8M3.2 7.3 6 10l2.8-2.7',
+      right: 'M2 6h8M7.3 3.2 10 6 7.3 8.8',
+      left: 'M10 6H2M4.7 3.2 2 6l2.7 2.8',
+    };
+    return `<svg class="sys-m-dir" viewBox="0 0 12 12" aria-hidden="true"><path d="${paths[dir] || paths.up}"/></svg>`;
+  }
+  function slotHtml(){
+    return '<span class="sys-m-slot"><span class="sys-m-track" aria-hidden="true"><span class="sys-m-fill"></span></span><b class="sys-m-v num">—</b></span>';
+  }
+  function renderGroup(g){
+    const icon = typeIcon(g.icon);
+    if (g.kind === 'pair'){
+      const sides = g.parts.map(p =>
+        `<span class="sys-m-side" data-part="${p.key}">${dirIcon(p.dir)}${slotHtml()}</span>`
+      ).join('');
+      return `<span class="sys-m is-pair" role="group" data-k="${g.key}">${icon}${sides}</span>`;
+    }
+    if (g.kind === 'cap'){
+      return `<span class="sys-m is-cap" role="group" data-k="${g.key}">${icon}<span class="sys-m-cap"><span class="sys-m-track" aria-hidden="true"><span class="sys-m-fill"></span></span><b class="sys-m-v num" data-part="used">—</b><span class="sys-m-slash" aria-hidden="true">/</span><b class="sys-m-v num" data-part="total">—</b></span></span>`;
+    }
+    return `<span class="sys-m is-pct" role="group" data-k="${g.key}">${icon}${slotHtml()}</span>`;
+  }
+  function setTip(el, text){
+    if (!el) return;
+    el.title = text;
+    el.setAttribute('aria-label', text);
+  }
+  function setFill(root, key){
+    const fill = root && root.querySelector('.sys-m-fill');
+    if (!fill) return;
+    const ratio = fillRatio(key, last);
+    fill.style.width = (ratio == null ? 0 : ratio) + '%';
+  }
+
   function renderMetrics(){
     const row = $('#sysMetrics');
     if (!row) return;
-    const sel = fields();
-    const key = sel.join(',');
+    const groups = visibleGroups();
+    const key = groups.map(g => g.key).join(',');
     if (row.dataset.key !== key){
       row.dataset.key = key;
-      row.innerHTML = sel.map(k => {
-        const m = META[k];
-        const kind = (k === 'diskWrite' || k === 'diskRead' || k === 'netUp' || k === 'netDown') ? 'is-rate' : 'is-pct';
-        return `<span class="sys-m ${kind}" data-k="${k}"><span class="sys-m-k">${m.short}</span><span class="sys-m-slot"><span class="sys-m-track" aria-hidden="true"><span class="sys-m-fill"></span></span><b class="sys-m-v num">—</b></span></span>`;
-      }).join('') + '<span class="sys-more" id="sysMore" hidden>…</span>';
+      row.innerHTML = groups.map(renderGroup).join('')
+        + '<span class="sys-more" id="sysMore" hidden>…</span>';
     }
-    sel.forEach(k => {
-      const el = row.querySelector(`.sys-m[data-k="${k}"]`);
+    const bits = [];
+    groups.forEach(g => {
+      const el = row.querySelector(`.sys-m[data-k="${g.key}"]`);
       if (!el) return;
+      if (g.kind === 'pair'){
+        const parts = [];
+        let any = false;
+        g.parts.forEach(p => {
+          const side = el.querySelector(`.sys-m-side[data-part="${p.key}"]`);
+          if (!side) return;
+          const text = valueOf(p.key, last);
+          const miss = text == null;
+          if (!miss) any = true;
+          const shown = miss ? '—' : text;
+          const v = side.querySelector('.sys-m-v');
+          if (v) v.textContent = shown;
+          side.classList.toggle('is-miss', miss);
+          setTip(side, p.label + (miss ? ' · 暂无数据' : ' ' + shown));
+          setFill(side, p.key);
+          parts.push(p.label + ' ' + shown);
+        });
+        el.classList.toggle('is-miss', !any);
+        const summary = g.label + ' · ' + parts.join(' · ');
+        setTip(el, summary);
+        bits.push(summary);
+        return;
+      }
+      if (g.kind === 'cap'){
+        const cap = diskCap(last);
+        const miss = cap == null;
+        const usedEl = el.querySelector('[data-part="used"]');
+        const totalEl = el.querySelector('[data-part="total"]');
+        if (usedEl) usedEl.textContent = miss ? '—' : cap.used;
+        if (totalEl) totalEl.textContent = miss ? '—' : cap.total;
+        el.classList.toggle('is-miss', miss);
+        setFill(el, 'disk');
+        const summary = g.label + (miss ? ' · 暂无数据' : ' ' + cap.text);
+        setTip(el, summary);
+        bits.push(summary);
+        return;
+      }
+      const k = partKeys(g)[0];
       const text = valueOf(k, last);
       const miss = text == null;
       el.classList.toggle('is-miss', miss);
       const v = el.querySelector('.sys-m-v');
       if (v) v.textContent = miss ? '—' : text;
-      const fill = el.querySelector('.sys-m-fill');
-      if (fill){
-        const ratio = fillRatio(k, last);
-        fill.style.width = (ratio == null ? 0 : ratio) + '%';
-      }
-      el.title = META[k].full + (miss ? ' · 暂无数据' : ' ' + text);
+      setFill(el, k);
+      const summary = g.label + (miss ? ' · 暂无数据' : ' ' + text);
+      setTip(el, summary);
+      bits.push(summary);
     });
     const strip = $('#sysStrip');
-    if (strip){
-      const bits = sel.map(k => {
-        const t = valueOf(k, last);
-        return META[k].full + ' ' + (t == null ? '—' : t);
-      });
-      strip.title = bits.join(' · ');
-    }
+    if (strip) strip.title = bits.join(' · ');
     fit();
   }
 
@@ -198,9 +303,11 @@
     const box = $('#sysFieldsList');
     if (!box) return;
     const sel = new Set(fields());
-    box.innerHTML = FIELDS.map(([k, label]) => `
-      <label class="tag-opt"><input type="checkbox" value="${k}" ${sel.has(k) ? 'checked' : ''}>
-      <span>${label}</span></label>`).join('');
+    box.innerHTML = GROUPS.map(g => {
+      const on = partKeys(g).some(k => sel.has(k));
+      return `<label class="tag-opt"><input type="checkbox" value="${g.key}" ${on ? 'checked' : ''}>
+      <span>${g.label}</span></label>`;
+    }).join('');
   }
 
   function setVisible(on){
@@ -266,8 +373,10 @@
   if (fieldsList) fieldsList.addEventListener('change', e => {
     const cb = e.target.closest('input[type="checkbox"]');
     if (!cb) return;
+    const group = GROUPS.find(g => g.key === cb.value);
+    const keys = group ? partKeys(group) : [];
     const set = new Set(fields());
-    if (cb.checked) set.add(cb.value); else set.delete(cb.value);
+    keys.forEach(k => { if (cb.checked) set.add(k); else set.delete(k); });
     const nextFields = ORDER.filter(k => set.has(k));
     App.prefs.sysbar = Object.assign({}, prefs(), { fields: nextFields });
     API.put('/api/settings', { sysbar: { fields: nextFields } })

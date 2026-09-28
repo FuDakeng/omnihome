@@ -53,6 +53,8 @@ def test_container_without_host_does_not_report_overlay(monkeypatch):
     assert summary["percent"] is None
     assert summary["usedTB"] is None
     assert summary["totalTB"] is None
+    assert summary["usedBytes"] is None
+    assert summary["totalBytes"] is None
     assert summary["volumes"] == []
     assert "/:/host:ro" in summary["hint"]
     assert "容器视角" in summary["hint"]
@@ -67,6 +69,8 @@ def test_bare_metal_without_host_mount_uses_local_root(monkeypatch):
     assert summary["scope"] == "local"
     assert summary["storageFallback"] is False
     assert summary["percent"] == 10
+    assert summary["usedBytes"] == 100
+    assert summary["totalBytes"] == 1000
     assert summary["volumes"] == []
 
 
@@ -79,6 +83,8 @@ def test_host_volumes_sum_without_double_counting_scope(monkeypatch):
     assert summary["scope"] == "host"
     assert summary["storageFallback"] is False
     assert summary["percent"] == 27
+    assert summary["usedBytes"] == 400
+    assert summary["totalBytes"] == 1500
     assert summary["hint"] == ""
 
 

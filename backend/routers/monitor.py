@@ -322,12 +322,14 @@ def _host_volumes() -> list:
 
 
 def _storage_unavailable(scope: str, hint: str) -> dict:
-    """容量未知。percent / usedTB / totalTB 必须是 null，前端只能显示「—」。"""
+    """容量未知。percent / usedTB / totalTB / 字节必须是 null，前端只能显示「—」。"""
     return {
         "scope": scope,
         "percent": None,
         "usedTB": None,
         "totalTB": None,
+        "usedBytes": None,
+        "totalBytes": None,
         "volumes": [],
         "storageFallback": True,
         "hint": hint,
@@ -349,6 +351,8 @@ def _storage_summary(root_disk) -> dict:
             "percent": round(used / total * 100) if total else 0,
             "usedTB": round(used / 1099511627776, 1),
             "totalTB": round(total / 1099511627776, 1),
+            "usedBytes": used,
+            "totalBytes": total,
             "volumes": vols,
             "storageFallback": False,
             "hint": "",
@@ -362,6 +366,8 @@ def _storage_summary(root_disk) -> dict:
         "percent": round(root_disk.percent),
         "usedTB": round(root_disk.used / 1099511627776, 1),
         "totalTB": round(root_disk.total / 1099511627776, 1),
+        "usedBytes": int(root_disk.used),
+        "totalBytes": int(root_disk.total),
         "volumes": [],
         "storageFallback": False,
         "hint": "",
@@ -1121,6 +1127,7 @@ def system_metrics(authorization: Optional[str] = Header(None)):
         "disk": {n: (io.read_bytes, io.write_bytes) for n, io in io_all.items()},
     }
     disk_read, disk_write = _sum_disk_rates(disks)
+    cap = _disk_capacity_for_strip()
     return {
         "ts": int(now),
         "cpu": round(cpu, 1),
@@ -1131,7 +1138,9 @@ def system_metrics(authorization: Optional[str] = Header(None)):
         "disks": disks,
         "diskRead": disk_read,
         "diskWrite": disk_write,
-        "diskPercent": _disk_percent_for_strip(),
+        "diskPercent": cap["percent"],
+        "diskUsedBytes": cap["usedBytes"],
+        "diskTotalBytes": cap["totalBytes"],
         "diskTemp": disk_temp,
         "gpu": _gpu_metrics(),
     }
@@ -1151,27 +1160,49 @@ def _sum_disk_rates(disks: list) -> tuple:
     return round(read, 2), round(write, 2)
 
 
-_DISK_PCT_CACHE = {"ts": 0.0, "val": None}
+_DISK_PCT_CACHE = {"ts": 0.0, "val": None, "used": None, "total": None}
 
 
-def _disk_percent_for_strip():
-    """存储占用百分比。未知、容器回退或超出 0–100 时返回 None，前端显示「—」。"""
+def _finite_num(v):
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    if v != v:  # NaN
+        return None
+    return float(v)
+
+
+def _disk_capacity_for_strip():
+    """存储占用。未知、容器回退或百分比超出 0–100 时，百分比与字节都是 None。
+
+    字节给仪表盘横条显示「已用 / 总量」。百分比仍用于横条底部填充，口径与原来一致。
+    """
     now = time.time()
-    if _DISK_PCT_CACHE["ts"] and now - _DISK_PCT_CACHE["ts"] < 10:
-        return _DISK_PCT_CACHE["val"]
-    val = None
+    c = _DISK_PCT_CACHE
+    if c["ts"] and now - c["ts"] < 10:
+        return {"percent": c["val"], "usedBytes": c.get("used"), "totalBytes": c.get("total")}
+    percent = used = total = None
     try:
         import psutil
         summary = _storage_summary(psutil.disk_usage("/"))
         if not summary.get("storageFallback"):
-            pct = summary.get("percent")
-            if isinstance(pct, (int, float)) and not isinstance(pct, bool):
-                pct = float(pct)
-                if 0 <= pct <= 100:
-                    val = round(pct, 1)
+            pct = _finite_num(summary.get("percent"))
+            if pct is not None and 0 <= pct <= 100:
+                percent = round(pct, 1)
+                ub = _finite_num(summary.get("usedBytes"))
+                tb = _finite_num(summary.get("totalBytes"))
+                if ub is not None and tb is not None and ub >= 0 and tb > 0:
+                    used = int(round(ub))
+                    total = int(round(tb))
     except Exception:
-        val = None
-    _DISK_PCT_CACHE["ts"] = now
-    _DISK_PCT_CACHE["val"] = val
-    return val
+        percent = used = total = None
+    c["ts"] = now
+    c["val"] = percent
+    c["used"] = used
+    c["total"] = total
+    return {"percent": percent, "usedBytes": used, "totalBytes": total}
+
+
+def _disk_percent_for_strip():
+    """存储占用百分比。未知、容器回退或超出 0–100 时返回 None，前端显示「—」。"""
+    return _disk_capacity_for_strip()["percent"]
 
