@@ -53,9 +53,24 @@ def test_disk_percent_hides_fallback_and_out_of_range(monkeypatch):
 
     monkeypatch.setattr(mon, "_storage_summary", lambda root: {
         "storageFallback": False, "percent": 42,
+        "usedBytes": 1319413953331, "totalBytes": 4398046511104,
     })
-    mon._DISK_PCT_CACHE.update({"ts": 0.0, "val": None})
+    mon._DISK_PCT_CACHE.update({"ts": 0.0, "val": None, "used": None, "total": None})
     assert mon._disk_percent_for_strip() == 42.0
+    cap = mon._disk_capacity_for_strip()
+    assert cap["percent"] == 42.0
+    assert cap["usedBytes"] == 1319413953331
+    assert cap["totalBytes"] == 4398046511104
+
+    monkeypatch.setattr(mon, "_storage_summary", lambda root: {
+        "storageFallback": False, "percent": 140,
+        "usedBytes": 5, "totalBytes": 1,
+    })
+    mon._DISK_PCT_CACHE.update({"ts": 0.0, "val": None, "used": 9, "total": 9})
+    cap = mon._disk_capacity_for_strip()
+    assert cap["percent"] is None
+    assert cap["usedBytes"] is None
+    assert cap["totalBytes"] is None
 
 
 def test_dashboard_strip_markup_and_styles():
@@ -72,6 +87,13 @@ def test_dashboard_strip_markup_and_styles():
     mobile = (ROOT / "demo" / "css" / "mobile.css").read_text(encoding="utf-8")
     assert "#sysStrip" in mobile
     js = (ROOT / "demo" / "js" / "sysbar.js").read_text(encoding="utf-8")
-    for key in ("cpuTemp", "diskWrite", "diskRead", "netUp", "netDown"):
+    for key in ("cpuTemp", "diskWrite", "diskRead", "netUp", "netDown", "diskUsedBytes", "diskTotalBytes"):
         assert key in js
     assert "—" in js
+    assert "硬盘读写" in js and "网络收发" in js
+    assert "sys-m-ic" in js and "aria-label" in js
+    assert "sys-m-k" not in js
+    icons = (ROOT / "demo" / "views" / "icons.html").read_text(encoding="utf-8")
+    for icon in ("i-gpu", "i-mem", "i-hdd", "i-diskio"):
+        assert f'id="{icon}"' in icons
+    assert ".sys-m-ic" in css and ".sys-m-cap" in css and ".sys-m-side" in css
