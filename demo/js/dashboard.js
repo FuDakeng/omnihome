@@ -8,19 +8,32 @@
 const Dash = (() => {
   /* 组件注册表：id → 标题与图标（与 index.html 的 data-widget 对应） */
   const WIDGETS = {
-    monitor:   { title: '系统监控',     icon: 'i-activity' },
-    quicknav:  { title: '快捷导航',     icon: 'i-bookmark' },
-    calendar:  { title: '日历',         icon: 'i-clock' },
-    word:      { title: '每日单词',     icon: 'i-note' },
-    vault:     { title: '密码保险库',   icon: 'i-shield' },
-    quicknote: { title: '灵感速记',     icon: 'i-pen' },
-    plan:      { title: '今日计划',     icon: 'i-check' },
-    translate: { title: '翻译',         icon: 'i-globe' },
-    passgen:   { title: '强密码生成',   icon: 'i-key' },
+    monitor:     { title: '系统监控',     icon: 'i-activity' },
+    sysinfo:     { title: '系统信息',     icon: 'i-cpu' },
+    resmon:      { title: '资源监控',     icon: 'i-activity' },
+    resuse:      { title: '资源占用',     icon: 'i-sliders' },
+    dockerchart: { title: '容器曲线',     icon: 'i-box' },
+    dockerpie:   { title: '内存占比',     icon: 'i-db' },
+    dockerlist:  { title: 'Docker 容器',  icon: 'i-box' },
+    quicknav:    { title: '快捷导航',     icon: 'i-bookmark' },
+    calendar:    { title: '日历',         icon: 'i-clock' },
+    word:        { title: '每日单词',     icon: 'i-note' },
+    vault:       { title: '密码保险库',   icon: 'i-shield' },
+    quicknote:   { title: '灵感速记',     icon: 'i-pen' },
+    plan:        { title: '今日计划',     icon: 'i-check' },
+    translate:   { title: '翻译',         icon: 'i-globe' },
+    passgen:     { title: '强密码生成',   icon: 'i-key' },
   };
-  /* 默认上盘的组件；翻译 / 强密码需用户主动添加，避免挤掉现有布局 */
-  const DEFAULT_ORDER = ['monitor', 'quicknav', 'calendar', 'word', 'vault', 'quicknote', 'plan'];
+  /* 默认上盘的组件；翻译 / 强密码需用户主动添加，避免挤掉现有布局。
+     监控类组件默认排在摘要仪表后面，仅管理员且功能开启时可见。 */
+  const DEFAULT_ORDER = [
+    'monitor', 'sysinfo', 'resmon', 'resuse',
+    'dockerchart', 'dockerpie', 'dockerlist',
+    'quicknav', 'calendar', 'word', 'vault', 'quicknote', 'plan',
+  ];
   const OPT_IN = ['translate', 'passgen'];
+  /* 已有布局里没有这些 id 时，插到「系统监控」后面，而不是甩到整页末尾 */
+  const FRESH_GROUP = ['sysinfo', 'resmon', 'resuse', 'dockerchart', 'dockerpie', 'dockerlist'];
 
   /* 尺寸拖拽边界：跨列 3~12（低于 3 列卡片内容无法阅读），高度 160px 起按 20px 吸附 */
   const COL_MIN = 3, COL_MAX = 12;
@@ -59,18 +72,46 @@ const Dash = (() => {
     applyAllSizes();
   }
 
-  /* 按保存顺序重排卡片（未记录的组件按默认顺序补在末尾），收纳的隐藏 */
+  function adminOn(){
+    return !!(window.App && App.user && App.user.role === 'admin' && App.user.monitorEnabled);
+  }
+  function isAdminWidget(id){
+    const c = cardOf(id);
+    return !!(c && c.hasAttribute('data-admin-widget'));
+  }
+
+  /* 管理员监控组件：未开启时收起，且不出现在「添加组件」里 */
+  function paintVisibility(){
+    const on = adminOn();
+    cards().forEach(c => {
+      const id = c.dataset.widget;
+      const blocked = c.hasAttribute('data-admin-widget') && !on;
+      c.hidden = removed.includes(id) || blocked;
+      c.style.display = '';
+    });
+  }
+
+  /* 按保存顺序重排卡片。新的监控组件紧跟在「系统监控」后：摘要 → 明细 → Docker。 */
   function apply(order){
-    const seq = [
-      ...order,
-      ...DEFAULT_ORDER.filter(id => !order.includes(id)),
-      ...OPT_IN.filter(id => !order.includes(id)),
-    ];
+    const known = new Set([...order, ...removed]);
+    const fresh = FRESH_GROUP.filter(id => WIDGETS[id] && !known.has(id));
+    const seq = order.filter(id => WIDGETS[id]);
+    if (fresh.length){
+      let at = seq.indexOf('monitor');
+      /* 还没保存过布局时，order 为空，先放上摘要卡再接新组件，避免摘要被挤到后面 */
+      if (at < 0 && !removed.includes('monitor')){
+        seq.unshift('monitor');
+        at = 0;
+      }
+      seq.splice(at >= 0 ? at + 1 : 0, 0, ...fresh);
+    }
+    DEFAULT_ORDER.filter(id => !seq.includes(id)).forEach(id => seq.push(id));
+    OPT_IN.filter(id => !seq.includes(id)).forEach(id => seq.push(id));
     seq.forEach(id => {
       const c = cardOf(id);
       if (c) grid.appendChild(c);
     });
-    cards().forEach(c => { c.hidden = removed.includes(c.dataset.widget); });
+    paintVisibility();
   }
 
   function save(){
@@ -259,8 +300,14 @@ const Dash = (() => {
   }
 
   /* ---------- 添加组件弹窗 ---------- */
+  function canAdd(id){
+    if (!WIDGETS[id] || !removed.includes(id)) return false;
+    if (isAdminWidget(id) && !adminOn()) return false;
+    return true;
+  }
+
   function renderAddList(){
-    const list = removed.filter(id => WIDGETS[id]);
+    const list = removed.filter(canAdd);
     $('#addWidgetList').innerHTML = list.length
       ? list.map(id => `
         <button class="widget-add-tile" data-widget-add="${id}">
@@ -273,11 +320,16 @@ const Dash = (() => {
 
   function addWidget(id){
     if (!WIDGETS[id]) return;
+    if (isAdminWidget(id) && !adminOn()){
+      showToast('系统监控与 Docker 组件仅管理员可添加', 'err');
+      return;
+    }
     removed = removed.filter(x => x !== id);
     const c = cardOf(id);
     if (c){ c.hidden = false; grid.appendChild(c); applySize(c); }
     save();
     renderAddList();
+    document.dispatchEvent(new CustomEvent('dash-widgets'));
     showToast(`已添加「${WIDGETS[id].title}」`);
   }
 
@@ -435,11 +487,12 @@ const Dash = (() => {
     });
 
     App.onEnter(load);
+    document.addEventListener('monitor-gate', paintVisibility);
     setEditing(false);
   }
 
   init();
-  return { load };
+  return { load, syncAdmin: paintVisibility, removedHas: id => removed.includes(id) };
 })();
 
 export { Dash };

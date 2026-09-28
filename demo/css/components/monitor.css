@@ -329,3 +329,82 @@ body.sidebar-collapsed .ct-filter .drop-panel{
 .ct-row-btn.primary{ border-color: var(--om-primary); color: var(--om-primary); background: var(--om-primary-ghost); }
 .ct-row-btn .ic{ width: 12px; height: 12px; }
 
+/* ---------- 仪表盘上的监控 / Docker 卡片 ---------- */
+.res-bars{ display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.res-bar-lbl{
+  display: flex; justify-content: space-between; gap: 8px;
+  font-size: 13px; margin-bottom: 7px; min-width: 0;
+}
+.res-bar-note{ font-size: 11px; color: var(--om-text-3); margin-top: 5px; }
+.mon-dash-head{ flex-wrap: wrap; row-gap: 8px; min-width: 0; }
+.mon-dash-head .card-title{ flex: none; }
+.mon-dash-head .res-tabs{
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+}
+.mon-dash-head .res-tabs::-webkit-scrollbar{ display: none; }
+.mon-dash-head .res-tab{ flex: none; white-space: nowrap; }
+.mon-dash-head .res-disk-sel{ flex: none; max-width: 100%; min-width: 0; }
+#dashGrid [data-widget] > .card-pad,
+#dashGrid [data-widget] > .tbl-wrap,
+#dashGrid [data-widget] > .dash-empty{
+  min-width: 0;
+  max-width: 100%;
+}
+#dashGrid [data-widget] canvas{ max-width: 100%; }
+#dashGrid [data-widget="resmon"] .res-chart-wrap,
+#dashGrid [data-widget="dockerchart"] .res-chart-wrap{
+  width: 100%;
+  min-width: 0;
+  height: 220px;
+  overflow: hidden;
+}
+#dashGrid [data-widget="resmon"].has-h .res-chart-wrap,
+#dashGrid [data-widget="dockerchart"].has-h .res-chart-wrap{
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 160px;
+}
+#dashGrid [data-widget="dockerpie"] .ct-pie{
+  flex-wrap: wrap;
+  justify-content: center;
+}
+#dashGrid [data-widget="dockerpie"] .ct-pie-legend{
+  flex: 1 1 160px;
+  min-width: 0;
+}
+#dashGrid [data-widget="dockerpie"] .ct-pie-item{ min-width: 0; }
+#dashGrid [data-widget="dockerpie"] .ct-pie-tlabel{
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+#dashGrid:not(.editing) [data-widget="dockerlist"]{ overflow: hidden; }
+#dashGrid [data-widget="dockerlist"] .tbl-wrap{ max-width: 100%; }
+#dashGrid [data-widget="dockerlist"] .cell-name{
+  white-space: normal;
+  overflow-wrap: anywhere;
+  align-items: flex-start;
+}
+#dashGrid [data-widget="dockerlist"] .cell-sub{ overflow-wrap: anywhere; }
+.dash-empty{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 148px;
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--om-text-3);
+}
+.dash-empty .ic{ width: 28px; height: 28px; opacity: .65; }
+.dash-empty-title{ font-size: 13px; font-weight: 600; color: var(--om-text-2); }
+.dash-empty-sub{ font-size: 12px; max-width: 36em; line-height: 1.5; }
+.dash-empty[hidden], .tbl-wrap[hidden]{ display: none; }
+
