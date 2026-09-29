@@ -80,7 +80,16 @@ import { S } from './state.js';
     const el = id
       ? (root ? root.querySelector('[id="' + String(id).replace(/"/g, '') + '"]') : document.getElementById(id))
       : null;
-    if (el){ el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    if (el){
+      /* 分享预览自己滚动。scrollIntoView 会连带滚动外层，大纲就跟着跑。 */
+      if (root){
+        const top = el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
+        root.scrollTo({ top: Math.max(0, top - 12), behavior: 'smooth' });
+      } else {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      return;
+    }
     const ta = $('#edSrc');
     if (ta && S.currentMode !== 'preview' && isFinite(line)){
       const lines = ta.value.split('\n');

@@ -76,21 +76,49 @@ html[data-motion="off"] .boot-bar i{ animation: none; width: 100%; opacity: .35;
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
 }
 .kb-share-view-actions{ display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: none; }
+.kb-share-view-actions .icon-btn{ flex: none; }
 .kb-share-view-layout{
-  display: grid; grid-template-columns: 180px minmax(0, 1fr) auto;
-  flex: 1; min-height: 0; border-top: 1px solid var(--om-border);
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) auto;
+  /* 行高锁在弹层剩余空间里。默认 auto 行会按正文撑开，
+     外层 modal overflow:hidden 把超出部分裁掉，预览就无法向下滚。 */
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1; min-height: 0; overflow: hidden;
+  border-top: 1px solid var(--om-border);
 }
 #kbShareViewList{
-  overflow: auto; padding: 8px 6px; border-right: 1px solid var(--om-border);
+  overflow: auto; min-height: 0; padding: 8px 6px; border-right: 1px solid var(--om-border);
 }
 #kbShareViewList .note-item.active{ background: var(--om-primary-ghost); color: var(--om-primary); }
 #kbShareViewList .kb-folder{ margin: 0; }
 #kbShareViewList .kb-folder-row{ padding: 5px 6px; }
-.kb-share-ed{ display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.kb-share-ed .ed-body{ flex: 1; min-height: 0; }
+.kb-share-ed{
+  display: flex; flex-direction: column;
+  min-width: 0; min-height: 0; height: 100%; max-height: 100%;
+  overflow: hidden;
+}
+/* 工具栏 / 状态栏锁定高度，只让正文区收缩并滚动 */
+.kb-share-ed > *:not(.ed-body){ flex: none; }
+.kb-share-ed .ed-body{
+  flex: 1 1 auto; min-height: 0; overflow: hidden;
+  grid-template-rows: minmax(0, 1fr);
+}
+/* .md-preview 全局是 overflow:visible。在分享弹层里它会把网格行撑到全文高度，
+   只读和可编辑的预览都无法滚动，右侧大纲也被拉出视口。
+   预览、分屏源码、实时编辑区各自在定高格子里滚动，大纲列保持整列高度。 */
+.kb-share-ed .ed-body > .md-preview,
+.kb-share-ed .ed-body > .md-src,
+.kb-share-ed .ed-body > .livemd{
+  min-width: 0; min-height: 0;
+  height: 100%; max-height: 100%;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
 .kb-share-outline{
-  position: relative; top: auto; align-self: stretch;
-  height: 100%; max-height: none;
+  position: sticky; top: 0; align-self: stretch;
+  height: 100%; max-height: 100%; min-height: 0;
+  overflow: hidden;
   border-radius: 0; border-top: 0; border-bottom: 0; border-right: 0;
 }
 .modal{

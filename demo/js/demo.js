@@ -158,8 +158,12 @@ function setMode(mode, persist = true, origin){
   if (origin && prev && prev !== resolved && !motionReduced()) runThemeTransition(apply, origin);
   else apply();
 }
-$('#themeToggle').addEventListener('click', e =>
-  setMode(root.dataset.theme === 'dark' ? 'light' : 'dark', true, e.currentTarget));
+/* 顶栏与分享页共用同一套明暗：点哪颗都在日间 / 夜间之间切换，并记到本机 */
+function onThemeToggle(e){
+  setMode(root.dataset.theme === 'dark' ? 'light' : 'dark', true, e.currentTarget);
+}
+$('#themeToggle').addEventListener('click', onThemeToggle);
+$('#kbShareTheme')?.addEventListener('click', onThemeToggle);
 $$('#modeSeg .seg-btn').forEach(b =>
   b.addEventListener('click', () => setMode(b.dataset.mode, true, b)));
 
