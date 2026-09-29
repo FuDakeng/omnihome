@@ -263,13 +263,24 @@
   box-sizing: border-box;
   max-width: 100%;
   margin-top: 4px;
-  padding: 8px 10px 10px;
+  padding: 12px 14px 14px;
   border: 1px solid var(--om-border);
-  border-radius: 8px;
+  border-radius: var(--om-radius-sm);
   background: var(--om-surface);
+  box-shadow: var(--om-shadow-sm);
   overflow-x: auto;
+  overflow-y: hidden;
   white-space: normal;
   color: var(--om-text-1);
+  font-family: var(--om-font);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.md-mermaid .lm-mermaid-chart{
+  color: var(--om-text-1);
+  font-family: var(--om-font);
+  font-size: 14px;
+  line-height: 1.45;
 }
 .md-mermaid .lm-mermaid-chart:empty::after{
   content: '正在渲染图表…';

@@ -5,7 +5,7 @@
 import json
 from pathlib import Path
 
-VERSION = "0.3.24"
+VERSION = "0.3.25"
 STAGE = "知识库"
 
 _CHANGELOG_FILE = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
