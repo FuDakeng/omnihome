@@ -896,6 +896,8 @@ def run_suite(engine):
     check(f"[{engine}] 改密度不冲掉折叠",
           layout.get("compact") is True and layout.get("sidebarCollapsed") is True, str(layout))
 
+    check_plugin_downloads(engine, tok)
+
     print("-- 监控横条字段 --")
     r = client.get("/api/settings", headers=HA(tok))
     sb = (r.json() or {}).get("sysbar") or {}
@@ -920,6 +922,43 @@ def run_suite(engine):
     check(f"[{engine}] 改布局不冲掉监控横条",
           sb.get("fields") == [] and (r.json() or {}).get("layout", {}).get("sidebarCollapsed") is True,
           str(sb))
+
+
+def check_plugin_downloads(engine, tok):
+    """下载接口必须返回 zip。漏导入打包函数时会 500 纯文本，浏览器存成 .txt。"""
+    print("-- 插件与扩展下载 --")
+    r = client.get("/api/plugin.zip")
+    check(f"[{engine}] 插件下载未登录", r.status_code == 401, r.text[:120])
+    r = client.get("/api/plugin.zip", params={"token": tok})
+    check(f"[{engine}] 插件 zip",
+          r.status_code == 200
+          and "application/zip" in (r.headers.get("content-type") or "")
+          and r.content[:2] == b"PK"
+          and "omnihome-sync.zip" in (r.headers.get("content-disposition") or ""),
+          f"{r.status_code} {(r.headers.get('content-type') or '')} {r.content[:24]!r}")
+    ext = TMP / "omnihome-extension.zip"
+    with zipfile.ZipFile(ext, "w") as z:
+        z.writestr("manifest.json", '{"version":"9.9.9"}')
+    import routers.workspace as ws
+    import routers.data as data_mod
+    old_w, old_d = ws.EXTENSION_ZIP, data_mod.EXTENSION_ZIP
+    ws.EXTENSION_ZIP = ext
+    data_mod.EXTENSION_ZIP = ext
+    try:
+        r = client.get("/api/extension.zip", params={"token": tok})
+        check(f"[{engine}] 扩展 zip",
+              r.status_code == 200
+              and "application/zip" in (r.headers.get("content-type") or "")
+              and r.content[:2] == b"PK"
+              and "omnihome-extension.zip" in (r.headers.get("content-disposition") or ""),
+              f"{r.status_code} {(r.headers.get('content-type') or '')} {r.content[:24]!r}")
+        chk = client.get("/api/extension/check")
+        check(f"[{engine}] 扩展包检测版本",
+              chk.status_code == 200 and (chk.json() or {}).get("version") == "9.9.9",
+              chk.text[:160])
+    finally:
+        ws.EXTENSION_ZIP = old_w
+        data_mod.EXTENSION_ZIP = old_d
 
 
 def main():
