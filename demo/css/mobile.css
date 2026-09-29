@@ -188,9 +188,16 @@
   body.share-phone-editor .kb-share-ed{ display: flex; }
   body.share-phone-editor .kb-share-outline.open{
     display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 190;
-    width: 100%; height: min(50dvh, 420px);
+    width: 100%; height: min(50dvh, 420px); max-height: min(50dvh, 420px);
+  }
+  /* 底部大纲盖住预览下沿时，仍能把末段滚到面板上方 */
+  body.share-phone-editor:has(#kbShareOutline.open) #kbSharePreview{
+    padding-bottom: calc(min(50dvh, 420px) + 16px);
   }
   #kbShareModeSeg [data-sh-mode="split"]{ display: none; }
+  .kb-share-view-actions .icon-btn{
+    width: 44px; height: 44px; min-width: 44px;
+  }
 
   /* 仪表盘 / 书签 / 保险库 / 监控 / 设置 */
   .wx-strip{ max-width: none; width: 100%; }
