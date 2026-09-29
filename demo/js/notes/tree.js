@@ -125,7 +125,7 @@ import { S } from './state.js';
           ${locked ? '<span class="chip no-dot" style="font-size:10px;padding:2px 6px" title="系统内置文件夹，不可删除">内置</span>'
             : (!S.vaultCanEdit() ? ''
             : `<button class="icon-btn-xs kb-folder-add" data-kb-add="${App.esc(f)}" title="在此文件夹内新建笔记或子文件夹"><svg class="ic"><use href="#i-plus"/></svg></button>
-               <button class="icon-btn-xs kb-folder-more" data-folder-act="${App.esc(f)}" title="文件夹操作：重命名 / 复制 / 导出 / 删除"><svg class="ic"><use href="#i-more"/></svg></button>`)}
+               <button class="icon-btn-xs kb-folder-more" data-folder-act="${App.esc(f)}" title="文件夹操作：重命名 / 移动 / 复制 / 导出 / 删除"><svg class="ic"><use href="#i-more"/></svg></button>`)}
         </div>
         <div class="kb-folder-body" ${open ? '' : 'hidden'}>
           ${inner || '<div class="kb-empty">暂无笔记，可新建或拖拽进来</div>'}
@@ -210,11 +210,16 @@ import { S } from './state.js';
     return a;
   };
 
+  S.trashSourceLabel = function(n){
+    return (n && n.deleted_source) === 'obsidian' ? 'Obsidian 同步' : '手动删除';
+  };
+
   S.trashNoteRow = function(n){
     return `
       <div class="note-item kb-trash-row" data-trash-id="${App.esc(n.id)}">
         <svg class="ic ni-icon" style="color:var(--om-text-3)"><use href="#i-note"/></svg>
         <span class="ni-title">${App.esc(n.deleted_title || n.title || '未命名笔记')}</span>
+        <span class="chip no-dot kb-trash-src" title="删除来源">${App.esc(S.trashSourceLabel(n))}</span>
         <span class="ni-date">${S.relTime(S.trashSort === 'updated' ? n.updated : n.deleted)}</span>
         <button class="icon-btn-xs kb-trash-restore" data-trash-restore="${App.esc(n.id)}" title="恢复"><svg class="ic"><use href="#i-reply"/></svg></button>
         <button class="icon-btn-xs kb-trash-purge" data-trash-purge="${App.esc(n.id)}" title="永久删除"><svg class="ic"><use href="#i-trash"/></svg></button>

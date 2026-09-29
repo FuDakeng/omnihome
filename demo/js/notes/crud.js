@@ -214,6 +214,7 @@ import { S } from './state.js';
           showToast(`文件夹已重命名为「${trimmed}」`);
         } catch (e) { showToast(e.message, 'err'); }
       }],
+      ['移动文件夹', 'i-swap', () => S.moveFolderByMenu(f)],
       ['分享文件夹', 'i-link', () => S.openShareModal({ kind: 'folder', folder: f, name: S.folderLabel(f) })],
       ['复制文件夹', 'i-copy', () => S.copyFolder(f)],
       ['导出文件夹', 'i-download', () => API.dl('/api/notes/folder/export?path=' + encodeURIComponent(f))],
@@ -242,6 +243,97 @@ import { S } from './state.js';
       await S.load();
       showToast(src.length ? `已复制文件夹（${src.length} 篇笔记）` : '已复制空文件夹');
     } catch (e) { showToast(e.message, 'err'); }
+  };
+
+  /* 选择目标文件夹。resolve 为路径（根目录是空字符串），取消为 null。 */
+  S.pickFolder = function(opts = {}){
+    return new Promise(resolve => {
+      const disable = typeof opts.disable === 'function' ? opts.disable : () => false;
+      $('#kbMoveTitle').textContent = opts.title || '移动到';
+      $('#kbMoveSub').textContent = opts.sub || '选择目标文件夹';
+      const list = $('#kbMoveList');
+      const folders = S.folders
+        .filter(f => S.folderOfVault(f) === S.currentVault
+          && f !== S.PLAN_FOLDER && f !== S.QUICK_FOLDER
+          && !f.startsWith(S.PLAN_FOLDER + '/') && !f.startsWith(S.QUICK_FOLDER + '/'))
+        .slice()
+        .sort((a, b) => a.localeCompare(b, 'zh'));
+      const rows = [{ path: '', label: '仓库根目录', depth: 0 }]
+        .concat(folders.map(f => ({ path: f, label: S.folderLabel(f), depth: f.split('/').length })));
+      let chosen = rows.find(r => !disable(r.path));
+      if (!chosen) chosen = rows[0];
+      const paint = () => {
+        list.innerHTML = rows.map(r => {
+          const off = disable(r.path);
+          const on = !off && chosen && chosen.path === r.path;
+          const here = opts.here != null && r.path === opts.here;
+          return `<button type="button" class="kb-move-item${on ? ' on' : ''}" data-move-path="${App.esc(r.path)}"${off ? ' disabled' : ''} style="padding-left:${12 + r.depth * 16}px">
+            <svg class="ic"><use href="#${r.path ? 'i-folder' : 'i-book'}"/></svg>
+            <span>${App.esc(r.label)}</span>
+            ${here ? '<span class="chip no-dot">当前位置</span>' : ''}
+          </button>`;
+        }).join('');
+      };
+      paint();
+      S._movePick = {
+        resolve: (v) => {
+          if (!S._movePick) return;
+          S._movePick = null;
+          App.closeModal('kbMoveMask');
+          resolve(v);
+        },
+        get chosen(){ return chosen; },
+        setChosen(path){
+          const hit = rows.find(r => r.path === path && !disable(r.path));
+          if (!hit) return;
+          chosen = hit;
+          paint();
+        },
+      };
+      list.onclick = (e) => {
+        const btn = e.target.closest('[data-move-path]');
+        if (!btn || btn.disabled) return;
+        S._movePick && S._movePick.setChosen(btn.dataset.movePath || '');
+      };
+      App.openModal('kbMoveMask');
+    });
+  };
+
+  S.finishMovePick = function(value){
+    if (S._movePick) S._movePick.resolve(value);
+    else App.closeModal('kbMoveMask');
+  };
+
+  S.moveNoteByMenu = async function(id){
+    const meta = S.idx.find(n => n.id === id);
+    if (!meta) return;
+    if (meta.pinned){ showToast('常驻笔记不能移动', 'err'); return; }
+    const cur = meta.folder || '';
+    const dest = await S.pickFolder({
+      title: '移动笔记',
+      sub: `把「${meta.title || '未命名笔记'}」放到`,
+      here: cur,
+      disable: f => f === cur,
+    });
+    if (dest == null || dest === cur) return;
+    await S.moveNote(id, dest);
+    if (id === S.currentId) S.updateCrumb();
+  };
+
+  S.moveFolderByMenu = async function(f){
+    if (f === S.PLAN_FOLDER || f === S.QUICK_FOLDER){
+      showToast('系统内置文件夹不能移动', 'err');
+      return;
+    }
+    const parent = f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '';
+    const dest = await S.pickFolder({
+      title: '移动文件夹',
+      sub: `把「${S.folderLabel(f)}」放到`,
+      here: parent,
+      disable: t => t === f || t.startsWith(f + '/') || t === parent,
+    });
+    if (dest == null) return;
+    await S.moveFolders([f], dest);
   };
 
   S.moveNote = async function(id, folder){

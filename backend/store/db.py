@@ -34,6 +34,9 @@ _COL_COMMENTS = {
     "salt": "主密码派生盐",
     "pos": "排序位置",
     "updated": "更新时间戳（毫秒）",
+    "deleted": "软删时间戳（0 表示未删除）",
+    "deleted_title": "删除时的标题快照",
+    "deleted_source": "删除来源（web=手动，obsidian=同步）",
     "hash": "内容指纹（增量同步去重）",
     "version": "迁移版本号",
     "done_at": "迁移完成时间戳（毫秒）",
@@ -66,7 +69,8 @@ _TABLES = {
                  ("pinned", "INTEGER"), ("folder", "VARCHAR(255)"),
                  ("vault", "VARCHAR(64)"),
                  ("pos", "BIGINT"), ("content", "TEXT"), ("updated", "BIGINT"),
-                 ("deleted", "BIGINT"), ("deleted_title", "VARCHAR(255)")],
+                 ("deleted", "BIGINT"), ("deleted_title", "VARCHAR(255)"),
+                 ("deleted_source", "VARCHAR(32)")],
         "pk": ["username", "id"],
         "idx": [("username", "updated"), ("username", "pos")],
     },
@@ -239,11 +243,13 @@ def _ensure_tables(conn):
     from sqlalchemy import text
     for name, spec in _TABLES.items():
         conn.execute(text(_table_ddl(name, spec, mysql)))
-    # 已存在的旧表补齐缺失列（幂等）：hash 指纹列、bm_notes 软删两列、vault 仓库列
+    # 已存在的旧表补齐缺失列（幂等）：hash 指纹列、bm_notes 软删列、vault 仓库列
     extra_cols = {"hash": "VARCHAR(32) NOT NULL DEFAULT ''"}
     notes_spec = dict(_TABLES["bm_notes"])
     for cname, ctype in notes_spec["cols"]:
-        if cname in ("deleted", "deleted_title", "vault"):
+        if cname == "deleted_source":
+            extra_cols[cname] = "VARCHAR(32) NOT NULL DEFAULT ''"
+        elif cname in ("deleted", "deleted_title", "vault"):
             extra_cols[cname] = ctype + (
                 " NOT NULL DEFAULT 'default'" if cname == "vault" else "")
     for name, spec in _TABLES.items():
@@ -699,7 +705,7 @@ def _sql_read_notes_index(conn, username: str) -> str:
     from sqlalchemy import text
     rows = conn.execute(text(
         'SELECT "id", "title", "tags", "pinned", "folder", "updated", '
-        '"deleted", "deleted_title", "vault" '
+        '"deleted", "deleted_title", "deleted_source", "vault" '
         'FROM "bm_notes" WHERE "username" = :u ORDER BY "pos", "id"'),
         {"u": username}).fetchall()
     out = []
@@ -716,6 +722,8 @@ def _sql_read_notes_index(conn, username: str) -> str:
         except (AttributeError, TypeError, ValueError): item["deleted"] = 0
         try: item["deleted_title"] = r.deleted_title or ""
         except AttributeError: item["deleted_title"] = ""
+        try: item["deleted_source"] = r.deleted_source or ""
+        except AttributeError: item["deleted_source"] = ""
         try: item["vault"] = (r.vault or storage.VAULT_DEFAULT)
         except AttributeError: item["vault"] = storage.VAULT_DEFAULT
         out.append(item)
@@ -744,13 +752,15 @@ def _sql_write_notes_index(conn, username: str, content: str):
                        "t": int(item.get("updated") or time.time()),
                        "deleted": int(item.get("deleted") or 0),
                        "deleted_title": (item.get("deleted_title") or "")[:255],
+                       "deleted_source": (item.get("deleted_source") or "")[:32],
                        "vault": (item.get("vault") or storage.VAULT_DEFAULT)[:64]})
     if params:
         sql = ('INSERT INTO "bm_notes" '
                '("username", "id", "title", "tags", "pinned", '
-               '"folder", "vault", "pos", "updated", "content", "deleted", "deleted_title") '
+               '"folder", "vault", "pos", "updated", "content", "deleted", "deleted_title", '
+               '"deleted_source") '
                "VALUES (:u, :id, :title, :tags, :pinned, :folder, :vault, :pos, :t, '', "
-               ":deleted, :deleted_title)")
+               ":deleted, :deleted_title, :deleted_source)")
         if _is_mysql(conn):
             sql += (" ON DUPLICATE KEY UPDATE \"title\" = VALUES(\"title\"), "
                     "\"tags\" = VALUES(\"tags\"), "
@@ -760,7 +770,8 @@ def _sql_write_notes_index(conn, username: str, content: str):
                     "\"pos\" = VALUES(\"pos\"), "
                     "\"updated\" = VALUES(\"updated\"), "
                     "\"deleted\" = VALUES(\"deleted\"), "
-                    "\"deleted_title\" = VALUES(\"deleted_title\")")
+                    "\"deleted_title\" = VALUES(\"deleted_title\"), "
+                    "\"deleted_source\" = VALUES(\"deleted_source\")")
         else:
             sql += (' ON CONFLICT ("username", "id") DO UPDATE SET '
                     '"title" = excluded."title", "tags" = excluded."tags", '
@@ -769,7 +780,8 @@ def _sql_write_notes_index(conn, username: str, content: str):
                     '"pos" = excluded."pos", '
                     '"updated" = excluded."updated", '
                     '"deleted" = excluded."deleted", '
-                    '"deleted_title" = excluded."deleted_title"')
+                    '"deleted_title" = excluded."deleted_title", '
+                    '"deleted_source" = excluded."deleted_source"')
         conn.execute(text(sql), params)
 
 
@@ -804,8 +816,9 @@ def _sql_write_note_body(conn, username: str, key: str, content: str):
     # 阶段即触发 NOT NULL 约束失败（旧库因 ALTER ADD COLUMN 可空而未暴露）。
     sql = ('INSERT INTO "bm_notes" '
            '("username", "id", "content", "updated", "title", '
-           '"tags", "pinned", "folder", "vault", "pos", "deleted", "deleted_title") '
-           "VALUES (:username, :id, :c, :t, '', '', 0, '', 'default', 0, 0, '')")
+           '"tags", "pinned", "folder", "vault", "pos", "deleted", "deleted_title", '
+           '"deleted_source") '
+           "VALUES (:username, :id, :c, :t, '', '', 0, '', 'default', 0, 0, '', '')")
     if _is_mysql(conn):
         sql += (" ON DUPLICATE KEY UPDATE \"content\" = VALUES(\"content\"), "
                 "\"updated\" = VALUES(\"updated\")")

@@ -178,7 +178,7 @@ X-API-Key: <raw key>
 ```json
 { "ok": true, "softDeleted": true }
 ```
-- **软删**：设笔记 `deleted` / `deleted_title` 时间戳，与 Web 端删除一致，**进门户「回收站」可恢复**，不物理删除正文。
+- **软删**：设笔记 `deleted` / `deleted_title` 时间戳，并写 `deleted_source=obsidian`，与 Web 端删除一样**进门户「回收站」可恢复**。回收站里会标明来源「Obsidian 同步」（站内手动删除为 `web` / 「手动删除」）。不物理删除正文。
 - `path` 未命中：返回 **404** `{ "detail": "文件不存在" }`。
 
 ### 3.6 列出 / 读写附件

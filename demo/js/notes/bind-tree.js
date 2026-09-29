@@ -2,20 +2,57 @@ import { S } from './state.js';
 
 S.bindTree = function () {/* ---------- 桌面拖拽 .md 文件 / 文件夹 → 导入（支持嵌套结构） ---------- */
     const dropTarget = $('#noteTree');   // 容器同时承载 .kb-tree-body 类（用于拖拽高亮）
+    /* 本机文件拖入：悬停到文件夹行或其内部时选中该文件夹，松开后导入进去。 */
+    function fileDropHit(el){
+      if (!el || !dropTarget.contains(el)) return { row: null, folder: '' };
+      const direct = el.closest('[data-folder-toggle]');
+      if (direct && dropTarget.contains(direct))
+        return { row: direct, folder: direct.dataset.folderToggle || '' };
+      const root = el.closest('[data-drop-root]');
+      if (root && dropTarget.contains(root)) return { row: root, folder: '' };
+      const body = el.closest('.kb-folder-body');
+      if (body){
+        const row = body.previousElementSibling;
+        if (row && row.matches && row.matches('[data-folder-toggle]'))
+          return { row, folder: row.dataset.folderToggle || '' };
+      }
+      return { row: null, folder: '' };
+    }
+    function clearFileDropHint(){
+      dropTarget.querySelectorAll('.kb-drop-hint, .kb-file-target').forEach(x => {
+        x.classList.remove('kb-drop-hint', 'kb-file-target');
+      });
+    }
+    function markFileDrop(el){
+      clearFileDropHint();
+      const hit = fileDropHit(el);
+      if (!hit.row) return hit;
+      hit.row.classList.add('kb-drop-hint');
+      const folder = hit.row.closest('.kb-folder');
+      if (folder) folder.classList.add('kb-file-target');
+      return hit;
+    }
     if (dropTarget){
       dropTarget.addEventListener('dragover', e => {
         if (e.dataTransfer.types.includes('Files')){
           e.preventDefault();
           e.dataTransfer.dropEffect = 'copy';
           dropTarget.classList.add('kb-drop-active');
+          markFileDrop(e.target);
         }
       });
       dropTarget.addEventListener('dragleave', e => {
-        if (!dropTarget.contains(e.relatedTarget)) dropTarget.classList.remove('kb-drop-active');
+        if (!dropTarget.contains(e.relatedTarget)){
+          dropTarget.classList.remove('kb-drop-active');
+          clearFileDropHint();
+        }
       });
       dropTarget.addEventListener('drop', async e => {
         e.preventDefault();
+        const hit = fileDropHit(e.target);
+        const destFolder = hit.folder || '';
         dropTarget.classList.remove('kb-drop-active');
+        clearFileDropHint();
         const dt = e.dataTransfer;
         if (!dt) return;
         /* 本机图片 → 直接上传为附件（自动归档进附件分区）；其余文件继续走 .md/.zip 导入 */
@@ -39,7 +76,7 @@ S.bindTree = function () {/* ---------- 桌面拖拽 .md 文件 / 文件夹 → 
         if (items.length === 1){
           const f = items[0].getAsFile && items[0].getAsFile();
           if (f && (f.name.toLowerCase().endsWith('.md') || f.name.toLowerCase().endsWith('.zip'))){
-            await dropUploadSingle(f);
+            await dropUploadSingle(f, destFolder);
             return;
           }
         }
@@ -54,7 +91,7 @@ S.bindTree = function () {/* ---------- 桌面拖拽 .md 文件 / 文件夹 → 
           showToast('未发现 .md 文件（已自动忽略 macOS 资源垃圾与系统文件）', 'err');
           return;
         }
-        await dropUploadMulti(collected);
+        await dropUploadMulti(collected, destFolder);
       });
     }
 
@@ -84,29 +121,36 @@ S.bindTree = function () {/* ---------- 桌面拖拽 .md 文件 / 文件夹 → 
         await readEntries(entry.createReader(), out, (prefix || '') + entry.name + '/');
       }
     }
-    async function dropUploadSingle(file){
+    function importWhere(folder){
+      return folder ? `到「${S.folderLabel(folder)}」` : '';
+    }
+    async function dropUploadSingle(file, folder){
       const fd = new FormData();
       fd.append('file', file);
+      if (folder) fd.append('folder', folder);
+      if (S.currentVault) fd.append('vault', S.currentVault);
       try {
         const r = await fetch('/api/notes/import-md', {
           method: 'POST', headers: { 'Authorization': 'Bearer ' + API.getToken() }, body: fd,
         });
         if (!r.ok) throw new Error((await r.json()).detail || ('HTTP ' + r.status));
         const d = await r.json();
-        showToast(`导入 ${d.imported} 个笔记${d.skipped ? '（跳过 ' + d.skipped + ' 个）' : ''}`);
+        showToast(`导入 ${d.imported} 个笔记${importWhere(folder)}${d.skipped ? '（跳过 ' + d.skipped + ' 个）' : ''}`);
+        if (folder){ S.expanded.add(folder); S.persistExpanded(); }
         await S.load();
       } catch (e) { showToast('导入失败：' + e.message, 'err'); }
     }
-    async function dropUploadMulti(files){
+    async function dropUploadMulti(files, folder){
       try {
         const r = await fetch('/api/notes/import-files', {
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + API.getToken(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ files }),
+          body: JSON.stringify({ files, folder: folder || '', vault: S.currentVault || '' }),
         });
         if (!r.ok) throw new Error((await r.json()).detail || ('HTTP ' + r.status));
         const d = await r.json();
-        showToast(`导入 ${d.imported} 篇笔记${d.skipped ? '（跳过 ' + d.skipped + ' 个非 .md）' : ''}`);
+        showToast(`导入 ${d.imported} 篇笔记${importWhere(folder)}${d.skipped ? '（跳过 ' + d.skipped + ' 个非 .md）' : ''}`);
+        if (folder){ S.expanded.add(folder); S.persistExpanded(); }
         await S.load();
       } catch (e) { showToast('导入失败：' + e.message, 'err'); }
     }

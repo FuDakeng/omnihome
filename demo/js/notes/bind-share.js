@@ -230,6 +230,17 @@ S.bindShare = function () {
       if (Date.now() - (S._trashDropAt || 0) < 500) return;
       S.openTrashModal();
     });
+    $('#kbMoveCancel')?.addEventListener('click', () => S.finishMovePick(null));
+    $('#kbMoveOk')?.addEventListener('click', () => {
+      const pick = S._movePick;
+      S.finishMovePick(pick ? pick.chosen.path : null);
+    });
+    $('#kbMoveMask')?.addEventListener('click', e => {
+      if (e.target === $('#kbMoveMask')) S.finishMovePick(null);
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && $('#kbMoveMask')?.classList.contains('open')) S.finishMovePick(null);
+    });
     $('#kbTrashClose')?.addEventListener('click', () => App.closeModal('kbTrashMask'));
     $('#kbTrashPurgeAll')?.addEventListener('click', S.purgeAllTrash);
     $('#kbTrashMask')?.addEventListener('click', e => { if (e.target === $('#kbTrashMask')) App.closeModal('kbTrashMask'); });

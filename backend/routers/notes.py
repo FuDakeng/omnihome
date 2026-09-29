@@ -15,7 +15,7 @@ from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 import httpx
-from fastapi import APIRouter, Body, File, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
@@ -32,6 +32,7 @@ from routers.notes_lib import (
     _ensure_vaults, _active_vault_id, _vault_public, _merged_notes_payload,
     _ensure_pinned, _gc_trash, _find_note, _ensure_folder, _is_junk_path,
     _safe_fs_name, _note_to_md, _parse_md, _create_imported_note,
+    _clean_import_folder, _join_import_folder, _mark_trashed,
     _folder_vault, _folder_claimed, _folder_claim, _folder_unclaim,
     _folders_in_vault, _infer_note_vault, _is_builtin_folder,
     _add_member_projection, _drop_member_projection, _refresh_team_projections,
@@ -189,15 +190,13 @@ def delete_folder(name: str, authorization: Optional[str] = Header(None)):
     prefix = name + "/"
     removed = {name} | {f for f in folders if f.startswith(prefix) and _folder_claimed(data, f, vid)}
     idx = storage.notes_index(store)
-    now = int(time.time())
     trashed = 0
     for item in idx:
         f = item.get("folder") or ""
         # 只回收本仓库在该路径下的笔记，其它仓库同名文件夹不受影响
         if (f == name or f.startswith(prefix)) and _infer_note_vault(item) == vid:
             if not item.get("pinned"):
-                item["deleted"] = now
-                item["deleted_title"] = item.get("title") or ""
+                _mark_trashed(item, "web")
                 trashed += 1
             else:
                 item["folder"] = ""   # 常驻笔记不进回收站，归位根目录
@@ -402,20 +401,31 @@ def export_all_notes(authorization: Optional[str] = Header(None),
 
 @router.post("/api/notes/import-md")
 async def import_md(file: UploadFile = File(...),
+                   folder: str = Form(""),
+                   vault: str = Form(""),
                    authorization: Optional[str] = Header(None)):
     """导入 Markdown：
-       - 单个 .md 文件 → 在「我的笔记」根目录创建一篇笔记
-       - .zip 文件 → 按 zip 内的目录结构还原文件夹，逐级补齐，标题取自文件名"""
+       - 单个 .md 文件 → 在目标文件夹（默认根目录）创建一篇笔记
+       - .zip 文件 → 按 zip 内的目录结构还原文件夹，逐级补齐，标题取自文件名
+       folder 为拖入时悬停选中的目标文件夹，zip / 单文件都挂在它下面。"""
     import zipfile as _zf
     username = require_user(authorization)
     raw = await file.read()
     if not raw:
         raise HTTPException(400, "文件为空")
     name = (file.filename or "").lower()
+    base = _clean_import_folder(folder)
+    vid = (vault or "").strip()
+    if vid:
+        _require_vault_edit(username, vid)
     # ---- 单文件 ----
     if name.endswith(".md") or file.content_type in ("text/markdown", "text/x-markdown"):
         title, content = _parse_md(raw, file.filename or "未命名笔记.md")
-        return _create_imported_note(username, title, content, "")
+        if base:
+            _ensure_folder(username, base, vid)
+        meta = _create_imported_note(username, title, content, base, vid)
+        return {"ok": True, "imported": 1, "skipped": 0, "id": meta.get("id"),
+                "folder": base}
     # ---- zip ----
     if not (name.endswith(".zip") or file.content_type in ("application/zip", "application/x-zip-compressed")):
         raise HTTPException(400, "仅支持 .md 或 .zip")
@@ -442,28 +452,35 @@ async def import_md(file: UploadFile = File(...),
         path = n.replace("\\", "/").strip("/")
         # 关键：根目录下的 .md 文件（无 /）应视为 folder="" 而不是把整段路径当文件夹
         if "/" in path:
-            folder, fname = path.rsplit("/", 1)
+            inner, fname = path.rsplit("/", 1)
         else:
-            folder, fname = "", path
+            inner, fname = "", path
+        dest = _join_import_folder(base, inner)
         # 还原嵌套文件夹（顺序补齐父级）
-        for depth in range(1, folder.count("/") + 2):
-            sub = "/".join(folder.split("/")[:depth])
+        for depth in range(1, dest.count("/") + 2):
+            sub = "/".join(dest.split("/")[:depth])
             if sub:
-                _ensure_folder(username, sub)
+                _ensure_folder(username, sub, vid)
         raw_md = zf.read(n)
         title, content = _parse_md(raw_md, fname)
-        _create_imported_note(username, title, content, folder)
+        _create_imported_note(username, title, content, dest, vid)
         created += 1
     return {"ok": True, "imported": created, "skipped": skipped}
 
 class ImportedFilesIn(BaseModel):
     """前端拖拽 .md 文件 / 文件夹：每条带相对路径（如 '项目规划/前端/笔记.md'）。"""
     files: list = []              # [{path, content}, ...]
+    folder: str = ""              # 松开时悬停的目标文件夹，导入内容挂在它下面
+    vault: str = ""               # 当前浏览的笔记仓库
 
 @router.post("/api/notes/import-files")
 def import_files(body: ImportedFilesIn, authorization: Optional[str] = Header(None)):
     """从前端拖拽目录 / 多文件批量导入：path 视为 zip 内的相对路径，逐级补齐父文件夹。"""
     username = require_user(authorization)
+    base = _clean_import_folder(body.folder or "")
+    vid = (body.vault or "").strip()
+    if vid:
+        _require_vault_edit(username, vid)
     created, skipped = 0, 0
     for item in (body.files or []):
         path = (item.get("path") if isinstance(item, dict) else None) or ""
@@ -476,16 +493,17 @@ def import_files(body: ImportedFilesIn, authorization: Optional[str] = Header(No
         if not norm:
             skipped += 1; continue
         if "/" in norm:
-            folder, fname = norm.rsplit("/", 1)
+            inner, fname = norm.rsplit("/", 1)
         else:
-            folder, fname = "", norm
-        for depth in range(1, folder.count("/") + 2):
-            sub = "/".join(folder.split("/")[:depth])
+            inner, fname = "", norm
+        dest = _join_import_folder(base, inner)
+        for depth in range(1, dest.count("/") + 2):
+            sub = "/".join(dest.split("/")[:depth])
             if sub:
-                _ensure_folder(username, sub)
+                _ensure_folder(username, sub, vid)
         raw_bytes = content.encode("utf-8") if isinstance(content, str) else content
         title, body_md = _parse_md(raw_bytes, fname)
-        _create_imported_note(username, title, body_md, folder)
+        _create_imported_note(username, title, body_md, dest, vid)
         created += 1
     return {"ok": True, "imported": created, "skipped": skipped}
 
@@ -576,6 +594,7 @@ def restore_note(nid: str, authorization: Optional[str] = Header(None)):
         return {"ok": True, "restored": False}
     hit.pop("deleted", None)
     hit.pop("deleted_title", None)
+    hit.pop("deleted_source", None)
     hit["updated"] = int(time.time())
     # 原文件夹可能已随删除一起移除：恢复时自动补注册，否则笔记在目录树不可见
     fp = (hit.get("folder") or "").strip("/")
@@ -668,8 +687,7 @@ def delete_note(nid: str, authorization: Optional[str] = Header(None)):
         idx[:] = [i for i in idx if i["id"] != nid]
         storage.save_notes_index(store, idx)
         return {"ok": True, "softDeleted": False}
-    hit["deleted"] = int(time.time())
-    hit["deleted_title"] = hit.get("title") or ""
+    _mark_trashed(hit, "web")
     storage.save_notes_index(store, idx)
     return {"ok": True, "softDeleted": True}
 

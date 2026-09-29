@@ -27,7 +27,7 @@ const SELF_WRITE_MS = 4000;         // 自写抑制窗口（避免回环触发�
 
 /* 插件独立版本线（与服务端 app 版本解耦；须与 manifest.json 的 version 保持一致）。
    打进启动日志与设置页，用户反馈报错时可一眼确认所装插件版本。 */
-const PLUGIN_VERSION = '0.0.9';
+const PLUGIN_VERSION = '0.0.10';
 
 const ASSET_MAX = 5 * 1024 * 1024;   // 与服务端 ASSET_MAX 一致
 const ASSET_DIR = 'OmniHome-assets';  // 从站点拉取、本地无原路径的附件落点
@@ -568,7 +568,7 @@ class OmniHomeSyncPlugin extends Plugin {
       title: push ? '用当前仓库覆盖服务端？' : '用服务端覆盖当前仓库？',
       sub: push
         ? '高危操作：服务端该笔记仓库将与本地 Obsidian 仓库对齐，服务端多出的笔记会进回收站，同路径笔记以本地为准。不可自动撤销。'
-        : '高危操作：本地仓库将与服务端对齐，本地多出的笔记会移入回收站，同路径笔记以服务端为准。不可自动撤销。',
+        : '高危操作：本地仓库将与服务端对齐，本地多出的笔记会移入插件回收站，同路径笔记以服务端为准。不可自动撤销。',
       okText: '确认覆盖', danger: true,
     });
     if (!ok) return;
@@ -613,7 +613,7 @@ class OmniHomeSyncPlugin extends Plugin {
           n++;
         }
         for (let i = 0; i < localFiles.length; i++) {
-          if (!remoteByPath[localFiles[i].path]) { await this.trashLocal(localFiles[i], baseline); n++; }
+          if (!remoteByPath[localFiles[i].path]) { await this.trashLocal(localFiles[i], baseline, 'overwrite'); n++; }
         }
       }
       this.settings.lastSyncAt = nowMs();
@@ -940,13 +940,122 @@ class OmniHomeSyncPlugin extends Plugin {
     baseline[path] = { lm: lm, rm: (data && data.mtime) || (r && r.mtime) || nowMs() };
     return true;
   }
-  async trashLocal(f, baseline) {
+  async trashLocal(f, baseline, source) {
+    // 同步删掉的本地笔记进插件回收站（.omnihome-trash，同步扫描会跳过），并记下删除来源。
+    const src = source || 'platform';
     this.markSelfWrite(f.path);
-    try { await this.app.vault.trash(f.file, true); }   // 移入 vault 内 .trash（可恢复）
-    catch (e) { try { await this.app.vault.delete(f.file); } catch (e2) { /* 忽略 */ } }
-    this.pushNoteLog('delete', f.path, '服务端已删除，本地移入回收站', '万事屋', 'Obsidian');
+    let content = '';
+    try { content = await this.app.vault.read(f.file); }
+    catch (e) { content = ''; }
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const rel = '.omnihome-trash/' + id + '.md';
+    try {
+      await this.ensureTrashDir();
+      await this.app.vault.create(rel, content);
+      const items = await this.loadTrashIndex();
+      items.unshift({
+        id: id,
+        path: f.path,
+        title: noteTitleFromPath(f.path),
+        deletedAt: nowMs(),
+        source: src,
+        file: rel,
+      });
+      const kept = items.slice(0, 200);
+      const overflow = items.slice(200);
+      await this.saveTrashIndex(kept);
+      for (let i = 0; i < overflow.length; i++) {
+        const old = overflow[i];
+        if (!old || !old.file) continue;
+        const af = this.app.vault.getAbstractFileByPath(old.file);
+        if (af) { try { await this.app.vault.delete(af); } catch (e2) { /* 忽略 */ } }
+      }
+    } catch (e) {
+      // 写插件回收站失败时退回库内 .trash，避免同步直接把文件抹掉且无处恢复
+      try { await this.app.vault.trash(f.file, false); }
+      catch (e2) { try { await this.app.vault.delete(f.file); } catch (e3) { /* 忽略 */ } }
+      this.pushNoteLog('delete', f.path, '服务端已删除，插件回收站写入失败，已改移入库内回收站', '万事屋', 'Obsidian');
+      delete baseline[f.path];
+      return true;
+    }
+    try { await this.app.vault.delete(f.file); }
+    catch (e) {
+      try { await this.app.vault.trash(f.file, false); } catch (e2) { /* 原文已进插件回收站 */ }
+    }
+    const from = src === 'overwrite' ? '服务端覆盖' : '万事屋同步';
+    this.pushNoteLog('delete', f.path, '服务端已删除，本地移入插件回收站（' + from + '）', '万事屋', 'Obsidian');
     delete baseline[f.path];
     return true;
+  }
+  async ensureTrashDir() {
+    const dir = '.omnihome-trash';
+    if (!this.app.vault.getAbstractFileByPath(dir)) {
+      try { await this.app.vault.createFolder(dir); } catch (e) { /* 并发已建 */ }
+    }
+  }
+  async loadTrashIndex() {
+    const p = '.omnihome-trash/index.json';
+    const f = this.app.vault.getAbstractFileByPath(p);
+    if (!(f instanceof TFile)) return [];
+    try {
+      const data = JSON.parse(await this.app.vault.read(f) || '[]');
+      return Array.isArray(data) ? data : [];
+    } catch (e) { return []; }
+  }
+  async saveTrashIndex(items) {
+    await this.ensureTrashDir();
+    const p = '.omnihome-trash/index.json';
+    const body = JSON.stringify(items || []);
+    const f = this.app.vault.getAbstractFileByPath(p);
+    if (f instanceof TFile) await this.app.vault.modify(f, body);
+    else await this.app.vault.create(p, body);
+  }
+  async removeTrashItem(id) {
+    const items = await this.loadTrashIndex();
+    const hit = items.filter((x) => x && x.id === id)[0];
+    await this.saveTrashIndex(items.filter((x) => x && x.id !== id));
+    if (hit && hit.file) {
+      const f = this.app.vault.getAbstractFileByPath(hit.file);
+      if (f) { try { await this.app.vault.delete(f); } catch (e) { /* 忽略 */ } }
+    }
+  }
+  async restorePluginTrash(id) {
+    const items = await this.loadTrashIndex();
+    const hit = items.filter((x) => x && x.id === id)[0];
+    if (!hit) { new Notice('回收站里已没有这篇笔记'); return; }
+    let content = '';
+    const tf = hit.file && this.app.vault.getAbstractFileByPath(hit.file);
+    if (tf instanceof TFile) content = await this.app.vault.read(tf);
+    let path = hit.path || ((hit.title || '未命名笔记') + '.md');
+    const dir = parentDir(path);
+    const stem = noteTitleFromPath(path);
+    if (this.app.vault.getAbstractFileByPath(path)) {
+      path = (dir ? dir + '/' : '') + stem + '-恢复.md';
+      let n = 2;
+      while (this.app.vault.getAbstractFileByPath(path)) {
+        path = (dir ? dir + '/' : '') + stem + '-恢复-' + n + '.md';
+        n++;
+      }
+    }
+    await this.ensureVaultFolder(dir);
+    await this.app.vault.create(path, content);
+    await this.removeTrashItem(id);
+    new Notice('已从插件回收站恢复：' + path);
+  }
+  async purgePluginTrash(id) {
+    await this.removeTrashItem(id);
+    new Notice('已从插件回收站永久删除');
+  }
+  async emptyPluginTrash() {
+    const items = await this.loadTrashIndex();
+    for (let i = 0; i < items.length; i++) {
+      const hit = items[i];
+      if (!hit || !hit.file) continue;
+      const f = this.app.vault.getAbstractFileByPath(hit.file);
+      if (f) { try { await this.app.vault.delete(f); } catch (e) { /* 忽略 */ } }
+    }
+    await this.saveTrashIndex([]);
+    new Notice('已清空插件回收站');
   }
   async deleteRemote(path, baseline) {
     await this.remoteDelete(path);
@@ -1111,6 +1220,12 @@ class OmniHomeSyncPlugin extends Plugin {
   }
 }
 
+function trashSourceLabel(src) {
+  if (src === 'overwrite') return '服务端覆盖';
+  if (src === 'platform') return '万事屋同步';
+  return '同步删除';
+}
+
 function renderNoteLogBox(box, logs) {
   box.empty();
   const rows = (logs || []).filter((x) => x && ['add', 'edit', 'delete'].indexOf(x.kind) >= 0);
@@ -1239,7 +1354,7 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
       });
     new Setting(containerEl)
       .setName('用服务端覆盖当前仓库')
-      .setDesc('本地仓库将与服务端对齐：同路径以服务端为准，本地多出的笔记进回收站。需确认。')
+      .setDesc('本地仓库将与服务端对齐：同路径以服务端为准，本地多出的笔记进插件回收站。需确认。')
       .addButton((b) => {
         b.setButtonText('覆盖本地');
         if (typeof b.setWarning === 'function') b.setWarning();
@@ -1264,6 +1379,52 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
         new Notice('OmniHome Sync：已解绑');
       }));
 
+    const trashHead = containerEl.createEl('h3', { text: '插件回收站' });
+    trashHead.style.marginTop = '18px';
+    containerEl.createEl('p', {
+      cls: 'omnihome-sync-muted',
+      text: '同步导致的本地删除会留在这里，并标明删除来源。恢复后笔记回到原路径，并会再次参与同步。',
+    });
+    const trashBox = containerEl.createDiv({ cls: 'omnihome-sync-trash' });
+    trashBox.createEl('p', { text: '正在读取…', cls: 'omnihome-sync-muted' });
+    plugin.loadTrashIndex().then((items) => {
+      trashBox.empty();
+      if (!items.length) {
+        trashBox.createEl('p', { text: '回收站是空的', cls: 'omnihome-sync-muted' });
+        return;
+      }
+      new Setting(trashBox)
+        .setName('共 ' + items.length + ' 篇')
+        .setDesc('永久删除后无法从插件里恢复。')
+        .addButton((b) => b.setButtonText('清空').setWarning().onClick(async () => {
+          const ok = await confirmDialog(plugin.app, {
+            title: '清空插件回收站？',
+            sub: '这些笔记将从插件回收站移除，无法再从这里恢复。',
+            okText: '清空', danger: true,
+          });
+          if (!ok) return;
+          await plugin.emptyPluginTrash();
+          this.display();
+        }));
+      items.forEach((item) => {
+        const row = new Setting(trashBox)
+          .setName(item.title || noteTitleFromPath(item.path) || '未命名笔记')
+          .setDesc((item.path || '') + ' · ' + plugin.fmtTime(item.deletedAt));
+        row.nameEl.createSpan({ text: trashSourceLabel(item.source), cls: 'omnihome-sync-src' });
+        row.addButton((b) => b.setButtonText('恢复').onClick(async () => {
+          await plugin.restorePluginTrash(item.id);
+          this.display();
+        }));
+        row.addButton((b) => b.setButtonText('永久删除').setWarning().onClick(async () => {
+          await plugin.purgePluginTrash(item.id);
+          this.display();
+        }));
+      });
+    }).catch(() => {
+      trashBox.empty();
+      trashBox.createEl('p', { text: '读取回收站失败', cls: 'omnihome-sync-muted' });
+    });
+
     const logHead = containerEl.createEl('h3', { text: '同步日志' });
     logHead.style.marginTop = '18px';
     const logBox = containerEl.createDiv({ cls: 'omnihome-sync-log' });
@@ -1285,7 +1446,7 @@ class OmniHomeSyncSettingTab extends PluginSettingTab {
 
     containerEl.createEl('p', {
       cls: 'omnihome-sync-help',
-      text: '同步范围：当前令牌绑定的笔记仓库中的普通笔记及其引用的附件（≤5MB）。系统内置仓库（每日计划 / 灵感速记 / 常驻）不可同步。冲突按最后修改时间优先（LWW，2 秒内站点优先；服务端无独立变更时不会回拉以免打断正在编辑的正文）。单轮删除超过 ' + DELETE_VALVE + ' 个会暂停并请你确认。',
+      text: '同步范围：当前令牌绑定的笔记仓库中的普通笔记及其引用的附件（≤5MB）。系统内置仓库（每日计划 / 灵感速记 / 常驻）不可同步。冲突按最后修改时间优先（LWW，2 秒内站点优先；服务端无独立变更时不会回拉以免打断正在编辑的正文）。单轮删除超过 ' + DELETE_VALVE + ' 个会暂停并请你确认。因同步删除的门户笔记进入门户回收站并标记「Obsidian 同步」；因同步删除的本地笔记进入上方插件回收站并标记来源。',
     });
   }
 }

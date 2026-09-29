@@ -94,6 +94,7 @@ import { S } from './state.js';
           S.renderTree(); S.renderTabs();
         } catch (e) { showToast('重命名失败：' + e.message, 'err'); }
       }],
+      meta.pinned ? null : ['移动', 'i-swap', () => S.moveNoteByMenu(id)],
       ['创建副本', 'i-copy', async () => {
         try {
           const d = await API.get('/api/notes/' + id);
