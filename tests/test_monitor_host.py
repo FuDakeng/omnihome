@@ -184,7 +184,7 @@ def test_monitor_page_exposes_hardware_card_and_filter_opens_right():
     assert 'id="monDiskPick"' in html
     assert 'class="mon-top"' in html
     assert "renderHwCard" in js
-    assert "monitorVisible" in js
+    assert "function redrawCharts()" in js
     assert "未检测到可监控的 GPU（NVIDIA / Intel / AMD）" in js
     assert "gpuName" in js
     assert "storageFallback" in js
