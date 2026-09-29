@@ -31,7 +31,7 @@ from routers.notes_lib import (
     require_sync_user, require_sync_ctx, _sync_require_member_edit,
     _guard_sync_put, _guard_sync_delete, _validate_sync_path, _split_sync_path,
     _resolve_sync_path, _sync_path_index, _note_to_path, _in_sync_scope,
-    _ensure_folder, _parse_md, _note_to_md, _gc_trash, _vault_by_id,
+    _ensure_folder, _parse_md, _note_to_md, _gc_trash, _vault_by_id, _mark_trashed,
     _vault_sync_enabled, _require_vault_edit, _clip_sync, _diff_summary,
     _log_vault_note, _sync_apply_note, _safe_fs_name,
     _load_vaults, _save_vaults, _active_vault_id, _team_ctx, _ensure_vaults,
@@ -385,7 +385,7 @@ def sync_rename_file(body: SyncRenameIn,
 def sync_delete_file(path: str,
                      x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
                      x_sync_approval: Optional[str] = Header(None, alias="X-Sync-Approval")):
-    """删除一篇笔记：软删进回收站（与 Web 端删除一致，可在门户恢复），不物理删正文。"""
+    """删除一篇笔记：软删进门户回收站，并标记来源为 Obsidian 同步。不物理删正文。"""
     ctx = require_sync_ctx(x_api_key)
     username, vault_id = ctx["u"], ctx["vault"]
     norm = _validate_sync_path(path)
@@ -394,11 +394,9 @@ def sync_delete_file(path: str,
     if not meta:
         raise HTTPException(404, "文件不存在")
     idx = storage.notes_index(username)
-    now = int(time.time())
     for it in idx:
         if it.get("id") == meta["id"]:
-            it["deleted"] = now
-            it["deleted_title"] = it.get("title") or ""
+            _mark_trashed(it, "obsidian")
             break
     storage.save_notes_index(username, idx)
     _log_vault_note(username, vault_id, kind="delete",

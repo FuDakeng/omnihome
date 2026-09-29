@@ -640,7 +640,7 @@ export const LiveMD = (() => {
         for (let i = 0; i < rowIdx; i++) acc += (rawRows[i] || '').length + 1;
         acc += 2;                              // 行首 "| "
         for (let k = 0; k < ci; k++) acc += String(cellsOfRow[k] == null ? '' : cellsOfRow[k]).length + 3;   // 单元格间 " | "
-        return Math.min(acc + inCell.length, rawFull.length);
+        return Math.min(acc + (typeof inCell === 'number' ? inCell : 0), rawFull.length);
       } catch (_) {
         return rawFull.length;
       }
@@ -868,6 +868,10 @@ export const LiveMD = (() => {
           i += 2;
           while (srcLines[i] && srcLines[i].trim() && isTableRow(srcLines[i])){ rows.push(srcLines[i]); i++; }
           html.push(renderTable(rows, t0));
+          /* for 循环末尾还会 i++。此时 i 已指向表格后的第一行，
+             不回退就会吞掉紧随表格的空行或正文（本机导入的笔记常含表格，
+             每次输入重建一次，后文被逐行吃掉、光标跳走）。 */
+          i--;
           continue;
         }
         html.push(singleLineHtml(line, i));

@@ -55,6 +55,33 @@
   font-size: 12px; color: var(--om-text-3);
 }
 .kb-trash-sort .seg-btn{ padding: 4px 10px; font-size: 12px; }
+.kb-trash-src{ flex: none; font-size: 10px; padding: 2px 6px; }
+.kb-move-list{
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: min(52vh, 420px); overflow: auto;
+}
+.kb-move-item{
+  display: flex; align-items: center; gap: 8px;
+  min-height: 44px; width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--om-border); border-radius: 8px;
+  background: var(--om-surface); color: var(--om-text-1);
+  text-align: left; cursor: pointer; font-size: 14px;
+}
+.kb-move-item .ic{ width: 16px; height: 16px; flex: none; color: var(--om-primary); }
+.kb-move-item span{ min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-move-item .chip{ margin-left: auto; flex: none; font-size: 10px; }
+.kb-move-item.on{
+  border-color: var(--om-primary);
+  background: var(--om-primary-ghost);
+}
+.kb-move-item:disabled{ opacity: .5; cursor: default; }
+.kb-folder.kb-file-target > .kb-folder-row{
+  outline: 2px dashed var(--om-primary);
+  outline-offset: -2px;
+  background: var(--om-primary-ghost);
+  border-radius: var(--om-radius-sm);
+}
 .kb-trash-seg{ color: var(--om-text-2); }
 .kb-trash-sep{ color: var(--om-text-3); margin: 0 3px; }
 .modal-obsidian{

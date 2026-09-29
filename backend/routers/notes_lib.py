@@ -587,13 +587,57 @@ def _note_to_md(meta: dict, content: str) -> bytes:
         md = f"{body}\n"
     return md.encode("utf-8")
 
+def _norm_md_text(text: str) -> str:
+    """统一换行并去掉会打乱实时编辑器的控制字符。
+
+    本机 .md 常带 CRLF、单独的 CR，或 Word / 备忘录写入的 U+2028。
+    这些字符若留在正文里，实时编辑器按行重建时会把它们当成行内换行，光标偏移对不上。
+    """
+    text = (text or "").replace("\ufeff", "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\u2028", "\n").replace("\u2029", "\n")
+    return text.replace("\x00", "")
+
+
+def _clean_import_folder(folder: str) -> str:
+    """导入目标文件夹：去掉首尾斜杠，拒绝路径穿越。"""
+    folder = (folder or "").replace("\\", "/").strip().strip("/")
+    if not folder:
+        return ""
+    parts = []
+    for seg in folder.split("/"):
+        if not seg or seg == ".":
+            continue
+        if seg == ".." or seg.startswith("._") or seg == "__MACOSX":
+            raise HTTPException(400, "非法目标文件夹")
+        parts.append(seg)
+    return "/".join(parts)
+
+
+def _join_import_folder(base: str, folder: str) -> str:
+    base = (base or "").strip("/")
+    folder = (folder or "").strip("/")
+    if not base:
+        return folder
+    if not folder:
+        return base
+    return base + "/" + folder
+
+
+def _mark_trashed(item: dict, source: str):
+    """软删进回收站，并记下删除来源（web=站内手动，obsidian=同步）。"""
+    item["deleted"] = int(time.time())
+    item["deleted_title"] = item.get("title") or ""
+    item["deleted_source"] = source or "web"
+
+
 def _parse_md(raw: bytes, fallback_name: str) -> tuple:
     """从 .md 字节里解析出 (title, content)：若首行是 H1 则标题取 H1，否则取文件名。"""
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         text = raw.decode("utf-8", errors="replace")
-    text = text.lstrip("\ufeff").lstrip()
+    text = _norm_md_text(text).lstrip()
     title, body = "", text
     m = re.match(r"^#\s+(.+?)\s*[\r\n]", text)
     if m:
@@ -625,7 +669,8 @@ def _ensure_folder(username: str, folder: str, vault_id: str = ""):
     data["folderVault"] = fv
     _save_vaults(username, data)
 
-def _create_imported_note(username: str, title: str, content: str, folder: str) -> dict:
+def _create_imported_note(username: str, title: str, content: str, folder: str,
+                          vault: str = "") -> dict:
     """创建一篇笔记（避免与现有标题冲突，重复自动加序号）。"""
     idx = storage.notes_index(username)
     used = {m["title"] for m in idx}
@@ -635,7 +680,12 @@ def _create_imported_note(username: str, title: str, content: str, folder: str) 
         final = f"{title} ({n})"
         n += 1
     note_id = uuid.uuid4().hex[:8]
-    vid = VAULT_SYSTEM if _is_builtin_folder(folder) else _active_vault_id(username)
+    if _is_builtin_folder(folder):
+        vid = VAULT_SYSTEM
+    elif vault:
+        vid = _require_vault_edit(username, vault)["vid"]
+    else:
+        vid = _active_vault_id(username)
     idx.insert(0, {"id": note_id, "title": final, "tags": [],
                    "folder": folder, "vault": vid, "pinned": False,
                    "updated": int(time.time())})

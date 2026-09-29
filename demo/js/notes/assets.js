@@ -34,6 +34,7 @@ import { S } from './state.js';
       if (!file) return;
       const fd = new FormData();
       fd.append('file', file);
+      if (S.currentVault) fd.append('vault', S.currentVault);
       try {
         const r = await fetch('/api/notes/import-md', {
           method: 'POST',

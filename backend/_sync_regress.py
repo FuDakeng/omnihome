@@ -244,6 +244,8 @@ def run_suite(engine):
     idx = storage.notes_index(USER)
     hit = next(i for i in idx if i["id"] == nid)
     check(f"[{engine}] 笔记标记 deleted", bool(hit.get("deleted")), str(hit.get("deleted")))
+    check(f"[{engine}] 同步删除来源为 obsidian",
+          hit.get("deleted_source") == "obsidian", str(hit.get("deleted_source")))
     check(f"[{engine}] 正文未物理删除（可恢复）",
           storage.note_read(USER, nid, "") == "重要正文", "")
     r = client.get("/api/sync/list", headers=HK(key))
@@ -251,6 +253,25 @@ def run_suite(engine):
           "工作/待删.md" not in [f["path"] for f in r.json()["files"]], "")
     r = client.delete("/api/sync/file", headers=HK(key), params={"path": "工作/不存在.md"})
     check(f"[{engine}] DELETE 不存在 -> 404", r.status_code == 404, str(r.status_code))
+
+    r = client.post("/api/notes/import-files", headers=HA(tok), json={
+        "folder": "归档", "vault": "default",
+        "files": [
+            {"path": "子/甲.md", "content": "# 甲\r\n\r\nhello\r\n"},
+            {"path": "乙.md", "content": "plain"},
+        ],
+    })
+    check(f"[{engine}] 拖入目标文件夹 imported=2",
+          r.status_code == 200 and r.json().get("imported") == 2, r.text[:160])
+    idx = storage.notes_index(USER)
+    hit_a = next(i for i in idx if i.get("title") == "甲" and not i.get("deleted"))
+    hit_b = next(i for i in idx if i.get("title") == "乙" and not i.get("deleted"))
+    check(f"[{engine}] 嵌套文件落在目标文件夹下",
+          hit_a.get("folder") == "归档/子", str(hit_a.get("folder")))
+    check(f"[{engine}] 单文件落在目标文件夹",
+          hit_b.get("folder") == "归档", str(hit_b.get("folder")))
+    body_a = storage.note_read(USER, hit_a["id"], "")
+    check(f"[{engine}] 导入正文去掉 CR", "\r" not in body_a and "hello" in body_a, repr(body_a[:40]))
 
     # ---------- 7. LWW ----------
     print("-- 7. LWW --")

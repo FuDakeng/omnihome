@@ -112,6 +112,21 @@
   color: var(--text-muted);
   font-size: 12px;
 }
+.omnihome-sync-trash {
+  margin: 8px 0 4px;
+}
+.omnihome-sync-src {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+  vertical-align: 1px;
+}
 .omnihome-sync-log-item {
   padding: 10px 4px 9px;
   border-bottom: 1px dashed var(--background-modifier-border);
