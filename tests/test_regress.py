@@ -31,6 +31,11 @@ def test_mermaid_editor_support():
     assert "</body>" not in purify.lower()
     css = (ROOT / "demo" / "css" / "components" / "pages.css").read_text(encoding="utf-8")
     assert ".lm-view-btn" in css
+    mmd = (ROOT / "demo" / "js" / "mermaid.js").read_text(encoding="utf-8")
+    assert "prepareDiagram" in mmd
+    assert "prepareGantt" in mmd
+    assert "theme: 'base'" in mmd
+    assert "polishChart" in mmd
     mobile = (ROOT / "demo" / "css" / "mobile.css").read_text(encoding="utf-8")
     assert ".lm-view-btn" in mobile
 

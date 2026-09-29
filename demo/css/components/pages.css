@@ -393,20 +393,79 @@ pre.md-code.is-folded [data-md-code-act="fold"]{ transform: rotate(-90deg); }
   width: 100%;
   max-width: 100%;
   margin-top: 28px;
-  padding: 8px 10px 10px;
+  padding: 12px 14px 14px;
   border: 1px solid var(--om-border);
-  border-radius: 8px;
+  border-radius: var(--om-radius-sm);
   background: var(--om-surface);
+  box-shadow: var(--om-shadow-sm);
   overflow-x: auto;
+  overflow-y: hidden;
   white-space: normal;
   color: var(--om-text-1);
-  font-size: 13px;
-  line-height: 1.5;
+  font-family: var(--om-font);
+  font-size: 14px;
+  line-height: 1.45;
 }
 .lm-mermaid.is-folded{ display: none; }
-.lm-mermaid-chart{ min-width: 0; }
+.lm-mermaid-chart{ min-width: 0; color: var(--om-text-1); font-family: var(--om-font); font-size: 14px; line-height: 1.45; }
 .lm-mermaid-chart svg,
-.md-mermaid svg{ max-width: 100%; height: auto; }
+.md-mermaid svg{
+  display: block;
+  max-width: none;
+  height: auto;
+  overflow: visible;
+  font-family: var(--om-font);
+}
+/* 围栏把字号和颜色清成 0 / 透明，不能漏进图表。角色名用了和底色相同的 fill，这里改回正文色。 */
+.lm-mermaid svg text.actor,
+.md-mermaid svg text.actor,
+.lm-mermaid svg .commit-label,
+.md-mermaid svg .commit-label{
+  fill: var(--om-text-1) !important;
+}
+.lm-mermaid svg .edgeLabel,
+.md-mermaid svg .edgeLabel,
+.lm-mermaid svg .edgeLabel p,
+.md-mermaid svg .edgeLabel span{
+  color: var(--om-text-1) !important;
+}
+.lm-mermaid svg text.legend,
+.md-mermaid svg text.legend{
+  fill: var(--om-text-1) !important;
+}
+.lm-mermaid svg .messageText,
+.md-mermaid svg .messageText,
+.lm-mermaid svg .loopText,
+.md-mermaid svg .loopText,
+.lm-mermaid svg .labelText,
+.md-mermaid svg .labelText{
+  fill: var(--om-text-1) !important;
+}
+.lm-mermaid svg rect.background,
+.md-mermaid svg rect.background{ fill: transparent !important; }
+.lm-mermaid svg .node > rect,
+.md-mermaid svg .node > rect,
+.lm-mermaid svg .cluster > rect,
+.md-mermaid svg .cluster > rect,
+.lm-mermaid svg rect.actor,
+.md-mermaid svg rect.actor{
+  rx: 8px;
+  ry: 8px;
+}
+.lm-mermaid svg .edgeLabel rect,
+.md-mermaid svg .edgeLabel rect{
+  rx: 6px;
+  ry: 6px;
+}
+.lm-mermaid svg .nodeLabel,
+.md-mermaid svg .nodeLabel,
+.lm-mermaid svg .edgeLabel,
+.md-mermaid svg .edgeLabel{
+  line-height: 1.4;
+  overflow: visible;
+}
+.lm-mermaid svg foreignObject,
+.md-mermaid svg foreignObject{ overflow: visible; }
 .lm-mermaid-chart:empty::after{
   content: '正在渲染图表…';
   color: var(--om-text-3);
