@@ -24,6 +24,7 @@ import secretbox
 import teams
 import translate as translate_svc
 from sessions import require_user, verify_password
+from routers.data import EXTENSION_ZIP, _plugin_zip_bytes
 
 router = APIRouter()
 
@@ -162,7 +163,12 @@ def download_extension(authorization: Optional[str] = Header(None),
     if not EXTENSION_ZIP.exists():
         raise HTTPException(
             404, "未找到扩展安装包：请将 omnihome-extension.zip 放到部署包根目录")
-    return FileResponse(str(EXTENSION_ZIP), filename="omnihome-extension.zip")
+    return FileResponse(
+        str(EXTENSION_ZIP),
+        media_type="application/zip",
+        filename="omnihome-extension.zip",
+        headers={"Cache-Control": "no-transform"},
+    )
 
 @router.get("/api/plugin.zip")
 def download_plugin(authorization: Optional[str] = Header(None),
@@ -171,8 +177,12 @@ def download_plugin(authorization: Optional[str] = Header(None),
     data, version = _plugin_zip_bytes()
     if not data:
         raise HTTPException(404, "未找到 Obsidian 插件目录")
-    from fastapi.responses import StreamingResponse
-    return Response(content=data, media_type="application/zip",
-                    headers={"Content-Disposition":
-                             'attachment; filename="omnihome-sync.zip"'})
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="omnihome-sync.zip"',
+            "Cache-Control": "no-transform",
+        },
+    )
 
