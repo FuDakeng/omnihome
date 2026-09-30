@@ -36,6 +36,35 @@ const App = (() => {
       localStorage.setItem('om_layout_motion', reduceMotion ? '1' : '0');
       localStorage.setItem('om_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
     } catch (e) { /* 隐私模式等无法写入时跳过，登录后仍由服务端偏好生效 */ }
+    applyLocaleEffects();
+  }
+
+  /* 语言 / 周起始 / 温度变化时通知日历、天气和文案。色相这类无关调整不重复刷。 */
+  let localeSigSeen = null;
+  function applyLocaleEffects(){
+    const l = (prefs && prefs.locale) || {};
+    const lang = l.lang === 'en' ? 'en' : 'zh-CN';
+    const week = l.weekStart === 'sun' ? 'sun' : 'mon';
+    const temp = l.tempUnit === 'f' ? 'f' : 'c';
+    const sig = lang + '|' + week + '|' + temp;
+    document.documentElement.lang = lang;
+    document.documentElement.dataset.weekStart = week;
+    document.documentElement.dataset.tempUnit = temp;
+    try { localStorage.setItem('om_lang', lang); } catch (e) {}
+    if (sig === localeSigSeen) return;
+    const prev = localeSigSeen;
+    localeSigSeen = sig;
+    const langChanged = !prev || prev.split('|')[0] !== lang;
+    const first = !prev;
+    if (langChanged && window.Locale) Locale.apply();
+    if (user && langChanged) applyUser(user);
+    if (!first){
+      document.dispatchEvent(new CustomEvent('om-locale', { detail: {
+        lang: langChanged,
+        week: !prev || prev.split('|')[1] !== week,
+        temp: !prev || prev.split('|')[2] !== temp,
+      }}));
+    }
   }
 
   /* 头像渲染：有自定义头像时用图片填充，否则回首字母 */
@@ -64,9 +93,10 @@ const App = (() => {
     });
     $$('.user-chip .user-name, .menu-head .user-name').forEach(el =>
       el.textContent = u.nickname || u.username);
-    const planLabel = u.role === 'admin' ? '管理员' : '成员';
+    const tr = window.Locale ? s => Locale.t(s) : s => s;
+    const planLabel = u.role === 'admin' ? tr('管理员') : tr('成员');
     const sub = $('.user-chip .user-plan');
-    if (sub) sub.textContent = planLabel + ' · 在线';
+    if (sub) sub.textContent = planLabel + ' · ' + tr('在线');
     const mail = $('.menu-head .user-plan');
     if (mail) mail.textContent = planLabel + ' · @' + u.username;
   }
@@ -146,6 +176,7 @@ const App = (() => {
     applyUser(u);
     prefs = await API.get('/api/settings').catch(() => null);
     applyPrefs(prefs);
+    applyUser(u);
     unlock();
     listeners.forEach(fn => { try { fn(u); } catch (e) { console.error(e); } });
     refreshInbox();

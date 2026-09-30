@@ -10,6 +10,8 @@
       localStorage.getItem('om_layout_compact') === '1' ? 'on' : 'off';
     document.documentElement.dataset.motion =
       localStorage.getItem('om_layout_motion') === '1' ? 'off' : 'on';
+    if (localStorage.getItem('om_lang') === 'en')
+      document.documentElement.lang = 'en';
     var sidebarCollapsed = localStorage.getItem('om_sidebar_collapsed') === '1';
     document.documentElement.classList.toggle('sidebar-collapsed', sidebarCollapsed);
     var syncSidebar = function () {

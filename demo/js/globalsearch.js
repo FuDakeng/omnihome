@@ -40,7 +40,7 @@
             <span class="sp-del" data-recent-del="${App.esc(q)}" title="删除这条历史">×</span></button>`).join('')
         : '<div style="font-size:12px;color:var(--om-text-3);padding:4px 2px">暂无搜索记录</div>';
     }
-    $$('.engine-chip').forEach(c => c.classList.toggle('on', c.textContent === currentEngine()));
+    $$('.engine-chip').forEach(c => c.classList.toggle('on', (c.dataset.engine || c.textContent.trim()) === currentEngine()));
   }
 
   function delRecent(q){
@@ -114,7 +114,8 @@
   document.addEventListener('click', e => {
     const chip = e.target.closest('.engine-chip');
     if (chip){
-      engineIdx = ORDER.indexOf(chip.textContent);
+      const picked = ORDER.indexOf(chip.dataset.engine || chip.textContent.trim());
+      if (picked >= 0) engineIdx = picked;
       localStorage.setItem('om_engine', engineIdx);
       renderRecent();
       return;

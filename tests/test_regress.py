@@ -40,6 +40,40 @@ def test_mermaid_editor_support():
     assert ".lm-view-btn" in mobile
 
 
+def test_locale_week_temp_and_last_login():
+    """语言与区域要作用到日历和天气；登录记录不留空档；用户列表显示最近登录。"""
+    import time
+    sys.path.insert(0, str(BACKEND))
+    from routers.auth import _last_login_label
+
+    assert _last_login_label({}) == ""
+    assert _last_login_label({"logins": [{"ts": 0}, "bad"]}) == ""
+    older = 1_700_000_000
+    newer = 1_800_000_000
+    assert _last_login_label({"logins": [{"ts": older}, {"ts": newer - 10}]}) == time.strftime(
+        "%Y-%m-%d %H:%M", time.localtime(newer - 10))
+    assert _last_login_label({
+        "lastLoginAt": newer,
+        "logins": [{"ts": older}],
+    }) == time.strftime("%Y-%m-%d %H:%M", time.localtime(newer))
+
+    settings = (ROOT / "demo" / "js" / "settings.js").read_text(encoding="utf-8")
+    assert "最近登录" in settings
+    assert "创建于" not in settings
+    cal = (ROOT / "demo" / "js" / "calendar.js").read_text(encoding="utf-8")
+    assert "weekStart" in cal
+    assert "DOW_SUN" in cal
+    weather = (ROOT / "demo" / "js" / "weather.js").read_text(encoding="utf-8")
+    assert "tempC" in weather
+    css = (ROOT / "demo" / "css" / "components" / "overlays.css").read_text(encoding="utf-8")
+    assert ".set-row.stack > .set-row-info" in css
+    assert "flex: none" in css
+    html = (ROOT / "demo" / "views" / "overlays-settings.html").read_text(encoding="utf-8")
+    assert "set-row stack" in html
+    assert "天气气温按此单位显示" in html
+    assert "locale.js" in (ROOT / "demo" / "js" / "boot.js").read_text(encoding="utf-8")
+
+
 def test_changelog_and_version():
     sys.path.insert(0, str(BACKEND))
     import app_version

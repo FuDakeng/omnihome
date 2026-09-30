@@ -25,19 +25,29 @@
   };
 
   function windText(deg){
-    const dirs = ['北', '东北', '东', '东南', '南', '西南', '西', '西北'];
-    return dirs[Math.round(deg / 45) % 8] + '风';
+    const dirs = ['北风', '东北风', '东风', '东南风', '南风', '西南风', '西风', '西北风'];
+    const name = dirs[Math.round(deg / 45) % 8];
+    return window.Locale ? Locale.t(name) : name;
   }
+  function t(s){ return window.Locale ? Locale.t(s) : s; }
+  function showTemp(v){ return window.Locale ? Locale.tempC(v) : v; }
+  function unit(){ return window.Locale ? Locale.tempMark() : '°C'; }
 
   /* 附加项文本：缺数据时返回空串不展示 */
   function extraOf(key, d){
     const t0 = (d.days || [])[0] || {};
+    const gap = window.Locale && Locale.lang() === 'en' ? ' ' : '';
     switch (key){
-      case 'cond':    return d.cond || '';
-      case 'temp':    return t0.max != null ? `↑${t0.max}°/↓${t0.min}° 体感${d.feels}°` : `体感${d.feels}°`;
-      case 'humidity':return d.humidity != null ? `湿度${d.humidity}%` : '';
-      case 'rain':    return d.rainProb != null ? `雨${d.rainProb}%` : '';
-      case 'aqi':     return d.aqi != null ? `空气${d.aqi}` : '';
+      case 'cond':    return t(d.cond || '');
+      case 'temp': {
+        const feels = t('体感') + gap;
+        return t0.max != null
+          ? `↑${showTemp(t0.max)}°/↓${showTemp(t0.min)}° ${feels}${showTemp(d.feels)}°`
+          : `${feels}${showTemp(d.feels)}°`;
+      }
+      case 'humidity':return d.humidity != null ? `${t('湿度')}${gap}${d.humidity}%` : '';
+      case 'rain':    return d.rainProb != null ? `${t('降雨概率')}${gap}${d.rainProb}%` : '';
+      case 'aqi':     return d.aqi != null ? `${t('空气指数')}${gap}${d.aqi}` : '';
       case 'uv':      return d.uv != null ? `UV${Math.round(d.uv)}` : '';
       default: return '';
     }
@@ -45,14 +55,14 @@
 
   function renderStrip(){
     const w = prefs();
-    $('#wxSCity').textContent = locText() || (w.lat ? '自定义位置' : '定位中');
+    $('#wxSCity').textContent = locText() || (w.lat ? t('自定义位置') : t('定位中'));
     if (!last) return;
-    $('#wxSTemp').textContent = last.temp + '°';
+    $('#wxSTemp').textContent = showTemp(last.temp) + unit();
     $('#wxSIc use').setAttribute('href', '#i-' + last.icon);
     $('#wxSExtra').textContent =
       fields().map(k => extraOf(k, last)).filter(Boolean).join(' · ');
     $('#wxStripInfo').title =
-      `${locText() || '当前位置'} · ${last.cond} ${last.temp}° · 更新于 ${last.updated} · 点击查看详情`;
+      `${locText() || t('当前位置')} · ${t(last.cond)} ${showTemp(last.temp)}${unit()} · ${last.updated}`;
   }
 
   /* 时区变化时持久化（顶栏时钟读取），值未变则跳过请求 */
@@ -73,7 +83,7 @@
       syncTz(d);
       renderStrip();
     } catch (e) {
-      $('#wxSCity').textContent = locText() || '天气不可用';
+      $('#wxSCity').textContent = locText() || t('天气不可用');
       $('#wxSTemp').textContent = '--°';
     }
   }
@@ -85,23 +95,23 @@
   function openDetail(){
     if (!last){ load(); return; }
     const d = last;
-    $('#wxDTitle').textContent = '天气详情 · ' + (locText() || '当前位置');
+    $('#wxDTitle').textContent = t('天气详情') + ' · ' + (locText() || t('当前位置'));
     $('#wxDSub').textContent =
-      `${d.cond} · 更新于 ${d.updated}${prefs().tzName ? ' · 时区 ' + prefs().tzName : ''}`;
+      `${t(d.cond)} · ${d.updated}${prefs().tzName ? ' · ' + prefs().tzName : ''}`;
     $('#wxDIc use').setAttribute('href', '#i-' + d.icon);
-    $('#wxDTemp').innerHTML = d.temp + '<sup>°C</sup>';
-    $('#wxDCond').textContent = `体感 ${d.feels}°C · ${windText(d.windDeg)} ${d.windSpeed} km/h`;
+    $('#wxDTemp').innerHTML = showTemp(d.temp) + '<sup>' + unit() + '</sup>';
+    $('#wxDCond').textContent = `${t('体感')} ${showTemp(d.feels)}${unit()} · ${windText(d.windDeg)} ${d.windSpeed} km/h`;
     $('#wxDMeta').innerHTML = [
-      metaItem('#i-droplet', d.humidity != null ? d.humidity + '%' : '--', '湿度'),
-      metaItem('#i-cloud-rain', d.rainProb != null ? d.rainProb + '%' : '--', '降雨概率'),
-      metaItem('#i-activity', d.aqi != null ? d.aqi : '--', '空气指数'),
-      metaItem('#i-sun', d.uv != null ? Math.round(d.uv) : '--', '紫外线'),
+      metaItem('#i-droplet', d.humidity != null ? d.humidity + '%' : '--', t('湿度')),
+      metaItem('#i-cloud-rain', d.rainProb != null ? d.rainProb + '%' : '--', t('降雨概率')),
+      metaItem('#i-activity', d.aqi != null ? d.aqi : '--', t('空气指数')),
+      metaItem('#i-sun', d.uv != null ? Math.round(d.uv) : '--', t('紫外线')),
     ].join('');
     $('#wxDDays').innerHTML = (d.days || []).map((day, i) => `
       <div class="wx-day${i === 0 ? ' today' : ''}" title="${day.date} · ${day.cond}">
-        <span class="wx-d-name">${i === 0 ? '今天' : DOW[new Date(day.date).getDay()]}</span>
+        <span class="wx-d-name">${i === 0 ? t('今天') : t(DOW[new Date(day.date).getDay()])}</span>
         <svg class="ic"><use href="#i-${day.icon}"/></svg>
-        <span class="wx-d-t num"><b>${day.max}°</b><span>${day.min}°</span></span>
+        <span class="wx-d-t num"><b>${showTemp(day.max)}°</b><span>${showTemp(day.min)}°</span></span>
         ${day.rain != null ? `<span class="wx-d-rain num" title="降雨概率"><svg class="ic"><use href="#i-droplet"/></svg>${day.rain}%</span>` : '<span class="wx-d-rain"></span>'}
       </div>`).join('');
     App.openModal('wxDetailMask');
@@ -112,7 +122,7 @@
     const sel = new Set(fields());
     $('#wxFieldsList').innerHTML = FIELDS.map(([k, label]) => `
       <label class="tag-opt"><input type="checkbox" value="${k}" ${sel.has(k) ? 'checked' : ''}>
-      <span>${label}</span></label>`).join('');
+      <span>${t(label)}</span></label>`).join('');
   }
 
   /* ---------- 位置保存（城市 + 区县 + 坐标 + 显示字段合并） ---------- */
@@ -235,6 +245,12 @@
     if (!btn) return;
     const hit = ($('#wxCityResults')._hits || [])[+btn.dataset.cityHit];
     if (hit) saveCity(hit);
+  });
+
+  document.addEventListener('om-locale', () => {
+    renderStrip();
+    if ($('#wxDetailMask') && $('#wxDetailMask').classList.contains('open')) openDetail();
+    if ($('#wxFieldsPop') && !$('#wxFieldsPop').hidden) renderFieldsList();
   });
 
   App.onEnter(() => {

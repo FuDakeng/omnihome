@@ -141,21 +141,27 @@
   function fmtLoginTs(ts){
     const d = new Date(ts * 1000), now = new Date();
     const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    if (d.toDateString() === now.toDateString()) return '今天 ' + hm;
+    const en = window.Locale && Locale.lang() === 'en';
+    if (d.toDateString() === now.toDateString()) return (en ? 'Today ' : '今天 ') + hm;
+    if (en){
+      const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+      return `${mon} ${d.getDate()} ${hm}`;
+    }
     return `${d.getMonth() + 1} 月 ${d.getDate()} 日 ${hm}`;
   }
   async function loadLogins(){
     try {
       const d = await API.get('/api/auth/logins');
       const list = d.logins || [];
+      const tr = window.Locale ? s => Locale.t(s) : s => s;
       $('#loginList').innerHTML = list.length ? list.map((x, i) => `
         <div class="qk-row">
-          <span class="qk-name" style="width:auto;max-width:180px">${App.esc(x.device || '未知设备')}</span>
-          ${i === 0 ? '<span class="chip success">当前设备</span>' : ''}
-          <span class="num" style="margin-left:auto;font-size:11px;color:var(--om-text-3)">${App.esc(x.place || '')} · ${fmtLoginTs(x.ts)}</span>
-          ${i > 0 ? `<button class="icon-btn-xs" data-login-del="${x.ts}" title="移除记录"><svg class="ic"><use href="#i-close"/></svg></button>` : ''}
+          <span class="qk-name" style="width:auto;max-width:180px">${App.esc(tr(x.device || '未知设备'))}</span>
+          ${i === 0 ? `<span class="chip success">${App.esc(tr('当前设备'))}</span>` : ''}
+          <span class="num" style="margin-left:auto;font-size:11px;color:var(--om-text-3)">${App.esc(tr(x.place || ''))} · ${fmtLoginTs(x.ts)}</span>
+          ${i > 0 ? `<button class="icon-btn-xs" data-login-del="${x.ts}" title="${App.esc(tr('移除记录'))}"><svg class="ic"><use href="#i-close"/></svg></button>` : ''}
         </div>`).join('')
-        : '<div style="font-size:12px;color:var(--om-text-3)">暂无登录记录</div>';
+        : `<div style="font-size:12px;color:var(--om-text-3)">${App.esc(window.Locale ? Locale.t('暂无登录记录') : '暂无登录记录')}</div>`;
     } catch (e) {}
   }
   $('#loginList').addEventListener('click', async e => {
@@ -278,8 +284,9 @@
     /* 管理员：全部账号（可增删）；普通用户：自己 + 已绑定账号（可解绑） */
     const isAdmin = App.user && App.user.role === 'admin';
     $('#addUserBtn').hidden = !isAdmin;
-    $('#userListChip').textContent = isAdmin
-      ? '每个用户独立数据空间' : '已绑定账号可互相切换';
+    const tr = window.Locale ? s => Locale.t(s) : s => s;
+    $('#userListChip').textContent = tr(isAdmin
+      ? '每个用户独立数据空间' : '已绑定账号可互相切换');
     try {
       const users = await API.get('/api/auth/users');
       $('#userList').innerHTML = users.map(u => `
@@ -287,13 +294,13 @@
           <div style="display:flex;align-items:center;gap:12px">
             <span class="avatar">${App.esc((u.nickname || u.username).slice(0, 2).toUpperCase())}</span>
             <div class="set-row-info"><div class="set-row-label">${App.esc(u.nickname || u.username)}</div>
-              <div class="set-row-sub">@${App.esc(u.username)} · 创建于 ${App.esc(u.createdAt)}</div></div>
+              <div class="set-row-sub">@${App.esc(u.username)} · ${tr('最近登录')} ${App.esc(u.lastLogin || '—')}</div></div>
           </div>
           <div style="display:flex;align-items:center;gap:8px">
-            <span class="chip ${u.role === 'admin' ? 'primary' : 'no-dot'}">${u.role === 'admin' ? '管理员' : '成员'}</span>
-            ${u.bound ? `<button class="icon-btn-xs" data-unlink="${App.esc(u.username)}" title="解除绑定"><svg class="ic"><use href="#i-close"/></svg></button>` : ''}
+            <span class="chip ${u.role === 'admin' ? 'primary' : 'no-dot'}">${u.role === 'admin' ? tr('管理员') : tr('成员')}</span>
+            ${u.bound ? `<button class="icon-btn-xs" data-unlink="${App.esc(u.username)}" title="${App.esc(tr('解除绑定'))}"><svg class="ic"><use href="#i-close"/></svg></button>` : ''}
             ${isAdmin && u.username !== App.user.username && u.role !== 'admin'
-              ? `<button class="icon-btn-xs" data-user-del="${App.esc(u.username)}" title="删除用户"><svg class="ic"><use href="#i-trash"/></svg></button>` : ''}
+              ? `<button class="icon-btn-xs" data-user-del="${App.esc(u.username)}" title="${App.esc(tr('删除用户'))}"><svg class="ic"><use href="#i-trash"/></svg></button>` : ''}
           </div>
         </div>`).join('');
     } catch (e) {
@@ -727,15 +734,27 @@
     } catch (e) { showToast(e.message, 'err'); }
   });
 
+  function paintAccountLine(){
+    const u = App.user;
+    if (!u) return;
+    const tr = window.Locale ? s => Locale.t(s) : s => s;
+    $('#setUserSub').textContent = `${tr('外观、账号、数据与关于万事屋的一切')} · ${tr('当前用户')} ${u.nickname || u.username}`;
+    $('#pwdChangedAt').textContent = u.pwdChangedAt
+      ? tr('上次修改：') + u.pwdChangedAt : tr('上次修改：—');
+  }
+  document.addEventListener('om-locale', e => {
+    if (!App.user) return;
+    paintAccountLine();
+    if (e.detail && e.detail.lang){ loadLogins(); loadUsers(); }
+  });
+
   /* ---------- 进入时初始化 ---------- */
   App.onEnter(async () => {
     reflectPrefs();
     const u = App.user;
     $('#accNick').value = u.nickname || '';
     $('#accAvatar') && App.renderAvatar($('#accAvatar'), u);
-    $('#pwdChangedAt').textContent = u.pwdChangedAt
-      ? '上次修改：' + u.pwdChangedAt : '上次修改：—';
-    $('#setUserSub').textContent = `外观、账号、数据与关于万事屋的一切 · 当前用户 ${u.nickname || u.username}`;
+    paintAccountLine();
     loadUsers();
     loadRegToggle();
     loadFeatures();

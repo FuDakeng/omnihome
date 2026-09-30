@@ -23,10 +23,11 @@ function goView(name, fromHash){
   $$('.view').forEach(v => v.classList.toggle('active', v.dataset.view === name));
   $$('.nav-item[data-nav]').forEach(b => b.classList.toggle('active', b.dataset.nav === name));
   const nav = $(`.nav-item[data-nav="${name}"]`);
-  if (nav) $('#crumbTitle').textContent = nav.dataset.title;
+  if (nav) $('#crumbTitle').textContent = window.Locale ? Locale.t(nav.dataset.title) : nav.dataset.title;
   document.body.dataset.view = name;
   $('#collapseBtn')?.classList.remove('kb-mode');
-  $('#collapseBtn')?.setAttribute('title', (window.isPhone && isPhone()) ? '打开菜单' : '折叠 / 展开侧边栏');
+  const menuTitle = (window.isPhone && isPhone()) ? '打开菜单' : '折叠 / 展开侧边栏';
+  $('#collapseBtn')?.setAttribute('title', window.Locale ? Locale.t(menuTitle) : menuTitle);
   $('#userMenu').classList.remove('open');
   if (typeof window.closePhoneChrome === 'function') closePhoneChrome();
   if (name !== 'notes'){
@@ -342,18 +343,37 @@ function tickClock(){
   const off = typeof w.tzOffset === 'number'
     ? w.tzOffset : -new Date().getTimezoneOffset() * 60;
   const d = new Date(Date.now() + off * 1000);
-  const week = ['日', '一', '二', '三', '四', '五', '六'][d.getUTCDay()];
   const p = n => String(n).padStart(2, '0');
-  el.textContent = `${d.getUTCMonth() + 1} 月 ${d.getUTCDate()} 日 · 星期${week} · ` +
-    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+  const hm = `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+  const en = window.Locale && Locale.lang() === 'en';
+  if (en){
+    const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+    const week = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()];
+    el.textContent = `${mon} ${d.getUTCDate()} · ${week} · ${hm}`;
+  } else {
+    const week = ['日', '一', '二', '三', '四', '五', '六'][d.getUTCDay()];
+    el.textContent = `${d.getUTCMonth() + 1} 月 ${d.getUTCDate()} 日 · 星期${week} · ${hm}`;
+  }
   /* 悬浮提示时区归属，区分本机时间与定位城市时间 */
+  const localWord = en ? 'local time' : '当地时间';
+  const hereWord = en ? 'Local time' : '本机时间';
   el.title = w.city
-    ? `${w.city}${w.district ? ' ' + w.district : ''} 当地时间` +
+    ? `${w.city}${w.district ? ' ' + w.district : ''} ${localWord}` +
       (w.tzName ? ` · ${w.tzName}` : '')
-    : '本机时间';
+    : hereWord;
 }
 tickClock();
 setInterval(tickClock, 1000);
+document.addEventListener('om-locale', () => {
+  tickClock();
+  const name = document.body && document.body.dataset.view;
+  const nav = name && $(`.nav-item[data-nav="${name}"]`);
+  if (nav && $('#crumbTitle'))
+    $('#crumbTitle').textContent = window.Locale ? Locale.t(nav.dataset.title) : nav.dataset.title;
+  const menuTitle = (window.isPhone && typeof isPhone === 'function' && isPhone())
+    ? '打开菜单' : '折叠 / 展开侧边栏';
+  $('#collapseBtn')?.setAttribute('title', window.Locale ? Locale.t(menuTitle) : menuTitle);
+});
 
 const bootHash = viewFromHash();
 if (bootHash) goView(bootHash, true);

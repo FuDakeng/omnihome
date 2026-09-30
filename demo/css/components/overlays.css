@@ -359,6 +359,15 @@ html[data-motion="off"] .boot-bar i{ animation: none; width: 100%; opacity: .35;
 .set-row:first-child{ padding-top: 12px; }
 .set-row:last-child{ border-bottom: 0; padding-bottom: 12px; }
 .set-row-info{ min-width: 0; flex: 1 1 168px; }
+/* 纵向排列时 168px 是主轴尺寸，会在标题和内容之间撑出空白 */
+.set-row.stack{
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 10px;
+}
+.set-row.stack > .set-row-info{ flex: none; width: 100%; }
+#loginList{ display: flex; flex-direction: column; gap: 4px; }
 .set-row-label{ font-size: var(--om-fs-sm); font-weight: 600; color: var(--om-text-1); line-height: 1.45; }
 .set-row-sub{ font-size: 12px; color: var(--om-text-3); margin-top: 5px; line-height: 1.55; }
 .set-row-ctrl{ display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
