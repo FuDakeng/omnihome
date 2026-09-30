@@ -9,16 +9,26 @@
   const pad = n => String(n).padStart(2, '0');
   const key = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
+  const DOW_SUN = ['日', '一', '二', '三', '四', '五', '六'];
+  const DOW_MON = ['一', '二', '三', '四', '五', '六', '日'];
+  const DOW_SUN_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const DOW_MON_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const MONTH_EN = ['January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+
   function render(){
     const y = cursor.getFullYear(), m = cursor.getMonth();
-    $('#calLabel').textContent = `${y} 年 ${m + 1} 月`;
+    const sun = window.Locale && Locale.weekStart() === 'sun';
+    const en = window.Locale && Locale.lang() === 'en';
+    $('#calLabel').textContent = en ? `${MONTH_EN[m]} ${y}` : `${y} 年 ${m + 1} 月`;
     const first = new Date(y, m, 1);
-    const startOffset = (first.getDay() + 6) % 7;      // 周一为一周起始
+    const startOffset = sun ? first.getDay() : (first.getDay() + 6) % 7;
     const daysInMonth = new Date(y, m + 1, 0).getDate();
     const prevDays = new Date(y, m, 0).getDate();
     const todayKey = key(new Date());
+    const heads = en ? (sun ? DOW_SUN_EN : DOW_MON_EN) : (sun ? DOW_SUN : DOW_MON);
 
-    let html = '<span class="cal-dow">一</span><span class="cal-dow">二</span><span class="cal-dow">三</span><span class="cal-dow">四</span><span class="cal-dow">五</span><span class="cal-dow">六</span><span class="cal-dow">日</span>';
+    let html = heads.map(d => `<span class="cal-dow">${d}</span>`).join('');
     const cells = [];
     for (let i = startOffset - 1; i >= 0; i--) cells.push({ d: prevDays - i, other: true });
     for (let d = 1; d <= daysInMonth; d++) cells.push({ d, other: false, date: key(new Date(y, m, d)) });
@@ -44,4 +54,5 @@
   });
 
   App.onEnter(render);
+  document.addEventListener('om-locale', render);
 })();

@@ -1,4 +1,5 @@
 /* OmniHome · ESM 入口：按依赖顺序加载，最后启动应用。 */
+import './locale.js';
 import './demo.js';
 import './phone.js';
 import { API } from './api.js';

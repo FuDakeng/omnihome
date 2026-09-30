@@ -163,7 +163,35 @@ def _record_login(cfg: dict, username: str, request: Request):
            "ip": ip, "place": _ip_label(ip)}
     logins = [x for x in u.get("logins") or [] if isinstance(x, dict)]
     u["logins"] = ([rec] + logins)[:10]
+    u["lastLoginAt"] = rec["ts"]
     storage.save_config(cfg)
+
+
+def _last_login_label(u: dict) -> str:
+    """最近一次登录的本地时间。删除单条登录记录不会抹掉这个时间。"""
+    if not isinstance(u, dict):
+        return ""
+    ts = 0
+    raw = u.get("lastLoginAt")
+    if isinstance(raw, (int, float)) and raw > 0:
+        ts = int(raw)
+    for x in u.get("logins") or []:
+        if not isinstance(x, dict):
+            continue
+        try:
+            ts = max(ts, int(x.get("ts") or 0))
+        except (TypeError, ValueError):
+            continue
+    if ts <= 0:
+        return ""
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+
+
+def _user_brief(name: str, u: dict, bound: bool) -> dict:
+    return {"username": name, "nickname": u.get("nickname", name),
+            "role": u.get("role", "member"), "bound": bound,
+            "createdAt": u.get("createdAt", ""),
+            "lastLogin": _last_login_label(u)}
 
 
 @router.post("/api/auth/logout")
@@ -273,20 +301,14 @@ def list_users(authorization: Optional[str] = Header(None)):
     out = []
     if me.get("role") == "admin":
         for name, u in cfg["users"].items():
-            out.append({"username": name, "nickname": u.get("nickname", name),
-                        "role": u.get("role", "member"), "bound": False,
-                        "createdAt": u.get("createdAt", "")})
+            out.append(_user_brief(name, u, False))
         return out
-    out.append({"username": username, "nickname": me.get("nickname", username),
-                "role": me.get("role", "member"), "bound": False,
-                "createdAt": me.get("createdAt", "")})
+    out.append(_user_brief(username, me, False))
     for name in (me.get("links") or {}):
         u = cfg["users"].get(name)
         if not u:
             continue
-        out.append({"username": name, "nickname": u.get("nickname", name),
-                    "role": u.get("role", "member"), "bound": True,
-                    "createdAt": u.get("createdAt", "")})
+        out.append(_user_brief(name, u, True))
     return out
 
 
