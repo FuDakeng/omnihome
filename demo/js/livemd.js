@@ -25,25 +25,37 @@ export const LiveMD = (() => {
   const escAttr = s => esc(s).replace(/"/g, '&quot;');
 
   /* ---------- 块级语法标记 ---------- */
+  /* 缩进视觉宽度：Tab 按 2 空格计，与 Tab 缩进写入一致 */
+  function indentCols(s){
+    let w = 0;
+    for (const ch of String(s || '')) w += ch === '\t' ? 2 : 1;
+    return w;
+  }
   function parseMarker(line){
     let m;
     if ((m = line.match(/^ {0,3}(-{3,}|\*{3,}|_{3,}) *$/))) return { raw: m[0], type: 'hr' };
-    /* 任务：行首可缩进；- / * / +；「-」和「[」之间的空格可省（-[ ]） */
+    /* 任务：行首可空格/Tab；- / * / +；「-」和「[」之间的空格可省（-[ ]） */
     if ((m = line.match(/^([ \t]*)([-*+])[ \t]?\[([ xX])\]/))) {
       let raw = m[0];
       if (line[raw.length] === ' ' || line[raw.length] === '\t') raw += line[raw.length];
       return { raw, type: 'todo', checked: m[3] !== ' ', indent: m[1] };
     }
-    if ((m = line.match(/^[-*+] /)))         return { raw: m[0], type: 'li' };
+    /* 无序 / 有序：行首可有空格或 Tab，渲染时按缩进留白 */
+    if ((m = line.match(/^([ \t]*)([-*+]) /))) return { raw: m[0], type: 'li', indent: m[1] };
     if ((m = line.match(/^#{1,6} /)))        return { raw: m[0], type: 'h', level: m[0].length - 1 };
     if ((m = line.match(/^> /)))             return { raw: m[0], type: 'quote' };
-    if ((m = line.match(/^(\d+)\. /)))       return { raw: m[0], type: 'oli', num: +m[1] };
+    if ((m = line.match(/^([ \t]*)(\d+)\. /))) return { raw: m[0], type: 'oli', num: +m[2], indent: m[1] };
     return null;
   }
-  const contPrefix = mk =>
-    mk ? (mk.type === 'todo' ? (mk.indent || '') + '- [ ] ' : mk.type === 'li' ? '- '
-        : mk.type === 'oli' ? (mk.num + 1) + '. ' : mk.type === 'quote' ? '> ' : '') : '';
-
+  const contPrefix = mk => {
+    if (!mk) return '';
+    const ind = mk.indent || '';
+    if (mk.type === 'todo') return ind + '- [ ] ';
+    if (mk.type === 'li') return ind + '- ';
+    if (mk.type === 'oli') return ind + (mk.num + 1) + '. ';
+    if (mk.type === 'quote') return '> ';
+    return '';
+  };
   /* ---------- 行内语法渲染（行内代码内不再解析） ---------- */
   function inlineHtml(s){
     let out = '', i = 0;
@@ -832,7 +844,8 @@ export const LiveMD = (() => {
                       : mk.type === 'quote' ? '&gt;' : esc(mk.raw.trim());
           inner = `<span class="lm-mk" data-raw="${esc(mk.raw)}" contenteditable="false">${glyph}</span>`;
         }
-        const ind = mk.indent && mk.indent.length ? ` style="--lm-ind:${mk.indent.length}"` : '';
+        const indW = mk.indent ? indentCols(mk.indent) : 0;
+        const ind = indW ? ` style="--lm-ind:${indW}"` : '';
         return `<div class="lm-line lm-${mk.type}${mk.type === 'h' ? ' lm-h lm-h' + mk.level : ''}" data-src-i="${i}"${ind}>${inner}${inlineHtml(rest) || '<br>'}</div>`;
       }
       return `<div class="lm-line" data-src-i="${i}">${inlineHtml(line) || '<br>'}</div>`;
@@ -1256,6 +1269,49 @@ export const LiveMD = (() => {
       return { line, r, sel, textBefore: lineRaw(line).slice(0, rawUntil(line, r.startContainer, r.startOffset)) };
     }
 
+    /* ---------- Tab 缩进：对当前行或多行选区在行首写入 / 去掉 Tab ---------- */
+    const TAB_IND = '\t';
+    function indentSelection(dir){
+      const rng = selectionRawRange();
+      if (!rng) return;
+      const raw = serializeAll();
+      const arr = raw.split('\n');
+      if (!arr.length) return;
+      let a = lineIndexAt(arr, rng.start);
+      /* 选区终点若刚好落在换行后（行首），末行不参与缩进 */
+      let endPos = rng.end;
+      if (endPos > rng.start && endPos > 0 && raw[endPos - 1] === '\n') endPos -= 1;
+      let b = lineIndexAt(arr, endPos);
+      if (a > b){ const t = a; a = b; b = t; }
+      a = Math.max(0, Math.min(a, arr.length - 1));
+      b = Math.max(0, Math.min(b, arr.length - 1));
+
+      let deltaStart = 0, deltaEnd = 0;
+      for (let i = a; i <= b; i++){
+        if (dir > 0){
+          arr[i] = TAB_IND + arr[i];
+          if (i === a) deltaStart = TAB_IND.length;
+          deltaEnd += TAB_IND.length;
+        } else {
+          const m = arr[i].match(/^(?:\t| {1,2})/);
+          if (!m) continue;
+          arr[i] = arr[i].slice(m[0].length);
+          if (i === a) deltaStart = -m[0].length;
+          deltaEnd -= m[0].length;
+        }
+      }
+      if (!deltaStart && !deltaEnd && dir < 0) return;
+
+      const nraw = arr.join('\n');
+      ta.value = nraw;
+      try { ta.dispatchEvent(new Event('input')); } catch (er) {}
+      rebuild(nraw);
+      const ns = Math.max(0, rng.start + deltaStart);
+      const ne = Math.max(ns, rng.end + deltaEnd);
+      if (rng.start === rng.end) restoreCaret(ns);
+      else selectRawRange(ns, ne);
+    }
+
     /* ---------- 按键：Enter 续行 / Backspace 还原与并段 ---------- */
     function onKeydown(e){
       if (composing || e.isComposing) return;
@@ -1281,6 +1337,13 @@ export const LiveMD = (() => {
           return;
         }
         if (e.key === 'Backspace' || e.key === 'Delete') return;
+      }
+
+      /* Tab / Shift+Tab：整行（或多行选区）缩进 / 取消缩进，写入 Tab 字符 */
+      if (e.key === 'Tab'){
+        e.preventDefault();
+        indentSelection(e.shiftKey ? -1 : 1);
+        return;
       }
 
       if (e.key === 'Enter' && e.shiftKey){

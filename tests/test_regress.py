@@ -281,6 +281,36 @@ def test_marker_wrap_and_sidebar_pref():
     assert storage.DEFAULT_PREFS["layout"]["sidebarCollapsed"] is False
 
 
+def test_livemd_tab_indent_and_indented_lists():
+    """实时编辑器支持 Tab 缩进；有序/无序/任务列表在行首有空格或 Tab 时也能渲染。"""
+    import re
+
+    livemd = (ROOT / "demo" / "js" / "livemd.js").read_text(encoding="utf-8")
+    assert "function indentSelection" in livemd
+    assert "e.key === 'Tab'" in livemd
+    assert "indentSelection(e.shiftKey ? -1 : 1)" in livemd
+    assert "function indentCols" in livemd
+    assert r"^([ \t]*)([-*+]) " in livemd
+    assert r"^([ \t]*)(\d+)\. " in livemd
+    assert r"^([ \t]*)([-*+])[ \t]?\[([ xX])\]" in livemd
+
+    pages = (ROOT / "demo" / "css" / "components" / "pages.css").read_text(encoding="utf-8")
+    assert ".lm-li, .lm-oli, .lm-todo{ padding-left: calc(2px + var(--lm-ind, 0) * 1ch); }" in pages
+
+    # 与 parseMarker 同构的正则：带前导空白的列表都能识别
+    todo_re = re.compile(r"^([ \t]*)([-*+])[ \t]?\[([ xX])\]")
+    li_re = re.compile(r"^([ \t]*)([-*+]) ")
+    oli_re = re.compile(r"^([ \t]*)(\d+)\. ")
+    assert todo_re.match("  - [x] done")
+    assert todo_re.match("\t- [ ] todo")
+    assert li_re.match("  - item")
+    assert li_re.match("\t* star")
+    assert oli_re.match("  1. one")
+    assert oli_re.match("\t2. two")
+    assert not li_re.match("-nospace")
+    assert not oli_re.match("1.nospace")
+
+
 def test_appearance_density_and_motion_wired():
     """密度 / 动效开关必须真正改 html dataset，且有对应 CSS；外观页结构完整。"""
     html = (ROOT / "demo" / "views" / "overlays-settings.html").read_text(encoding="utf-8")
