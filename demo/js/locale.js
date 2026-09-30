@@ -349,6 +349,11 @@ const EN = {
   "新建书签": "New bookmark",
   "添加组件": "Add widget",
   "编辑布局": "Edit layout",
+  "显示组件": "Show widgets",
+  "完成": "Done",
+  "点一下，把收起来的组件放回仪表盘": "Tap a widget to put it back on the dashboard",
+  "所有组件都在仪表盘上": "Every widget is already on the dashboard",
+  "编辑布局时导航保持展开，避免挡住组件": "The sidebar stays open while you edit, so widgets stay visible",
   "运行正常": "Healthy",
   "查看详情": "Details",
 };

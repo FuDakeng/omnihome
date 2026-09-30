@@ -214,6 +214,38 @@ def test_dashboard_edit_tools_not_clipped():
     assert "width: 44px" in mobile.split(".dash-tools .icon-btn-xs", 1)[1][:80]
 
 
+def test_dashboard_palette_instead_of_modal():
+    """编辑布局用左侧组件栏添加组件；完成在栏内；折叠时拉开导航列，手机内容让到右侧。"""
+    html = (ROOT / "demo" / "views" / "dashboard.html").read_text(encoding="utf-8")
+    overlay = (ROOT / "demo" / "views" / "overlays.html").read_text(encoding="utf-8")
+    js = (ROOT / "demo" / "js" / "dashboard.js").read_text(encoding="utf-8")
+    css = (ROOT / "demo" / "css" / "components" / "pages.css").read_text(encoding="utf-8")
+    mobile = (ROOT / "demo" / "css" / "mobile.css").read_text(encoding="utf-8")
+    loc = (ROOT / "demo" / "js" / "locale.js").read_text(encoding="utf-8")
+    assert 'id="dashPalette"' in html
+    assert 'id="dashDoneBtn"' in html and "完成" in html
+    assert 'id="addWidgetList"' in html
+    assert 'id="dashAddBtn"' not in html
+    assert "点一下，把收起来的组件放回仪表盘" in html
+    assert 'id="addWidgetMask"' not in overlay
+    assert "addWidgetList" not in overlay
+    assert "addWidgetMask" not in js
+    assert "openModal('addWidgetMask')" not in js
+    assert "dash-palette-open" in js
+    assert "document.body.appendChild(pal)" in js
+    assert "dashDoneBtn" in js
+    assert "stopPropagation" in js
+    assert "所有组件都在仪表盘上" in js
+    assert "body.dash-palette-open .app" in css
+    assert "var(--dash-palette-w)" in css
+    assert "body.dash-palette-open .main" in mobile
+    assert "grid-column: 2" in mobile
+    assert "--dash-palette-w: min(200px, 52vw)" in mobile
+    assert "body.dash-palette-open #dashGrid .dash-spark" in mobile
+    assert "点一下，把收起来的组件放回仪表盘" in loc
+    assert "编辑布局时导航保持展开，避免挡住组件" in loc
+
+
 def test_vault_categories_and_preview():
     """保险库左分类右卡片；分类/凭据可多选拖拽；预览同时展示地址账号密码；同站可多账号。"""
     js = (ROOT / "demo" / "js" / "vault.js").read_text(encoding="utf-8")

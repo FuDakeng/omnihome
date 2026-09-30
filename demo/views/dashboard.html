@@ -46,7 +46,6 @@
           </div>
           </div>
           <div class="vh-actions">
-            <button class="btn btn-primary btn-sm" id="dashAddBtn" hidden><svg class="ic"><use href="#i-plus"/></svg>添加组件</button>
             <button class="btn btn-outline btn-sm" id="dashEditBtn"><svg class="ic"><use href="#i-sliders"/></svg>编辑布局</button>
           </div>
         </div>
@@ -395,4 +394,16 @@
             </div>
           </article>
         </div>
+
+        <!-- 编辑布局：盖在左侧导航上的组件栏，完成按钮在栏内 -->
+        <aside class="dash-palette" id="dashPalette" hidden>
+          <div class="dash-palette-head">
+            <div class="dash-palette-title">添加组件</div>
+            <p>点一下，把收起来的组件放回仪表盘</p>
+          </div>
+          <div class="dash-palette-list" id="addWidgetList"></div>
+          <div class="dash-palette-foot">
+            <button type="button" class="btn btn-primary" id="dashDoneBtn"><svg class="ic"><use href="#i-check"/></svg>完成</button>
+          </div>
+        </aside>
       </section>

@@ -401,16 +401,6 @@
   document.addEventListener('monitor-gate', () => start());
   window.addEventListener('resize', () => fit());
 
-  const addBtn = $('#dashAddBtn');
-  const head = document.querySelector('.view[data-view="dashboard"] > .view-head');
-  if (addBtn && head){
-    const syncEdit = () => {
-      head.classList.toggle('is-dash-editing', !addBtn.hidden);
-      requestAnimationFrame(fit);
-    };
-    new MutationObserver(syncEdit).observe(addBtn, { attributes: true, attributeFilter: ['hidden'] });
-    syncEdit();
-  }
   const strips = document.querySelector('.vh-strips');
   if (window.ResizeObserver && strips){
     new ResizeObserver(() => fit()).observe(strips);

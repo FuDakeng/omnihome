@@ -116,9 +116,6 @@
   position: relative;
   z-index: 2;
 }
-.view[data-view="dashboard"] > .view-head.is-dash-editing{
-  gap: max(16px, var(--om-space-4));
-}
 .vh-strips .wx-strip{
   flex: 0 1 auto;
   min-width: 108px;
