@@ -822,22 +822,101 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
 #dashGrid [data-widget="vault"].has-h .btn,
 #dashGrid [data-widget="passgen"].has-h [data-pg="go"]{ margin-top: auto; }
 
-/* 添加组件弹窗列表 */
-.widget-add-grid{ display: flex; flex-direction: column; gap: 8px; }
+/* 编辑布局：组件栏悬浮在左侧导航之上。
+   导航折叠或窄桌面收成图标栏时，把导航列拉回展开宽度，栏才不会盖住右侧卡片。
+   只在编辑期间生效，不改用户保存的折叠状态。手机另见 mobile.css。 */
+body.dash-palette-open{
+  --dash-palette-w: var(--om-sidebar-w);
+}
+body.dash-palette-open .app{
+  grid-template-columns: var(--dash-palette-w) minmax(0, 1fr);
+  transition: none;
+}
+/* 完成在组件栏里，头部不再留「编辑布局」 */
+body.dash-palette-open .view[data-view="dashboard"] > .view-head .vh-actions{
+  display: none;
+}
+.dash-palette{
+  position: fixed;
+  top: 0; left: 0;
+  z-index: 55;
+  width: var(--dash-palette-w, var(--om-sidebar-w));
+  height: var(--om-app-h);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: calc(var(--om-space-5) + var(--om-safe-top)) var(--om-space-3) calc(var(--om-space-4) + var(--om-safe-bottom));
+  background: var(--om-surface);
+  border-right: 1px solid var(--om-border);
+  box-shadow: var(--om-shadow-lg);
+  box-sizing: border-box;
+}
+.dash-palette[hidden]{ display: none !important; }
+.dash-palette-head{
+  flex: none;
+  padding: 2px var(--om-space-2) var(--om-space-4);
+}
+.dash-palette-title{
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .2px;
+}
+.dash-palette-head p{
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--om-text-3);
+}
+.dash-palette-list{
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 2px 4px;
+}
+.dash-palette-empty{
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--om-text-3);
+  text-align: center;
+  padding: 18px 8px;
+}
+.dash-palette-foot{
+  flex: none;
+  margin-top: var(--om-space-3);
+  padding-top: var(--om-space-3);
+  border-top: 1px solid var(--om-border);
+}
+.dash-palette-foot .btn{
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+}
 .widget-add-tile{
   display: flex; align-items: center; gap: 10px; width: 100%;
-  padding: 11px 14px;
+  min-height: 44px;
+  padding: 10px 12px;
   border: 1px solid var(--om-border);
   border-radius: var(--om-radius-md);
-  background: var(--om-surface); color: var(--om-text-1);
+  background: var(--om-bg); color: var(--om-text-1);
   font-size: var(--om-fs-sm); font-weight: 600; text-align: left;
   cursor: pointer;
-  transition: all var(--om-t-fast);
+  transition: border-color var(--om-t-fast), background var(--om-t-fast), color var(--om-t-fast);
 }
+.widget-add-tile span{
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.widget-add-plus{ color: var(--om-primary); }
 .widget-add-tile:hover{
   border-color: var(--om-primary-border);
   background: var(--om-primary-ghost);
-  transform: translateY(-1px);
 }
 
 /* ============================================================

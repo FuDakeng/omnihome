@@ -245,20 +245,33 @@ const Dash = (() => {
   }
 
   /* ---------- 编辑模式 ---------- */
+  /* 组件栏盖住导航。折叠（含窄桌面图标栏）时由样式把导航列拉回展开宽度，
+     栏就落在导航上，不会伸进右侧卡片。不改用户保存的折叠偏好。 */
   function setEditing(on){
     editing = on;
     grid.classList.toggle('editing', on);
-    $('#dashEditBtn').innerHTML = on
-      ? '<svg class="ic"><use href="#i-check"/></svg>完成'
-      : (window.isPhone && isPhone()
-        ? '<svg class="ic"><use href="#i-sliders"/></svg>显示组件'
-        : '<svg class="ic"><use href="#i-sliders"/></svg>编辑布局');
-    $('#dashAddBtn').hidden = !on;
-    cards().forEach(toggleCardTools);
-    if (!on){
+    const phone = window.isPhone && isPhone();
+    const editBtn = $('#dashEditBtn');
+    editBtn.innerHTML = phone
+      ? '<svg class="ic"><use href="#i-sliders"/></svg>显示组件'
+      : '<svg class="ic"><use href="#i-sliders"/></svg>编辑布局';
+    editBtn.hidden = !!on;
+    $('#dashPalette').hidden = !on;
+    document.body.classList.toggle('dash-palette-open', on);
+    const col = $('#collapseBtn');
+    if (col){
+      col.title = on
+        ? '编辑布局时导航保持展开，避免挡住组件'
+        : (phone ? '打开菜单' : '折叠 / 展开侧边栏');
+    }
+    if (on){
+      if (phone) document.body.classList.remove('nav-open');
+      renderAddList();
+    } else {
       finishSort(false);
       abortResize();
     }
+    cards().forEach(toggleCardTools);
   }
 
   /* 编辑态为每张卡片注入：拖拽把手 + 收纳按钮 + 右下角调大小手柄 */
@@ -296,10 +309,12 @@ const Dash = (() => {
     const c = cardOf(id);
     if (c) c.hidden = true;
     save();
+    if (editing) renderAddList();
     showToast(`已收纳「${WIDGETS[id].title}」，可随时添加回来`);
   }
 
-  /* ---------- 添加组件弹窗 ---------- */
+  /* ---------- 左侧组件栏（收纳项点一下放回） ---------- */
+  const CATALOG = [...DEFAULT_ORDER, ...OPT_IN];
   function canAdd(id){
     if (!WIDGETS[id] || !removed.includes(id)) return false;
     if (isAdminWidget(id) && !adminOn()) return false;
@@ -307,15 +322,17 @@ const Dash = (() => {
   }
 
   function renderAddList(){
-    const list = removed.filter(canAdd);
-    $('#addWidgetList').innerHTML = list.length
+    const list = CATALOG.filter(canAdd);
+    const box = $('#addWidgetList');
+    if (!box) return;
+    box.innerHTML = list.length
       ? list.map(id => `
-        <button class="widget-add-tile" data-widget-add="${id}">
+        <button type="button" class="widget-add-tile" data-widget-add="${id}">
           <svg class="ic"><use href="#${WIDGETS[id].icon}"/></svg>
           <span>${WIDGETS[id].title}</span>
-          <svg class="ic" style="margin-left:auto;color:var(--om-primary)"><use href="#i-plus"/></svg>
+          <svg class="ic widget-add-plus"><use href="#i-plus"/></svg>
         </button>`).join('')
-      : '<div style="font-size:12px;color:var(--om-text-3);text-align:center;padding:18px 0">所有组件都在仪表盘上，没有可添加的收纳项</div>';
+      : '<div class="dash-palette-empty">所有组件都在仪表盘上</div>';
   }
 
   function addWidget(id){
@@ -452,15 +469,23 @@ const Dash = (() => {
 
   /* ---------- 事件绑定 ---------- */
   function init(){
-    $('#dashEditBtn').addEventListener('click', () => setEditing(!editing));
-    $('#dashAddBtn').addEventListener('click', () => {
-      renderAddList();
-      App.openModal('addWidgetMask');
-    });
+    /* 视图入场动画带 transform，会把 fixed 困在内容区里，组件栏就会盖住卡片。
+       挂到 body 上，left:0 才对准视口左侧的导航。 */
+    const pal = $('#dashPalette');
+    if (pal) document.body.appendChild(pal);
+    $('#dashEditBtn').addEventListener('click', () => setEditing(true));
+    $('#dashDoneBtn').addEventListener('click', () => setEditing(false));
     $('#addWidgetList').addEventListener('click', e => {
       const btn = e.target.closest('[data-widget-add]');
       if (btn) addWidget(btn.dataset.widgetAdd);
     });
+    /* 捕获阶段拦住折叠按钮，避免编辑中把导航收成图标栏后组件栏盖住卡片，
+       也不把这次折叠写进本地或账号偏好。 */
+    window.addEventListener('click', e => {
+      if (!editing || !e.target.closest || !e.target.closest('#collapseBtn')) return;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
 
     grid.addEventListener('mousedown', e => { onGripDown(e); onResizeDown(e); });
     /* 双击手柄恢复该组件默认尺寸 */
@@ -488,6 +513,9 @@ const Dash = (() => {
 
     App.onEnter(load);
     document.addEventListener('monitor-gate', paintVisibility);
+    document.addEventListener('view-change', e => {
+      if (editing && e.detail !== 'dashboard') setEditing(false);
+    });
     setEditing(false);
   }
 

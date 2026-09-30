@@ -201,6 +201,24 @@
 
   /* 仪表盘 / 书签 / 保险库 / 监控 / 设置 */
   .wx-strip{ max-width: none; width: 100%; }
+  /* 手机没有常驻导航列。编辑时留出左侧空列给组件栏，主区域靠右，卡片不被盖住。 */
+  body.dash-palette-open{
+    --dash-palette-w: min(200px, 52vw);
+  }
+  body.dash-palette-open .app,
+  body.dash-palette-open.sidebar-collapsed .app{
+    grid-template-columns: var(--dash-palette-w) minmax(0, 1fr);
+  }
+  body.dash-palette-open .main{ grid-column: 2; min-width: 0; }
+  .dash-palette{
+    z-index: 95;
+    width: var(--dash-palette-w);
+  }
+  /* 编辑时内容列变窄，网络曲线换到仪表下方，避免被挤出卡片 */
+  body.dash-palette-open #dashGrid .dash-spark{
+    flex: 1 1 100%;
+    min-width: 0;
+  }
   /* 手机：编辑按钮整行在横条下方，两条横条同一行，监控条可收缩 */
   .view[data-view="dashboard"] > .view-head{ flex-wrap: wrap; align-items: flex-end; }
   .vh-strips{ width: 100%; min-width: 0; flex: 1 1 100%; }
