@@ -8,6 +8,8 @@
    ```mermaid 围栏会渲染为流程图 / 时序图 / 甘特图等。光标在块内时显示
    源码便于修改，离开后显示图表；工具条可锁定「代码 / 图表」视图。
    切换只改展示，不改 Markdown 原文，也不挪动已记住的编辑位置。
+   Ctrl/⌘+V 把剪贴板里的 HTML 样式转成 Markdown；Ctrl/⌘+Shift+V 只粘贴纯文本。
+   分屏下的源码文本框走同一套规则。
    隐藏的原 textarea 仍是数据源，本组件每次变更回写并派发
    'input' 事件，原有自动保存/统计/待办解析逻辑无需改动。
 
@@ -18,6 +20,7 @@
      inst.focus() / inst.destroy()
    ============================================================ */
 import { isMermaidLang, scheduleMermaid, mermaidThemeName } from './mermaid.js';
+import { clipboardToMarkdown, fitPastedMarkdown } from './html2md.js';
 
 export const LiveMD = (() => {
   const E = s => { const d = document.createElement('div'); d.innerHTML = s; return d.firstChild; };
@@ -1313,7 +1316,26 @@ export const LiveMD = (() => {
     }
 
     /* ---------- 按键：Enter 续行 / Backspace 还原与并段 ---------- */
+    /* Ctrl/⌘+Shift+V：只粘贴纯文本。有的浏览器在 paste 上不带修饰键，这里提前记下。 */
+    let plainPasteArmed = false;
+    function notePasteChord(e){
+      const key = String(e.key || '').toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && key === 'v')
+        plainPasteArmed = true;
+    }
+    function plainPasteWanted(e){
+      const armed = plainPasteArmed;
+      plainPasteArmed = false;
+      if (armed) return true;
+      return !!(e && e.shiftKey && (e.ctrlKey || e.metaKey));
+    }
+    function onPasteKeyup(e){
+      const key = String(e.key || '').toLowerCase();
+      if (key === 'v' || key === 'shift' || key === 'control' || key === 'meta')
+        setTimeout(() => { plainPasteArmed = false; }, 0);
+    }
     function onKeydown(e){
+      notePasteChord(e);
       if (composing || e.isComposing) return;
 
       if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey
@@ -1513,16 +1535,52 @@ export const LiveMD = (() => {
       }
     }
 
-    /* ---------- 粘贴：图片走上传，纯文本插入并拆行 ---------- */
+    /* ---------- 粘贴：图片走上传；Ctrl/⌘+V 保留样式为 Markdown，Ctrl/⌘+Shift+V 只贴纯文本 ---------- */
     function onPaste(e){
+      if (root.style.display === 'none') return;
+      if (root.getAttribute('contenteditable') === 'false') return;
       const files = Array.from((e.clipboardData || {}).files || [])
         .filter(f => /^image\//.test(f.type));
-      if (files.length && opts.uploadImage){ e.preventDefault(); insertFiles(files); return; }
+      if (files.length && opts.uploadImage){
+        e.preventDefault();
+        plainPasteArmed = false;
+        insertFiles(files);
+        return;
+      }
       e.preventDefault();
-      const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+      const plainOnly = plainPasteWanted(e);
+      const cd = e.clipboardData || window.clipboardData;
+      let text = clipboardToMarkdown(cd, plainOnly).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       if (!text) return;
-      const rng = selectionRawRange(); if (!rng) return;
-      insertRawAt(rng.start, text.replace(/\r/g, ''), rng.end);
+      const rng = selectionRawRange() || { start: serializeAll().length, end: serializeAll().length };
+      if (!plainOnly) text = fitPastedMarkdown(serializeAll(), rng.start, rng.end, text);
+      insertRawAt(rng.start, text, rng.end);
+    }
+    /* 分屏源码框：浏览器对 textarea 只会贴纯文本，这里同样把 HTML 转成 Markdown */
+    function onTaPaste(e){
+      if (root.style.display !== 'none') return;
+      if (ta.readOnly || ta.disabled) return;
+      const cd = e.clipboardData || window.clipboardData;
+      const plainOnly = plainPasteWanted(e);
+      let text = clipboardToMarkdown(cd, plainOnly).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      if (!text) return;
+      e.preventDefault();
+      const start = ta.selectionStart || 0;
+      const end = ta.selectionEnd == null ? start : ta.selectionEnd;
+      if (!plainOnly) text = fitPastedMarkdown(ta.value, start, end, text);
+      ta.focus();
+      try { ta.setSelectionRange(start, end); } catch (err) {}
+      let ok = false;
+      try { ok = document.execCommand('insertText', false, text); } catch (err) { ok = false; }
+      if (!ok){
+        const s = ta.selectionStart || 0;
+        const epos = ta.selectionEnd == null ? s : ta.selectionEnd;
+        const v = ta.value;
+        ta.value = v.slice(0, s) + text + v.slice(epos);
+        const p = s + text.length;
+        ta.selectionStart = ta.selectionEnd = p;
+      }
+      try { ta.dispatchEvent(new Event('input')); } catch (err) {}
     }
     /* 复制/剪切：写入 Markdown 源码，而不是渲染后的 · / ☑ 等可见符号 */
     function onCopy(e){
@@ -2120,7 +2178,11 @@ export const LiveMD = (() => {
       e.preventDefault();
     });
     root.addEventListener('keydown', onKeydown);
+    root.addEventListener('keyup', onPasteKeyup);
     root.addEventListener('paste', onPaste);
+    ta.addEventListener('keydown', notePasteChord);
+    ta.addEventListener('keyup', onPasteKeyup);
+    ta.addEventListener('paste', onTaPaste);
     root.addEventListener('copy', onCopy);
     root.addEventListener('cut', onCut);
     root.addEventListener('click', onClick);
@@ -2282,6 +2344,9 @@ export const LiveMD = (() => {
         document.removeEventListener('selectionchange', onSelChange);
         document.removeEventListener('pointerdown', onDocPointerDown, true);
         document.removeEventListener('pointerup', onPointerUp);
+        ta.removeEventListener('keydown', notePasteChord);
+        ta.removeEventListener('keyup', onPasteKeyup);
+        ta.removeEventListener('paste', onTaPaste);
       },
       el: root
     };

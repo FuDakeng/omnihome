@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>html2md</title></head>
+<body>
+<pre id="result"></pre>
+<script type="module">
+import { htmlToMarkdown, pasteTextFromClipboard, fitPastedMarkdown } from '../demo/js/html2md.js';
+import { LiveMD } from '../demo/js/livemd.js';
+
+const fails = [];
+function eq(name, got, want){
+  if (got !== want) fails.push({ name, got, want });
+}
+
+eq('bold em', htmlToMarkdown('<p>Hello <strong>world</strong> and <em>more</em></p>'),
+  'Hello **world** and _more_');
+eq('heading', htmlToMarkdown('<h1>Title</h1><h2>Sub</h2><p>Body</p>'),
+  '# Title\n\n## Sub\n\nBody');
+eq('ul', htmlToMarkdown('<ul><li>one</li><li>two</li></ul>'),
+  '- one\n- two');
+eq('ol start', htmlToMarkdown('<ol start="3"><li>c</li><li>d</li></ol>'),
+  '3. c\n4. d');
+eq('nested', htmlToMarkdown('<ul><li>parent<ul><li>child</li></ul></li></ul>'),
+  '- parent\n  - child');
+eq('tasks', htmlToMarkdown('<ul><li><input type="checkbox" checked> done</li><li><input type="checkbox"> todo</li></ul>'),
+  '- [x] done\n- [ ] todo');
+eq('link', htmlToMarkdown('<p>See <a href="https://example.com/a">docs</a>.</p>'),
+  'See [docs](https://example.com/a).');
+eq('quote', htmlToMarkdown('<blockquote><p>quoted</p></blockquote>'),
+  '> quoted');
+eq('quote paras', htmlToMarkdown('<blockquote><p>a</p><p>b</p></blockquote>'),
+  '> a\n> \n> b');
+eq('inline code', htmlToMarkdown('<p>use <code>npm i</code> now</p>'),
+  'use `npm i` now');
+eq('fence', htmlToMarkdown('<pre><code class="language-js">const a = 1;</code></pre>'),
+  '```js\nconst a = 1;\n```');
+eq('fence blank', htmlToMarkdown('<pre><code>a\n\nb</code></pre>'),
+  '```\na\n\nb\n```');
+eq('table', htmlToMarkdown('<table><tr><th>A</th><th align="right">B</th></tr><tr><td>1</td><td><b>2</b></td></tr></table>'),
+  '| A | B |\n| --- | ---: |\n| 1 | **2** |');
+eq('div lines', htmlToMarkdown('<div>line1</div><div>line2</div>'),
+  'line1\nline2');
+eq('blank line', htmlToMarkdown('<div>line1</div><div><br></div><div>line2</div>'),
+  'line1\n\nline2');
+eq('spans', htmlToMarkdown('<span>hello </span><span style="font-weight:700">world</span>'),
+  'hello **world**');
+eq('both', htmlToMarkdown('<p><strong><em>x</em></strong></p>'),
+  '**_x_**');
+eq('strike', htmlToMarkdown('<p>go <del>away</del> now</p>'),
+  'go ~~away~~ now');
+eq('hr', htmlToMarkdown('<p>a</p><hr><p>b</p>'),
+  'a\n\n---\n\nb');
+eq('img', htmlToMarkdown('<p><img alt="pic" src="https://example.com/a.png"></p>'),
+  '![pic](https://example.com/a.png)');
+eq('data img', htmlToMarkdown('<p>x<img src="data:image/png;base64,aaaa">y</p>'),
+  'xy');
+eq('docs', htmlToMarkdown('<b style="font-weight:normal;" id="docs-internal-guid-1"><span style="font-weight:700;">Bold</span><span style="font-weight:400;"> and </span><span style="font-style:italic;">italic</span></b>'),
+  '**Bold** and _italic_');
+eq('word frag', htmlToMarkdown('<html><head><style>p{}</style></head><body><!--StartFragment--><p>Hello <b>World</b></p><!--EndFragment--></body></html>'),
+  'Hello **World**');
+eq('bold link', htmlToMarkdown('<p><a href="https://e.com"><b>hi</b></a></p>'),
+  '[**hi**](https://e.com)');
+
+eq('plain only', pasteTextFromClipboard({
+  plain: 'Hello world',
+  html: '<p>Hello <b>world</b></p>',
+  plainOnly: true,
+}), 'Hello world');
+eq('rich paste', pasteTextFromClipboard({
+  plain: 'Hello world',
+  html: '<p>Hello <b>world</b></p>',
+  plainOnly: false,
+}), 'Hello **world**');
+eq('keep md source', pasteTextFromClipboard({
+  plain: '# Title\n**bold**',
+  html: '<div style="color:#ccc;font-weight:700"># Title</div><div>**bold**</div>',
+  plainOnly: false,
+}), '# Title\n**bold**');
+eq('shift still plain', pasteTextFromClipboard({
+  plain: '# Title\n**bold**',
+  html: '<h1>Title</h1>',
+  plainOnly: true,
+}), '# Title\n**bold**');
+
+eq('fit inline', fitPastedMarkdown('hello world', 5, 5, '**bold**'), '**bold**');
+eq('fit block', fitPastedMarkdown('hello world', 5, 5, '# Title'), '\n# Title\n');
+eq('fit empty', fitPastedMarkdown('', 0, 0, '- a\n- b'), '- a\n- b');
+
+/* 编辑器：合成粘贴事件（浏览器允许时）以及系统剪贴板粘贴 */
+const ta = document.createElement('textarea');
+document.body.appendChild(ta);
+const ed = LiveMD.attach(ta, {});
+ed.focus();
+const sel = getSelection();
+const range = document.createRange();
+range.selectNodeContents(ed.el);
+range.collapse(true);
+sel.removeAllRanges();
+sel.addRange(range);
+
+let synthetic = '';
+try {
+  const dt = new DataTransfer();
+  dt.setData('text/plain', 'Hi');
+  dt.setData('text/html', '<p>Hi <b>there</b></p>');
+  synthetic = dt.getData('text/html') || '';
+  const ev = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
+  ed.el.dispatchEvent(ev);
+} catch (e) {
+  synthetic = 'err:' + e.message;
+}
+const afterSynthetic = ta.value;
+
+ed.setValue('');
+const src = document.createElement('div');
+src.contentEditable = 'true';
+src.innerHTML = '<p>Hello <strong>world</strong></p><ul><li>one</li><li>two</li></ul>';
+document.body.appendChild(src);
+const r2 = document.createRange();
+r2.selectNodeContents(src);
+sel.removeAllRanges();
+sel.addRange(r2);
+let copied = false;
+try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
+ed.focus();
+const r3 = document.createRange();
+r3.selectNodeContents(ed.el);
+r3.collapse(true);
+sel.removeAllRanges();
+sel.addRange(r3);
+let pasted = false;
+try { pasted = document.execCommand('paste'); } catch (e) { pasted = false; }
+const afterReal = ta.value;
+
+/* 分屏源码框 */
+ed.setValue('keep');
+ed.hide();
+ta.focus();
+ta.selectionStart = ta.selectionEnd = ta.value.length;
+let taPasted = false;
+try {
+  const dt = new DataTransfer();
+  dt.setData('text/plain', 'plain');
+  dt.setData('text/html', '<h2>Head</h2>');
+  const ev = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dt });
+  taPasted = ta.dispatchEvent(ev);
+} catch (e) { taPasted = false; }
+const taSnapshot = ta.value;
+
+ed.show();
+ed.setValue('');
+ed.el.dispatchEvent(new KeyboardEvent('keydown', {
+  key: 'v', code: 'KeyV', ctrlKey: true, shiftKey: true, bubbles: true,
+}));
+const dtShift = new DataTransfer();
+dtShift.setData('text/plain', 'Hello world');
+dtShift.setData('text/html', '<p>Hello <b>world</b></p>');
+ed.el.dispatchEvent(new ClipboardEvent('paste', {
+  bubbles: true, cancelable: true, clipboardData: dtShift,
+}));
+if (ta.value !== 'Hello world') fails.push({ name: 'shift editor', got: ta.value, want: 'Hello world' });
+
+const lines = [];
+lines.push(fails.length ? 'FAIL ' + fails.length : 'ALL PASS ' + 31);
+if (fails.length) lines.push(JSON.stringify(fails, null, 2));
+lines.push('syntheticHtml=' + JSON.stringify(synthetic));
+lines.push('afterSynthetic=' + JSON.stringify(afterSynthetic));
+lines.push('copied=' + copied + ' pasted=' + pasted);
+lines.push('afterReal=' + JSON.stringify(afterReal));
+lines.push('taValue=' + JSON.stringify(taSnapshot) + ' taPasted=' + taPasted);
+lines.push('shiftPaste=' + JSON.stringify(ta.value));
+document.getElementById('result').textContent = lines.join('\n');
+</script>
+</body>
+</html>
