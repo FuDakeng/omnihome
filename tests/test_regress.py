@@ -313,6 +313,70 @@ def test_marker_wrap_and_sidebar_pref():
     assert storage.DEFAULT_PREFS["layout"]["sidebarCollapsed"] is False
 
 
+def test_livemd_rich_paste_shortcuts():
+    """Ctrl/⌘+V 把 HTML 样式转成 Markdown；Ctrl/⌘+Shift+V 只贴纯文本。"""
+    import shutil
+
+    livemd = (ROOT / "demo" / "js" / "livemd.js").read_text(encoding="utf-8")
+    html2md = (ROOT / "demo" / "js" / "html2md.js").read_text(encoding="utf-8")
+    assert "from './html2md.js'" in livemd
+    assert "plainPasteArmed" in livemd
+    assert "function notePasteChord" in livemd
+    assert "function onTaPaste" in livemd
+    assert "clipboardToMarkdown" in livemd
+    assert "fitPastedMarkdown" in livemd
+    assert "export function htmlToMarkdown" in html2md
+    assert "export function pasteTextFromClipboard" in html2md
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "只粘贴纯文本" in readme
+
+    chrome = (shutil.which("google-chrome") or shutil.which("google-chrome-stable")
+              or shutil.which("chromium") or shutil.which("chromium-browser"))
+    if not chrome:
+        pytest.skip("未安装 Chrome，跳过 HTML→Markdown 行为测试")
+
+    import tempfile
+    import threading
+    from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+
+    class Quiet(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(ROOT), **kwargs)
+
+        def log_message(self, fmt, *args):
+            return
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Quiet)
+    port = httpd.server_address[1]
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    profile = tempfile.mkdtemp(prefix="omni-html2md-")
+    try:
+        url = f"http://127.0.0.1:{port}/tests/html2md_runner.html"
+        # dump-dom 打出页面后，无头 Chrome 有时不自行退出。读到结果就结束进程。
+        proc = subprocess.Popen(
+            [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
+             "--disable-dev-shm-usage", f"--user-data-dir={profile}",
+             "--dump-dom", url],
+            cwd=str(ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            text=True,
+        )
+        try:
+            dom, _ = proc.communicate(timeout=35)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            dom, _ = proc.communicate()
+        dom = dom or ""
+        if ('id="result">ALL PASS' not in dom or '"Hi **there**"' not in dom
+                or r"keep\n## Head" not in dom or 'shiftPaste="Hello world"' not in dom):
+            pytest.fail(dom[-4000:])
+    finally:
+        httpd.shutdown()
+
+
 def test_livemd_tab_indent_and_indented_lists():
     """实时编辑器支持 Tab 缩进；有序/无序/任务列表在行首有空格或 Tab 时也能渲染。"""
     import re
