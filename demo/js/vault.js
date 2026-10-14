@@ -526,6 +526,183 @@ const Vault = (() => {
     }
   }
 
+  /* ---------- 导入（CSV 模板，本地加密） ---------- */
+  const CSV_HEAD = {
+    '名称': 'name', '名字': 'name', 'name': 'name', 'title': 'name',
+    '分类': 'cat', '分组': 'cat', 'category': 'cat', 'folder': 'cat',
+    '网址': 'url', '链接': 'url', 'url': 'url', 'website': 'url', 'site': 'url',
+    '账号': 'account', '账户': 'account', '用户名': 'account', 'account': 'account',
+    'username': 'account', 'user': 'account',
+    '密码': 'password', 'password': 'password', 'pass': 'password', 'pwd': 'password',
+    '备注': 'note', '说明': 'note', 'note': 'note', 'notes': 'note', 'memo': 'note',
+  };
+  const CSV_ORDER = ['name', 'cat', 'url', 'account', 'password', 'note'];
+  let pendingImport = [];
+
+  /* 极简 CSV 解析：支持双引号包裹、"" 转义、CRLF / LF */
+  function parseCsv(text){
+    const rows = [];
+    let row = [], field = '', inQ = false;
+    for (let i = 0; i < text.length; i++){
+      const c = text[i];
+      if (inQ){
+        if (c === '"'){
+          if (text[i + 1] === '"'){ field += '"'; i++; }
+          else inQ = false;
+        } else field += c;
+        continue;
+      }
+      if (c === '"') inQ = true;
+      else if (c === ','){ row.push(field); field = ''; }
+      else if (c === '\r'){ /* CRLF：忽略回车 */ }
+      else if (c === '\n'){ row.push(field); rows.push(row); row = []; field = ''; }
+      else field += c;
+    }
+    if (field !== '' || row.length){ row.push(field); rows.push(row); }
+    return rows.filter(r => r.some(x => String(x).trim() !== ''));
+  }
+
+  /* 表头可识别则按列名取值；否则按模板列顺序取值。密码保留原样，不做 trim */
+  function csvToItems(rows){
+    if (!rows.length) return [];
+    const head = rows[0].map(h => CSV_HEAD[String(h).trim().toLowerCase()] || '');
+    /* 认作表头：含名称列，或至少 4 列命中列名（避免首行数据如 user/pass 被误判） */
+    const hasHead = head.includes('name') || head.filter(Boolean).length >= 4;
+    const idx = {};
+    if (hasHead) head.forEach((k, i) => { if (k && idx[k] === undefined) idx[k] = i; });
+    const body = hasHead ? rows.slice(1) : rows;
+    const out = [];
+    for (const r of body){
+      const rec = {};
+      CSV_ORDER.forEach((key, i) => {
+        const vi = hasHead ? idx[key] : i;
+        const val = vi === undefined ? '' : String(r[vi] ?? '');
+        rec[key] = key === 'password' ? val : val.trim();
+      });
+      if (!rec.name && !rec.account && !rec.url && !rec.password && !rec.note) continue;
+      rec.name = (rec.name || rec.account || rec.url || '未命名').slice(0, 60);
+      out.push(rec);
+    }
+    return out;
+  }
+
+  function downloadTemplate(){
+    const lines = [
+      '名称,分类,网址,账号,密码,备注',
+      'GitHub,工作,https://github.com,me@example.com,示例密码,可留空',
+      'GitHub,工作,https://github.com,team-bot,第二个密码,同一网站多账号就多写一行',
+      '邮箱,社交,https://mail.example.com,me@example.com,,',
+    ];
+    const blob = new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'omnihome-vault-template.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+    showToast('模板已下载');
+  }
+
+  /* CSV 多为 UTF-8；Excel 另存的中文文件可能是 GBK，解码失败再回退 */
+  async function readText(file){
+    const buf = await file.arrayBuffer();
+    let text = new TextDecoder('utf-8').decode(buf);
+    if (text.includes('\uFFFD')){
+      try { text = new TextDecoder('gbk').decode(buf); } catch (e) { /* 保持 UTF-8 结果 */ }
+    }
+    return text.replace(/^\uFEFF/, '');
+  }
+
+  function ensureCatByName(name){
+    const n = String(name || '').trim().slice(0, 24);
+    if (!n || n === '全部' || n === '未分类') return 'none';
+    const hit = cats.find(x => x.name === n && x.id !== 'all' && x.id !== 'none');
+    if (hit) return hit.id;
+    const id = crypto.randomUUID().slice(0, 8);
+    const noneAt = cats.findIndex(x => x.id === 'none');
+    const rec = { id, name: n };
+    if (noneAt >= 0) cats.splice(noneAt, 0, rec); else cats.push(rec);
+    return id;
+  }
+
+  function previewImport(items){
+    pendingImport = items;
+    const box = $('#vimpPreview');
+    const ok = $('#vimpOk');
+    if (!items.length){
+      if (box){ box.hidden = false; box.textContent = '没有识别到有效行，请检查模板列名与内容'; }
+      if (ok) ok.disabled = true;
+      return;
+    }
+    if (box){
+      box.hidden = false;
+      const names = items.slice(0, 3).map(x => x.name).join('、');
+      box.textContent = `已识别 ${items.length} 条凭据：${names}${items.length > 3 ? ' 等' : ''}`;
+    }
+    if (ok) ok.disabled = false;
+  }
+
+  function openImport(){
+    if (!$('#vaultWrap').classList.contains('unlocked')) return showToast('请先解锁保险库', 'err');
+    pendingImport = [];
+    const name = $('#vimpFileName'); if (name) name.textContent = '未选择文件';
+    const box = $('#vimpPreview'); if (box){ box.hidden = true; box.textContent = ''; }
+    const ok = $('#vimpOk'); if (ok) ok.disabled = true;
+    const fi = $('#vimpFile'); if (fi) fi.value = '';
+    App.openModal('vimpMask');
+  }
+
+  async function doImport(){
+    if (!pendingImport.length) return showToast('请先选择 CSV 文件', 'err');
+    const items = pendingImport;
+    const now = Date.now();
+    let nextOrder = cache.reduce((m, x) => Math.max(m, x.data.order || 0), 0) + 1;
+    try {
+      for (const rec of items){
+        const cat = ensureCatByName(rec.cat);
+        const hue = [...rec.name].reduce((a, c) => a + c.codePointAt(0), 0) % 360;
+        const payload = {
+          name: rec.name, account: rec.account || '', url: rec.url || '',
+          password: rec.password || '', note: rec.note || '', cat,
+          added: now, updated: now, order: nextOrder++,
+        };
+        const id = crypto.randomUUID().slice(0, 8);
+        vaultData.items[id] = {
+          blob: await enc(payload),
+          meta: { name: rec.name, hue, updated: new Date(now).toLocaleDateString('zh-CN') },
+        };
+      }
+      await writeCheck();
+      await persist();
+      await refreshCache();
+      App.closeModal('vimpMask');
+      render();
+      pendingImport = [];
+      showToast(`已导入 ${items.length} 条凭据`);
+    } catch (e) {
+      showToast('导入失败：' + e.message, 'err');
+    }
+  }
+
+  function bindImport(){
+    $('#vaultImport').addEventListener('click', openImport);
+    $('#vimpDl').addEventListener('click', downloadTemplate);
+    $('#vimpPick').addEventListener('click', () => $('#vimpFile').click());
+    $('#vimpCancel').addEventListener('click', () => App.closeModal('vimpMask'));
+    $('#vimpOk').addEventListener('click', doImport);
+    $('#vimpFile').addEventListener('change', async e => {
+      const f = e.target.files[0];
+      e.target.value = '';
+      if (!f) return;
+      try {
+        const items = csvToItems(parseCsv(await readText(f)));
+        $('#vimpFileName').textContent = f.name;
+        previewImport(items);
+      } catch (err) {
+        showToast('文件读取失败', 'err');
+      }
+    });
+  }
+
   async function addCat(){
     const name = await App.promptModal({
       title: '新建分类',
@@ -720,6 +897,7 @@ const Vault = (() => {
       if (!$('#vaultWrap').classList.contains('unlocked')) return showToast('请先解锁保险库', 'err');
       setSelecting(!selecting);
     });
+    bindImport();
     $('#viCancel').addEventListener('click', () => App.closeModal('vaultItemMask'));
     $('#viSave').addEventListener('click', saveItem);
     $('#viAccAdd').addEventListener('click', () => {

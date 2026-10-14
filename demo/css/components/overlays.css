@@ -154,6 +154,19 @@ html[data-motion="off"] .boot-bar i{ animation: none; width: 100%; opacity: .35;
 .v-acc-add{ align-self: flex-start; }
 /* 账号行较多时正文滚动，不撑破视口 */
 #vaultItemMask .m-body{ max-height: min(64vh, 560px); overflow-y: auto; }
+/* 凭据导入弹窗（CSV 模板） */
+.vimp-help{ font-size: 12px; color: var(--om-text-3); line-height: 1.6; }
+.vimp-pick{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vimp-file{ font-size: 12px; color: var(--om-text-3); overflow-wrap: anywhere; }
+.vimp-preview{
+  font-size: 12px; color: var(--om-text-2);
+  background: var(--om-surface-2);
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius-md);
+  padding: 8px 10px;
+  line-height: 1.6;
+}
+#vimpMask .m-body{ max-height: min(64vh, 560px); overflow-y: auto; }
 .m-user{
   display: flex; align-items: center; gap: 12px;
   padding: 10px 12px;

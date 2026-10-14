@@ -303,6 +303,14 @@ def test_vault_categories_and_preview():
     assert "openDetail" in js
     assert "select-mode" in css
     assert "#vaultView.select-mode" in css
+    # 导入：按 CSV 模板导入，含模板下载与解析
+    assert 'id="vaultImport"' in html
+    assert 'id="vimpFile"' in overlay
+    assert "parseCsv" in js
+    assert "csvToItems" in js
+    assert "downloadTemplate" in js
+    assert "doImport" in js
+    assert ".vimp-preview" in overlays_css
 
 
 def test_marker_wrap_and_sidebar_pref():

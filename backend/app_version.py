@@ -5,8 +5,8 @@
 import json
 from pathlib import Path
 
-VERSION = "0.3.33"
-STAGE = "保险库多选模式"
+VERSION = "0.3.34"
+STAGE = "保险库导入"
 
 _CHANGELOG_FILE = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
 
