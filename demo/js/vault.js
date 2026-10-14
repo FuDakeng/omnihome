@@ -14,6 +14,7 @@ const Vault = (() => {
   let activeCat = 'all';
   let sortMode = 'manual';
   let cache = [];         // 解锁后明文缓存 {id, item, data, cat}
+  let selecting = false;  // 多选模式：仅此模式下点击卡片才勾选
   let sel = new Set();    // 多选凭据
   let catSel = new Set(); // 多选分类（不含全部）
   let dragEl = null;
@@ -325,6 +326,28 @@ const Vault = (() => {
     row.item = vaultData.items[row.id];
   }
 
+  /* ---------- 多选模式 ---------- */
+  const HINT_SELECT = '点选凭据，可批量归类或删除';
+  function setSelecting(on){
+    selecting = !!on;
+    const view = $('#vaultView');
+    if (view) view.classList.toggle('select-mode', selecting);
+    const btn = $('#vaultSelect');
+    if (btn){
+      btn.classList.toggle('active', selecting);
+      btn.setAttribute('aria-pressed', selecting ? 'true' : 'false');
+    }
+    const label = $('#vaultSelectLabel');
+    if (label) label.textContent = selecting ? '退出多选' : '多选';
+    if (selecting){
+      /* 进入多选时收起已展开的详情，避免与勾选相互干扰 */
+      $$('#vaultItems .v-card.is-open').forEach(c => setPreview(c, null, false));
+    } else {
+      sel.clear();
+    }
+    syncSelUi();
+  }
+
   /* ---------- 多选 ---------- */
   function batchBar(){ return $('#vaultBatch'); }
   function syncSelUi(){
@@ -344,6 +367,10 @@ const Vault = (() => {
       bar.hidden = false;
       $('#vaultBatchN').textContent = `已选 ${nCard} 个`;
       $('#vaultBatchHint').textContent = HINT_CARD;
+    } else if (selecting){
+      bar.hidden = false;
+      $('#vaultBatchN').textContent = '多选模式';
+      $('#vaultBatchHint').textContent = HINT_SELECT;
     } else {
       bar.hidden = true;
     }
@@ -663,6 +690,16 @@ const Vault = (() => {
     }
   }
 
+  /* 非多选模式：点击卡片打开该凭据详情（并收起其它卡片）；再次点击收起 */
+  function openDetail(card){
+    if (!card) return;
+    const row = cache.find(x => x.id === card.dataset.vId);
+    if (!row) return;
+    const willOpen = !card.classList.contains('is-open');
+    $$('#vaultItems .v-card.is-open').forEach(c => { if (c !== card) setPreview(c, null, false); });
+    setPreview(card, row.data, willOpen);
+  }
+
   function eventHit(e, selector){
     const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
     for (const n of path){
@@ -678,6 +715,10 @@ const Vault = (() => {
     $('#vaultNew').addEventListener('click', () => {
       if (!$('#vaultWrap').classList.contains('unlocked')) return showToast('请先解锁保险库', 'err');
       openEditor(null);
+    });
+    $('#vaultSelect').addEventListener('click', () => {
+      if (!$('#vaultWrap').classList.contains('unlocked')) return showToast('请先解锁保险库', 'err');
+      setSelecting(!selecting);
     });
     $('#viCancel').addEventListener('click', () => App.closeModal('vaultItemMask'));
     $('#viSave').addEventListener('click', saveItem);
@@ -707,7 +748,7 @@ const Vault = (() => {
       await persist();
       render();
     });
-    $('#vaultBatchClear').addEventListener('click', clearSel);
+    $('#vaultBatchClear').addEventListener('click', () => { setSelecting(false); clearSel(); });
     $('#vaultBatchDel').addEventListener('click', async () => {
       if (catSel.size && !sel.size) return deleteCats([...catSel]);
       return deleteCards([...sel]);
@@ -765,7 +806,9 @@ const Vault = (() => {
       const selBtn = eventHit(e, '[data-v-sel]');
       if (selBtn){
         e.stopPropagation();
-        toggleSel(selBtn.dataset.vSel);
+        const card = selBtn.closest('[data-v-id]');
+        if (selecting) toggleSel(selBtn.dataset.vSel);
+        else openDetail(card);
         return;
       }
 
@@ -793,7 +836,9 @@ const Vault = (() => {
 
       const card = eventHit(e, '#vaultItems .v-card[data-v-id]');
       if (card){
-        toggleSel(card.dataset.vId);
+        /* 仅多选模式下点击才勾选；否则点开该凭据详情 */
+        if (selecting) toggleSel(card.dataset.vId);
+        else openDetail(card);
       }
     });
 
@@ -938,6 +983,7 @@ const Vault = (() => {
     cache = [];
     sel.clear();
     catSel.clear();
+    if (selecting) setSelecting(false);
     $('#vaultWrap').classList.remove('unlocked');
     $('#masterPass').value = '';
     $('#masterPass2').value = '';

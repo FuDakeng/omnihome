@@ -297,6 +297,12 @@ def test_vault_categories_and_preview():
     overlays_css = (ROOT / "demo" / "css" / "components" / "overlays.css").read_text(encoding="utf-8")
     assert ".v-acc-list" in overlays_css
     assert ".v-acc-row" in overlays_css
+    # 多选模式：顶部「多选」开关，默认隐藏勾选控件，非多选时点击卡片看详情
+    assert 'id="vaultSelect"' in html
+    assert "setSelecting" in js
+    assert "openDetail" in js
+    assert "select-mode" in css
+    assert "#vaultView.select-mode" in css
 
 
 def test_marker_wrap_and_sidebar_pref():
