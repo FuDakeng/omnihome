@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>livemd backspace</title></head>
+<body>
+<pre id="result"></pre>
+<script type="module">
+import { LiveMD } from '../demo/js/livemd.js';
+
+const fails = [];
+function check(name, got, want){
+  if (got !== want) fails.push({ name, got, want });
+}
+
+/* 在实时编辑器里：把光标放到某行行首（第一个字符之前），按一次退格。
+   返回按完之后的原始 Markdown（textarea.value）。 */
+function backspaceAtLineStart(raw, targetText){
+  const ta = document.createElement('textarea');
+  document.body.appendChild(ta);
+  const ed = LiveMD.attach(ta, {});
+  ed.setValue(raw);
+  let line = null;
+  for (const el of ed.el.children){
+    if (el.classList.contains('lm-table')) continue;
+    if ((el.textContent || '').replace(/\u00a0/g, ' ').trim() === targetText) line = el;
+  }
+  if (!line){
+    return { error: 'line not found: ' + targetText,
+             children: [...ed.el.children].map(e => e.textContent) };
+  }
+  const sel = getSelection();
+  const range = document.createRange();
+  range.setStart(line, 0);   // 行元素内、第一个字符之前
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  ed.el.dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'Backspace', bubbles: true, cancelable: true,
+  }));
+  const after = ta.value;
+  try { ed.destroy(); } catch (e) {}
+  ta.remove();
+  return { after };
+}
+
+/* 1) 普通段落：行首退格应与上一行并段（删除中间换行） */
+{
+  const r = backspaceAtLineStart('before\nafter\nEND', 'after');
+  check('plain merge', r.after, 'beforeafter\nEND');
+  if (r.error) fails.push({ name: 'plain merge error', got: r });
+}
+
+/* 2) 上方有表格（一个 DOM 元素承载多行原始文本）：
+      行首退格只应删掉该行前的一个换行，不得动到表格或其它行 */
+{
+  const raw = 'before\n| a | b |\n| - | - |\n| 1 | 2 |\nafter\nEND';
+  const r = backspaceAtLineStart(raw, 'after');
+  /* 表格经编辑器序列化后分隔行会规范成 | --- | --- |；关键是只删本行前的换行，
+     不得复制/挪动表格或其它行 */
+  check('table-above merge', r.after,
+    'before\n| a | b |\n| --- | --- |\n| 1 | 2 |after\nEND');
+  if (r.error) fails.push({ name: 'table-above error', got: r });
+}
+
+const out = [];
+out.push(fails.length ? 'FAIL ' + fails.length : 'ALL PASS 2');
+if (fails.length) out.push(JSON.stringify(fails, null, 2));
+document.getElementById('result').textContent = out.join('\n');
+</script>
+</body>
+</html>

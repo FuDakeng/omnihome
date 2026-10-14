@@ -1434,22 +1434,23 @@ export const LiveMD = (() => {
             commitNoRebuild();
             return;
           }
-          /* 行首退格且无标记：并入上一行 */
+          /* 行首退格且无标记：并入上一行。
+             注意：DOM 子元素个数 ≠ 原始行数——表格是「一个元素承载多行原文」，
+             行数不同步时用 DOM 下标去索引 split('\n') 的数组会删改到别的行
+             （表现为行首退格时表格附近的文本被复制/挪位）。
+             这里改为按原始文本偏移定位，只删掉本行前的那一个换行。 */
           if (info.textBefore === ''){
             const ls = lines(); const idx = ls.indexOf(line);
             if (idx > 0){
               e.preventDefault();
-              const prevRaw = lineRaw(ls[idx - 1]);
-              const curRaw = lineRaw(line);
-              const arr = serializeAll().split('\n');
-              arr[idx - 1] = prevRaw + curRaw; arr.splice(idx, 1);
-              const nraw = arr.join('\n');
-              let base = 0;
-              for (let i = 0; i < idx - 1; i++) base += arr[i].length + 1;
+              const raw = serializeAll();
+              let base = 0;                 // 当前行在原文中的起始偏移
+              for (let i = 0; i < idx; i++) base += lineRaw(ls[i]).length + 1;
+              const nraw = raw.slice(0, base - 1) + raw.slice(base);
               ta.value = nraw;
               try { ta.dispatchEvent(new Event('input')); } catch (er) {}
               rebuild(nraw);
-              restoreCaret(base + prevRaw.length);
+              restoreCaret(base - 1);
             }
             return;
           }

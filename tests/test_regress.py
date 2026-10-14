@@ -377,6 +377,59 @@ def test_livemd_rich_paste_shortcuts():
         httpd.shutdown()
 
 
+def test_livemd_backspace_at_line_start_not_corrupt_table():
+    """行首退格并段：表格是「一个元素承载多行原文」，不能拿 DOM 下标去索引 raw 行数组，
+    否则会把表格附近的其它行复制/挪位（行首退格删错位置）。"""
+    import shutil
+
+    livemd = (ROOT / "demo" / "js" / "livemd.js").read_text(encoding="utf-8")
+    # 行首并段必须按原始偏移删换行，而不是用 arr[idx-1]=prev+cur + splice(idx,1)
+    assert "arr[idx - 1] = prevRaw + curRaw" not in livemd
+    assert "for (let i = 0; i < idx; i++) base += lineRaw(ls[i]).length + 1;" in livemd
+    assert "raw.slice(0, base - 1) + raw.slice(base)" in livemd
+
+    chrome = (shutil.which("google-chrome") or shutil.which("google-chrome-stable")
+              or shutil.which("chromium") or shutil.which("chromium-browser"))
+    if not chrome:
+        pytest.skip("未安装 Chrome，跳过退格并段行为测试")
+
+    import tempfile
+    import threading
+    import subprocess
+    from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+
+    class Quiet(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(ROOT), **kwargs)
+
+        def log_message(self, fmt, *args):
+            return
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Quiet)
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    profile = tempfile.mkdtemp(prefix="omni-bs-")
+    try:
+        url = f"http://127.0.0.1:{port}/tests/livemd_backspace_runner.html"
+        proc = subprocess.Popen(
+            [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
+             "--disable-dev-shm-usage", f"--user-data-dir={profile}",
+             "--dump-dom", url],
+            cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, text=True,
+        )
+        try:
+            dom, _ = proc.communicate(timeout=35)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            dom, _ = proc.communicate()
+        dom = dom or ""
+        if 'id="result">ALL PASS' not in dom:
+            pytest.fail(dom[-4000:])
+    finally:
+        httpd.shutdown()
+
+
 def test_livemd_tab_indent_and_indented_lists():
     """实时编辑器支持 Tab 缩进；有序/无序/任务列表在行首有空格或 Tab 时也能渲染。"""
     import re
