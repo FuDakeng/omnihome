@@ -355,23 +355,6 @@ AI 密钥的主密钥在 `data/` 里。整站搬家时备份整个数据目录�
 
 ---
 
-## 版本
-
-- 版本号只写在 `backend/app_version.py` 的 `VERSION` / `STAGE`
-- 用户可见的变更写在仓库根 `CHANGELOG.md`，新版本放在最上面
-- 应用内 **设置 → 关于** 读的就是这两处
-- 镜像习惯打 `omnihome:<版本>` 和 `omnihome:latest`
-
----
-
-## 文档维护
-
-用户能感知到的功能有变化时，要在同一次改动里更新本 README，必要时换掉 `docs/images/` 里的截图。约定写在 `.cursor/rules/omnihome-readme.mdc`，对后续改动一直有效。
-
-纯内部重构、对外行为和界面都不变时，不必为了改 README 而改 README。版本说明仍然进 `CHANGELOG.md`，不把更新日志贴进本文件。
-
----
-
 ## 相关文档
 
 - `DEPLOY.md` — 通用部署
@@ -381,17 +364,3 @@ AI 密钥的主密钥在 `data/` 里。整站搬家时备份整个数据目录�
 - `docs/Obsidian同步插件-服务端API.md`
 - `docs/UI对接规范.md` — 界面令牌和组件
 - `extension/README.md` — 扩展安装与同步行为
-
----
-
-## 注意事项
-
-- 发版时把最新的 `omnihome-extension.zip` 放在构建目录根再打镜像，否则容器里的下载仍是旧包
-- `*.pem`（扩展签名私钥）不要提交
-- 公网请走 HTTPS。示例在 `docker-compose.tls.yml` 和 `Caddyfile`
-- 容器监控需要时再挂 `docker.sock`，并且只读
-- 系统监控要显示整机硬盘和网卡时，容器须只读挂载宿主根（`-v /:/host:ro`）。没挂载时页面显示「—」，不会把容器磁盘报成整机容量
-
-## 许可证
-
-私有项目。
