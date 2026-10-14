@@ -944,7 +944,9 @@ body.dash-palette-open .view[data-view="dashboard"] > .view-head .vh-actions{
 .kb-folder-row:hover{ background: var(--om-surface-2); }
 .kb-folder.current > .kb-folder-row{ color: var(--om-primary); }
 .kb-chev{ width: 13px; height: 13px; color: var(--om-text-3); transform: rotate(-90deg); transition: transform var(--om-t-fast); }
-.kb-folder.open .kb-chev{ transform: none; }
+/* 只作用于本文件夹自己的箭头：用子选择器，
+   否则父级 open 会把所有后代（折叠中的子文件夹）箭头也强制指向下 */
+.kb-folder.open > .kb-folder-row > .kb-chev{ transform: none; }
 .kb-folder-ic{ width: 14px; height: 14px; color: var(--om-warning); }
 .kb-folder-name{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-count{ font-size: 10px; color: var(--om-text-3); }
