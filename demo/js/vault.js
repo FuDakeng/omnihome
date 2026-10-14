@@ -396,22 +396,55 @@ const Vault = (() => {
       .join('');
   }
 
+  /* 账号行：同一网站可一次录入多组账号/密码，保存时拆成多条凭据 */
+  function accRowHtml(account = '', password = ''){
+    return `<div class="v-acc-row">
+      <div class="input-wrap"><svg class="ic"><use href="#i-user"/></svg>
+        <input class="input v-acc-user" placeholder="账号 / 用户名" value="${App.esc(account)}"></div>
+      <div class="v-acc-pass-row">
+        <div class="input-wrap" style="flex:1"><svg class="ic"><use href="#i-key"/></svg>
+          <input class="input v-acc-pass" type="password" placeholder="密码" value="${App.esc(password)}"></div>
+        <button type="button" class="btn btn-outline btn-sm v-acc-gen" title="生成强密码"><svg class="ic"><use href="#i-zap"/></svg>生成</button>
+        <button type="button" class="btn btn-ghost btn-sm v-acc-del" title="移除这组账号"><svg class="ic"><use href="#i-close"/></svg></button>
+      </div>
+    </div>`;
+  }
+  function renderAccRows(rows){
+    const list = (rows && rows.length) ? rows : [{ account: '', password: '' }];
+    $('#viAccList').innerHTML = list.map(r => accRowHtml(r.account || '', r.password || '')).join('');
+    syncAccDel();
+  }
+  function syncAccDel(){
+    /* 首行是基础记录（编辑时就地改写），不允许整行移除；其余行可移除 */
+    $$('#viAccList .v-acc-row').forEach((r, i) => {
+      r.querySelector('.v-acc-del').style.display = i > 0 ? '' : 'none';
+    });
+  }
+  function accRows(){
+    return $$('#viAccList .v-acc-row').map(r => ({
+      account: r.querySelector('.v-acc-user').value.trim(),
+      password: r.querySelector('.v-acc-pass').value,
+    }));
+  }
+
   function openEditor(id){
     editingId = id;
-    $('#viName').value = ''; $('#viAccount').value = ''; $('#viUrl').value = '';
-    $('#viPass').value = ''; $('#viNote').value = '';
+    $('#viName').value = ''; $('#viUrl').value = ''; $('#viNote').value = '';
     const fallback = (viewingCats()[0] === 'all' ? 'none' : viewingCats()[0]);
     fillCatSelect(fallback);
+    let rows = [{ account: '', password: '' }];
     if (id){
       const row = cache.find(x => x.id === id);
       if (row){
         const d = row.data;
-        $('#viName').value = d.name || ''; $('#viAccount').value = d.account || '';
-        $('#viUrl').value = d.url || ''; $('#viPass').value = d.password || '';
+        $('#viName').value = d.name || '';
+        $('#viUrl').value = d.url || '';
         $('#viNote').value = d.note || '';
+        rows = [{ account: d.account || '', password: d.password || '' }];
         fillCatSelect(itemCat(d));
       }
     }
+    renderAccRows(rows);
     App.openModal('vaultItemMask');
   }
 
@@ -419,30 +452,51 @@ const Vault = (() => {
     const name = $('#viName').value.trim();
     if (!name) return showToast('请填写名称', 'err');
     const cat = itemCat({ cat: $('#viCat')?.value });
+    const url = $('#viUrl').value.trim();
+    const note = $('#viNote').value.trim();
     const now = Date.now();
+
+    /* 首行始终保留；其余行仅在填了账号或密码时才保存 */
+    let rows = accRows();
+    if (!rows.length) rows = [{ account: '', password: '' }];
+    const kept = [rows[0], ...rows.slice(1).filter(r => r.account || r.password)];
+
     const prev = editingId ? cache.find(x => x.id === editingId) : null;
-    const payload = {
-      name,
-      account: $('#viAccount').value.trim(),
-      url: $('#viUrl').value.trim(),
-      password: $('#viPass').value,
-      note: $('#viNote').value.trim(),
-      cat,
-      added: prev?.data.added || now,
-      updated: now,
-      order: prev?.data.order ?? (cache.reduce((m, x) => Math.max(m, x.data.order || 0), 0) + 1),
-    };
-    const id = editingId || crypto.randomUUID().slice(0, 8);
+    let nextOrder = cache.reduce((m, x) => Math.max(m, x.data.order || 0), 0) + 1;
     const hue = [...name].reduce((a, c) => a + c.codePointAt(0), 0) % 360;
-    vaultData.items[id] = {
-      blob: await enc(payload),
-      meta: { name, hue, updated: new Date(now).toLocaleDateString('zh-CN') },
-    };
+    const stamp = new Date(now).toLocaleDateString('zh-CN');
+
+    let first = true;
+    for (const row of kept){
+      let id, added, order;
+      if (first && prev){
+        id = prev.id;
+        added = prev.data.added || now;
+        order = prev.data.order ?? nextOrder++;
+      } else {
+        id = crypto.randomUUID().slice(0, 8);
+        added = now;
+        order = nextOrder++;
+      }
+      const payload = { name, account: row.account, url, password: row.password,
+                        note, cat, added, updated: now, order };
+      vaultData.items[id] = {
+        blob: await enc(payload),
+        meta: { name, hue, updated: stamp },
+      };
+      first = false;
+    }
+
     await persist();
     await refreshCache();
     App.closeModal('vaultItemMask');
     render();
-    showToast(editingId ? '凭据已更新' : '凭据已加密保存');
+    const n = kept.length;
+    if (editingId){
+      showToast(n > 1 ? `凭据已更新，新增 ${n - 1} 个账号` : '凭据已更新');
+    } else {
+      showToast(n > 1 ? `已加密保存 ${n} 条账号` : '凭据已加密保存');
+    }
   }
 
   async function addCat(){
@@ -627,7 +681,26 @@ const Vault = (() => {
     });
     $('#viCancel').addEventListener('click', () => App.closeModal('vaultItemMask'));
     $('#viSave').addEventListener('click', saveItem);
-    $('#viGen').addEventListener('click', () => { $('#viPass').value = genPass(16); });
+    $('#viAccAdd').addEventListener('click', () => {
+      $('#viAccList').insertAdjacentHTML('beforeend', accRowHtml());
+      syncAccDel();
+      const rows = $$('#viAccList .v-acc-row');
+      rows[rows.length - 1]?.querySelector('.v-acc-user')?.focus();
+    });
+    $('#viAccList').addEventListener('click', e => {
+      const gen = e.target.closest?.('.v-acc-gen');
+      if (gen){
+        e.preventDefault();
+        gen.closest('.v-acc-row').querySelector('.v-acc-pass').value = genPass(16);
+        return;
+      }
+      const del = e.target.closest?.('.v-acc-del');
+      if (del){
+        e.preventDefault();
+        del.closest('.v-acc-row').remove();
+        syncAccDel();
+      }
+    });
     $('#vaultSort').addEventListener('change', async () => {
       sortMode = $('#vaultSort').value;
       await writeCheck();

@@ -459,12 +459,9 @@
           <option value="none">未分类</option>
         </select>
       </div>
-      <div class="input-wrap"><svg class="ic"><use href="#i-user"/></svg><input class="input" id="viAccount" placeholder="账号 / 用户名"></div>
-      <div class="input-wrap"><svg class="ic"><use href="#i-link"/></svg><input class="input" id="viUrl" placeholder="网址（可选）。同一网站可添加多条账号"></div>
-      <div style="display:flex;gap:8px">
-        <div class="input-wrap" style="flex:1"><svg class="ic"><use href="#i-key"/></svg><input class="input" type="password" id="viPass" placeholder="密码"></div>
-        <button class="btn btn-outline btn-sm" id="viGen" title="生成强密码"><svg class="ic"><use href="#i-zap"/></svg>生成</button>
-      </div>
+      <div class="input-wrap"><svg class="ic"><use href="#i-link"/></svg><input class="input" id="viUrl" placeholder="网址（可选）。同一网站可添加多个账号"></div>
+      <div class="v-acc-list" id="viAccList"></div>
+      <button type="button" class="btn btn-outline btn-sm v-acc-add" id="viAccAdd"><svg class="ic"><use href="#i-plus"/></svg>添加账号</button>
       <div class="input-wrap"><svg class="ic"><use href="#i-note"/></svg><input class="input" id="viNote" placeholder="备注（可选）"></div>
     </div>
     <div class="m-foot">

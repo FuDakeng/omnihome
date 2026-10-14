@@ -141,6 +141,19 @@ html[data-motion="off"] .boot-bar i{ animation: none; width: 100%; opacity: .35;
 .m-head h3{ margin: 0 0 4px; font-size: var(--om-fs-lg); }
 .m-head p{ margin: 0; font-size: var(--om-fs-xs); color: var(--om-text-3); }
 .m-body{ padding: 0 var(--om-space-5) var(--om-space-5); display: flex; flex-direction: column; gap: 8px; }
+/* 凭据弹窗：同一网站一次录入多组账号/密码 */
+.v-acc-list{ display: flex; flex-direction: column; gap: 8px; }
+.v-acc-row{
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--om-border);
+  border-radius: var(--om-radius-md);
+  background: var(--om-surface-2);
+}
+.v-acc-pass-row{ display: flex; gap: 8px; align-items: center; }
+.v-acc-add{ align-self: flex-start; }
+/* 账号行较多时正文滚动，不撑破视口 */
+#vaultItemMask .m-body{ max-height: min(64vh, 560px); overflow-y: auto; }
 .m-user{
   display: flex; align-items: center; gap: 12px;
   padding: 10px 12px;

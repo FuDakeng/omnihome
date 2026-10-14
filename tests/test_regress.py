@@ -289,6 +289,14 @@ def test_vault_categories_and_preview():
     assert "个账号" in js
     assert "eventHit" in js
     assert "toggleSel(card.dataset.vId)" in js
+    # 同站多账号：弹窗内「添加账号」可录入多组账号/密码，保存时拆成多条凭据
+    assert 'id="viAccList"' in overlay
+    assert 'id="viAccAdd"' in overlay
+    assert "accRowHtml" in js
+    assert "accRows" in js
+    overlays_css = (ROOT / "demo" / "css" / "components" / "overlays.css").read_text(encoding="utf-8")
+    assert ".v-acc-list" in overlays_css
+    assert ".v-acc-row" in overlays_css
 
 
 def test_marker_wrap_and_sidebar_pref():
