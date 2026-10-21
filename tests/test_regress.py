@@ -187,6 +187,19 @@ def test_dashboard_widget_layout_flex():
     assert "dash-spark-svg" in html
 
 
+def test_livemd_caret_auto_scrolls_into_view():
+    """回车 / 重建光标后要把当前行滚进视野，但已可见时不滚动。"""
+    js = (ROOT / "demo" / "js" / "livemd.js").read_text(encoding="utf-8")
+    assert "function ensureCaretVisible" in js
+    assert "function nearestScroller" in js
+    assert "ensureCaretVisible();" in js
+    assert "prefers-reduced-motion" in js
+    assert "behavior: reduce ? 'auto' : 'smooth'" in js
+    block = js.split("function restoreCaret(off){", 1)[1].split("\n    }", 1)[0]
+    assert "ensureCaretVisible();" in block
+    assert "if (!delta) return;" in js
+
+
 def test_quicknote_only_opens_quick_folder():
     """速记卡兜底只能选「灵感速记」内的笔记，不能把「每日计划」等文档当速记打开。"""
     js = (ROOT / "demo" / "js" / "notes" / "quick.js").read_text(encoding="utf-8")

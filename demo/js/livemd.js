@@ -1130,6 +1130,55 @@ export const LiveMD = (() => {
       if (!walk(Array.from(line.childNodes))) caretEndOf(line);
     }
 
+    /* 最近的纵向滚动容器（编辑器自身 / 页面），只用于把光标滚回视野 */
+    function nearestScroller(el){
+      for (let p = el; p && p !== document.body && p !== document.documentElement; p = p.parentElement){
+        const cs = getComputedStyle(p);
+        if (/(auto|scroll)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight + 1) return p;
+      }
+      const doc = document.scrollingElement || document.documentElement;
+      if (doc && doc.scrollHeight > doc.clientHeight + 1) return doc;
+      return null;
+    }
+
+    /* 程序化重建后浏览器不会替光标自动滚动。这里按光标实际位置补一次滚动：
+       已在视野内（含 16px 余量）时不动作，避免正常输入时页面来回晃；需要滚动时平滑跟随。 */
+    function ensureCaretVisible(){
+      if (!alive || !root.isConnected || root.style.display === 'none') return;
+      const rootRect = root.getBoundingClientRect();
+      if (!rootRect.width && !rootRect.height) return;
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      const r = sel.getRangeAt(0);
+      if (r.startContainer !== root && !root.contains(r.startContainer)) return;
+      const cr = r.cloneRange();
+      cr.collapse(true);
+      let rect = cr.getBoundingClientRect();
+      if (!rect || (!rect.width && !rect.height)){
+        const line = caretLineEl();
+        if (!line) return;
+        rect = line.getBoundingClientRect();
+      }
+      const host = nearestScroller(root);
+      if (!host) return;
+      const isDoc = host === document.scrollingElement || host === document.documentElement || host === document.body;
+      const hr = isDoc ? { top: 0, bottom: window.innerHeight } : host.getBoundingClientRect();
+      const pad = 16;
+      const top = Math.max(0, hr.top) + pad;
+      const bottom = Math.min(window.innerHeight, hr.bottom) - pad;
+      if (bottom <= top) return;
+      let delta = 0;
+      if (rect.bottom > bottom) delta = rect.bottom - bottom;
+      else if (rect.top < top) delta = rect.top - top;
+      if (!delta) return;
+      const max = Math.max(0, host.scrollHeight - host.clientHeight);
+      const target = Math.max(0, Math.min(max, host.scrollTop + delta));
+      if (Math.abs(target - host.scrollTop) < 1) return;
+      const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      try { host.scrollTo({ top: target, behavior: reduce ? 'auto' : 'smooth' }); }
+      catch (_) { host.scrollTop = target; }
+    }
+
     function restoreCaret(off){
       if (off == null) return;
       off = nudgeMermaidCaret(off);
@@ -1145,6 +1194,7 @@ export const LiveMD = (() => {
       /* 光标落定后立刻判断 [[ ，不必等 selectionchange（程序化选区有时不派发） */
       if (!composing && !pointerDown) syncWiki();
       applyMermaidViews(off);
+      ensureCaretVisible();
     }
 
     /* 可编辑且非表格/代码行：光标落在该行时整行改为原文，便于直接改标记符号 */
