@@ -39,16 +39,23 @@
       meta.updated ? '上次保存 · ' + fmtTs(meta.updated) : '就绪';
   }
 
+  /* 速记卡只接管「灵感速记」文件夹里的笔记：每日计划等内置文档不能出现在这里 */
+  const inQuick = n => {
+    const f = String((n && n.folder) || '').replace(/^\/+|\/+$/g, '');
+    return f === QUICK_FOLDER || f.startsWith(QUICK_FOLDER + '/');
+  };
+
   async function ensureQuick(){
     const d = await API.get('/api/notes');
-    const list = d.notes || [];
+    const list = (d.notes || []).filter(n => !n.deleted && !n.pinned && inQuick(n));
     await ensureFolder(d.folders);
     let lastId = '';
     try { lastId = localStorage.getItem(LAST_KEY) || ''; } catch (e) {}
-    /* 优先打开上次记录的笔记；找不到则取最近更新的非常驻笔记 */
+    /* 优先打开上次记录的速记；找不到则取「灵感速记」里最近更新的一篇。
+       旧版本会兜底到任意最近更新的笔记，计划当天可能把「每日计划 · YYYY-MM」
+       打开并记住，导致计划内容跑到速记卡里；这里必须限定文件夹。 */
     let hit = (lastId && list.find(n => n.id === lastId))
-      || list.filter(n => !n.pinned)
-             .sort((a, b) => (b.updated || 0) - (a.updated || 0))[0];
+      || list.sort((a, b) => (b.updated || 0) - (a.updated || 0))[0];
     if (!hit){
       hit = await API.post('/api/notes',
         { title: '灵感速记', tags: ['灵感'], folder: QUICK_FOLDER, vault: 'system' });

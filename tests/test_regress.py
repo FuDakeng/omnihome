@@ -187,6 +187,16 @@ def test_dashboard_widget_layout_flex():
     assert "dash-spark-svg" in html
 
 
+def test_quicknote_only_opens_quick_folder():
+    """速记卡兜底只能选「灵感速记」内的笔记，不能把「每日计划」等文档当速记打开。"""
+    js = (ROOT / "demo" / "js" / "notes" / "quick.js").read_text(encoding="utf-8")
+    assert "const inQuick" in js
+    assert "QUICK_FOLDER + '/'" in js
+    assert "!n.deleted && !n.pinned && inQuick(n)" in js
+    # 旧实现兜底到任意最近更新的非常驻笔记，会把计划文档带进速记卡。
+    assert "list.filter(n => !n.pinned)" not in js
+
+
 def test_dashboard_edit_tools_not_clipped():
     """编辑布局时拖拽/收纳胶囊贴在卡片上沿，不能被 .editor / 灵感速记 overflow 裁掉。"""
     import re
