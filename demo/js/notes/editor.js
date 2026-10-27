@@ -155,6 +155,7 @@ import { isMermaidLang, scheduleMermaid } from '../mermaid.js';
   /* #edSrc 输入的统一处理（分屏直编与实时渲染共用） */
   S.onSrcInput = function(){
     S.dirty = true;
+    S._editSeq++;
     S.renderPreview();
     S.updateStat();
     $('#edFootTime').textContent = '编辑中…';

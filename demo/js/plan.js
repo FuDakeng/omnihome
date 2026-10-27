@@ -12,7 +12,9 @@ const Plan = (() => {
   const daySrc = $('#planDaySrc');
   let timer = null;
   let dayDate = '';
-  let cache = { ym: '', id: null, content: '' };   // 当前加载的月份文档
+  let daySeq = 0;   // 日历里连续点不同日期时，丢弃慢返回的旧月份文档
+  let dashDoc = { ym: '', id: null, content: '' };  // 仪表盘“今天”所在月份文档
+  let dayDoc = { ym: '', id: null, content: '' };   // 日历单日弹窗当前文档（可与仪表盘不同月）
 
   const pad = n => String(n).padStart(2, '0');
   const dateKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -117,12 +119,10 @@ const Plan = (() => {
       hit = await API.post('/api/notes', { title, tags: [], folder: FOLDER });
       const seed = templateOf(seedDate || dateKey(new Date()));
       await API.put('/api/notes/' + hit.id, { content: seed });
-      cache = { ym, id: hit.id, content: seed };
-      return cache;
+      return { ym, id: hit.id, content: seed };
     }
     const note = await API.get('/api/notes/' + hit.id);
-    cache = { ym, id: hit.id, content: note.content || '' };
-    return cache;
+    return { ym, id: hit.id, content: note.content || '' };
   }
 
   /* ---------- 进度统计 ---------- */
@@ -145,40 +145,46 @@ const Plan = (() => {
   async function sync(){
     const today = dateKey(new Date());
     try {
-      await ensureDoc(ymOf(today), today);
-      if (!sectionOf(cache.content, today)){
-        cache.content = upsertDay(cache.content, today, templateOf(today));
-        await API.put('/api/notes/' + cache.id, { content: cache.content });
+      const doc = await ensureDoc(ymOf(today), today);
+      if (!sectionOf(doc.content, today)){
+        doc.content = upsertDay(doc.content, today, templateOf(today));
+        await API.put('/api/notes/' + doc.id, { content: doc.content });
       }
-      src.value = sectionOf(cache.content, today) || templateOf(today);
+      dashDoc = doc;
+      if (dayDoc.id === doc.id) dayDoc.content = doc.content;
+      src.value = sectionOf(dashDoc.content, today) || templateOf(today);
       if (live) live.refresh();
       render();
     } catch (e) { /* 未登录 / 网络异常：保持占位提示 */ }
   }
 
   async function save(){
-    if (!cache.id) return;
+    if (!dashDoc.id) return;
+    const owner = dashDoc;   // 捕获本次要写的文档，避免期间日历打开别的月份时串写
     const today = dateKey(new Date());
     const body = src.value.replace(/\s+$/, '');
-    let next = upsertDay(cache.content, today, body);
+    let next = upsertDay(owner.content, today, body);
     try {
-      await API.put('/api/notes/' + cache.id, { content: next });
-      cache.content = next;
+      await API.put('/api/notes/' + owner.id, { content: next });
+      owner.content = next;
     } catch (e) {
       /* 文档可能在知识库里被删除：重建后再保存一次 */
       try {
-        await ensureDoc(ymOf(today), today);
-        next = upsertDay(cache.content, today, body);
-        await API.put('/api/notes/' + cache.id, { content: next });
-        cache.content = next;
+        const doc = await ensureDoc(ymOf(today), today);
+        dashDoc = doc;
+        next = upsertDay(doc.content, today, body);
+        await API.put('/api/notes/' + doc.id, { content: next });
+        doc.content = next;
       } catch (e2) { showToast(e2.message, 'err'); return; }
     }
+    if (dayDoc.id === dashDoc.id) dayDoc.content = dashDoc.content;
     $('#planTime').textContent = '已保存 ' + new Date().toTimeString().slice(0, 5);
   }
 
   /* ---------- 单日计划弹窗（日历联动） ---------- */
   /* 点击任意日期打开当日计划编辑；未来月份自动新建月度文档并填充空模板 */
   async function openDay(date){
+    const seq = ++daySeq;
     dayDate = date;
     $('#planDayTitle').textContent = date + ' 计划';
     $('#planDaySub').textContent = date === dateKey(new Date())
@@ -186,23 +192,28 @@ const Plan = (() => {
       : '按月归档于知识库「每日计划」文件夹';
     App.openModal('planDayMask');
     try {
-      await ensureDoc(ymOf(date), date);
-      daySrc.value = sectionOf(cache.content, date) || templateOf(date);
+      const doc = await ensureDoc(ymOf(date), date);
+      if (seq !== daySeq || dayDate !== date) return;   // 已点了别的日期
+      dayDoc = doc;
+      daySrc.value = sectionOf(doc.content, date) || templateOf(date);
       if (dayLive) dayLive.refresh();
     } catch (e) { showToast(e.message, 'err'); }
   }
 
   async function saveDay(){
-    if (!dayDate || !cache.id) return;
-    const next = upsertDay(cache.content, dayDate, daySrc.value.replace(/\s+$/, ''));
+    if (!dayDate || !dayDoc.id || dayDoc.ym !== ymOf(dayDate)) return;
+    const owner = dayDoc;    // 捕获文档：保存期间仪表盘切月也不能串写
+    const date = dayDate;
+    const next = upsertDay(owner.content, date, daySrc.value.replace(/\s+$/, ''));
     try {
-      await API.put('/api/notes/' + cache.id, { content: next });
-      cache.content = next;
+      await API.put('/api/notes/' + owner.id, { content: next });
+      owner.content = next;
+      if (dashDoc.id === owner.id) dashDoc.content = owner.content;
       App.closeModal('planDayMask');
       showToast('计划已保存');
-      /* 保存的正是今天：同步仪表盘组件 */
-      if (dayDate === dateKey(new Date())){
-        src.value = sectionOf(cache.content, dayDate) || '';
+      /* 保存的正是今天且仪表盘已加载同一份月度文档：同步仪表盘组件 */
+      if (date === dateKey(new Date()) && dashDoc.id === owner.id){
+        src.value = sectionOf(dashDoc.content, date) || '';
         if (live) live.refresh();
         render();
       }

@@ -126,10 +126,13 @@ import { S } from './state.js';
 
   S.selectVault = async function(id){
     if (!id || id === S.currentVault) return;
+    if (S.dirty) await S.save();
+    clearTimeout(S.saveTimer); S.saveTimer = null;
     S.currentVault = id;
     try { localStorage.setItem(S.VAULT_KEY, id); } catch (_) {}
     try { await API.put('/api/notes/vaults/select', { vault: id }); } catch (_) {}
     S.currentId = null;
+    S.editorNoteId = null;
     S.renderVaultSwitch();
     S.renderTree();
     const first = S.idx.find(n => !n.deleted && S.noteVault(n) === id);

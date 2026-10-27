@@ -33,7 +33,8 @@ import { S } from './state.js';
     S.persistTabs();
     if (id === S.currentId){
       const nxt = S.openTabs[Math.min(i, S.openTabs.length - 1)];
-      S.currentId = null; S.dirty = false;
+      S.currentId = null; S.dirty = false; S.editorNoteId = null;
+      clearTimeout(S.saveTimer); S.saveTimer = null;
       if (nxt) await S.open(nxt);
       else S.clearEditor();
     }
@@ -42,6 +43,8 @@ import { S } from './state.js';
 
   S.clearEditor = function(){
     S.currentId = null; S.dirty = false;
+    S.editorNoteId = null;
+    clearTimeout(S.saveTimer); S.saveTimer = null;
     $('#edSrc').value = ''; $('#edTitle').value = '';
     S.setReadonly(false);
     S.renderPreview();

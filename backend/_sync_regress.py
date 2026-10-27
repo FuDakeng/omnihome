@@ -206,6 +206,58 @@ def run_suite(engine):
     p2 = sorted(f["path"] for f in client.get("/api/sync/list", headers=HK(key)).json()["files"])
     check(f"[{engine}] 重复 list 路径稳定", p2 == paths, str(p2))
 
+    # 删除同名中的一篇后，另一篇的同步路径必须保持原样，不能前移顶替
+    # （前移会让客户端把“另一篇正文”当成同一路径的更新，整篇覆盖）。
+    keep_body = gcontent(client.get("/api/sync/file", headers=HK(key),
+                                   params={"path": "F/重名-2.md"}).json())
+    client.delete("/api/sync/file", headers=HK(key), params={"path": "F/重名.md"})
+    r = client.get("/api/sync/list", headers=HK(key))
+    paths = [f["path"] for f in r.json()["files"]]
+    check(f"[{engine}] 同名笔记删除后其余路径不前移",
+          paths == ["F/重名-2.md"], str(paths))
+    body = gcontent(client.get("/api/sync/file", headers=HK(key),
+                              params={"path": "F/重名-2.md"}).json())
+    check(f"[{engine}] 路径不前移时正文身份正确", body == keep_body, body[:80])
+    # 回收站里那篇仍占住 F/重名.md：新建同名笔记不能复用旧路径，
+    # 否则客户端会把新笔记正文写进本地旧文件。
+    r = client.post("/api/sync/file", headers=HK(key),
+                    json={"path": "F/重名.md", "content": "# 重名\n\n新笔记"})
+    new_path = (r.json() or {}).get("path") if r.status_code == 200 else ""
+    check(f"[{engine}] 删除后同名新建不复用旧路径",
+          new_path == "F/重名-3.md", r.text[:160])
+
+    # 把笔记改名成已存在的同名路径：新来者拿 -2，原有笔记的正文不被覆盖
+    reset(engine)
+    tok, key = reset(engine)
+    client.post("/api/sync/file", headers=HK(key),
+                json={"path": "G/甲.md", "content": "# 甲\n\n甲的正文"})
+    client.post("/api/sync/file", headers=HK(key),
+                json={"path": "G/乙.md", "content": "# 乙\n\n乙的正文"})
+    r = client.put("/api/sync/file/rename", headers=HK(key),
+                   json={"oldPath": "G/甲.md", "newPath": "G/乙.md"})
+    actual = (r.json() or {}).get("path") if r.status_code == 200 else ""
+    check(f"[{engine}] 改名撞名自动分到 -2", actual == "G/乙-2.md", r.text[:160])
+    body_b = gcontent(client.get("/api/sync/file", headers=HK(key),
+                                params={"path": "G/乙.md"}).json())
+    body_b2 = gcontent(client.get("/api/sync/file", headers=HK(key),
+                                 params={"path": "G/乙-2.md"}).json())
+    check(f"[{engine}] 撞名不改写原有笔记正文",
+          "乙的正文" in body_b and "甲的正文" in body_b2,
+          (body_b[:40] + " | " + body_b2[:40]))
+
+    # 本地改 H1 标题后，服务端返回实际新路径，客户端可把本地文件跟过去
+    reset(engine)
+    tok, key = reset(engine)
+    client.post("/api/sync/file", headers=HK(key),
+                json={"path": "H/旧名.md", "content": "# 旧名\n\n旧正文"})
+    r = client.post("/api/sync/file", headers=HK(key),
+                    json={"path": "H/旧名.md", "content": "# 新名\n\n新正文",
+                          "clientMtime": (int(time.time()) + 5) * 1000})
+    actual = (r.json() or {}).get("path") if r.status_code == 200 else ""
+    check(f"[{engine}] 改 H1 标题返回实际路径", actual == "H/新名.md", r.text[:160])
+    paths = [f["path"] for f in client.get("/api/sync/list", headers=HK(key)).json()["files"]]
+    check(f"[{engine}] 改 H1 后旧路径消失", paths == ["H/新名.md"], str(paths))
+
     # ---------- 5. rename 改 folder + title ----------
     print("-- 5. rename --")
     reset(engine)

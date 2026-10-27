@@ -161,7 +161,9 @@ S.bindTree = function () {/* ---------- 桌面拖拽 .md 文件 / 文件夹 → 
         if (S.currentId){
           S.openTabs = S.openTabs.filter(t => t !== S.currentId);   // 同步关闭当前标签页
           S.persistTabs();
-          S.currentId = null; $('#edSrc').value=''; $('#edTitle').value=''; S.renderPreview(); S.updateCrumb(); S.renderTree(); S.renderTabs();
+          S.currentId = null; S.editorNoteId = null;
+          clearTimeout(S.saveTimer); S.saveTimer = null;
+          $('#edSrc').value=''; $('#edTitle').value=''; S.renderPreview(); S.updateCrumb(); S.renderTree(); S.renderTabs();
         }
         return;
       }
@@ -447,7 +449,8 @@ S.bindTree = function () {/* ---------- 桌面拖拽 .md 文件 / 文件夹 → 
       } catch (_) {}
       showToast(`已移到回收站 ${delIds.length} 篇笔记`);
       if (delIds.includes(S.currentId)){
-        S.currentId = null; S.dirty = false;
+        S.currentId = null; S.dirty = false; S.editorNoteId = null;
+        clearTimeout(S.saveTimer); S.saveTimer = null;
         $('#edSrc').value = ''; $('#edTitle').value = ''; S.renderPreview();
         if (S.liveEd) S.liveEd.refresh();
         S.updateCrumb();
@@ -535,6 +538,7 @@ S.bindTree = function () {/* ---------- 桌面拖拽 .md 文件 / 文件夹 → 
     $('#edSrc').addEventListener('input', S.onSrcInput);
     $('#edTitle').addEventListener('input', () => {
       S.dirty = true;
+      S._editSeq++;
       /* 标签页标题实时跟随（保存落库时再同步目录树） */
       const meta = S.idx.find(n => n.id === S.currentId);
       if (meta){ meta.title = $('#edTitle').value.trim() || '未命名笔记'; S.renderTabs(); }

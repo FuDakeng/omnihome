@@ -21,6 +21,16 @@ S.folderVault = {};    // folderPath -> vaultId;
 
 S.currentId = null;
 
+S.editorNoteId = null; // 编辑器 DOM 里当前承载的笔记 id；加载/切换期间与 currentId 短暂不同步
+
+S._openSeq = 0;        // 打开笔记的请求序号：丢弃慢返回的旧响应，避免串页
+
+S._editSeq = 0;        // 正文/标题编辑序号：保存期间又有输入时不误清 dirty
+
+S._saveChain = null;   // 串行保存链：同一篇笔记的 PUT 不会并发乱序回写旧正文
+
+S._saveQueued = false;
+
 S.currentMode = 'edit';
 
 S.currentFolder = '';  // 新建笔记的默认文件夹（最近点选的）;

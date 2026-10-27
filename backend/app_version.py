@@ -5,8 +5,8 @@
 import json
 from pathlib import Path
 
-VERSION = "0.3.36"
-STAGE = "编辑器滚动"
+VERSION = "0.3.37"
+STAGE = "同步防覆盖"
 
 _CHANGELOG_FILE = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
 

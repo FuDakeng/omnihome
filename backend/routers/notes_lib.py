@@ -823,25 +823,94 @@ def _in_sync_scope(n: dict, vault_id: str = "") -> bool:
         return False
     return True
 
+def _sync_path_matches(stored: str, want: str) -> bool:
+    """已登记路径是否仍可沿用：与当前 folder/title 路径完全相同，或只是它的
+    `-2` / `-3` 重名序号（标题被改名后就不再匹配，需要重新分配）。"""
+    if not stored or not want:
+        return False
+    if stored == want:
+        return True
+    sdir, sname = _split_sync_path(stored)
+    wdir, wname = _split_sync_path(want)
+    if sdir != wdir:
+        return False
+    if not sname.lower().endswith(".md") or not wname.lower().endswith(".md"):
+        return False
+    sstem, wstem = sname[:-3], wname[:-3]
+    if not sstem.startswith(wstem + "-"):
+        return False
+    tail = sstem[len(wstem) + 1:]
+    return tail.isdigit() and int(tail) >= 2
+
 def _sync_path_index(username: str, vault_id: str = ""):
     """构建 {path: meta} 与 {id: path} 双向索引。
-    path 分配按 (folder, title, id) 确定性排序：notes_index 会因 save_note 的
-    updated 重排而变序，若不固定顺序，同名冲突笔记的 -2 后缀会在多次 /list 间抖动。"""
+
+    路径一旦分配就记在 notes/syncpaths.json（note id -> path）里，后续优先
+    沿用：同名笔记的 `-2` 序号绑定的是笔记本身，不会因为另一篇同名笔记被
+    删除/改名而整体前移。这很关键——路径前移会让同步客户端把「另一篇笔记
+    的正文」当成同一路径的更新拉到本地，表现为整篇笔记被另一篇覆盖。
+
+    新分配时先保留所有已登记路径，再给未登记的笔记找空位，绝不抢占别人
+    已登记的路径；多次 /list 与增删改之间保持稳定。"""
     idx = storage.notes_index(username)
     scoped = [n for n in idx
               if _in_sync_scope(n, vault_id) and not _is_junk_path(n.get("title") or "")]
     scoped.sort(key=lambda n: (n.get("folder") or "", n.get("title") or "",
                                n.get("id") or ""))
-    by_path, id_to_path = {}, {}
-    for n in scoped:
+    saved = storage.user_json(username, "notes/syncpaths.json", {})
+    if not isinstance(saved, dict):
+        saved = {}
+    # 回收站里的笔记仍占住原路径（默认保留 30 天）：这样删除后新建的同名笔记
+    # 会拿到 -2，客户端先把旧路径的本地文件移进回收站再拉新笔记，而不是把
+    # 新笔记正文直接写进旧文件。恢复回收站笔记时也能回到原路径。
+    reserved = {}
+    for n in idx:
+        if not n.get("deleted"):
+            continue
+        nid = n.get("id")
+        if vault_id and _infer_note_vault(n) != vault_id:
+            continue
+        stored = str(saved.get(nid) or "").replace("\\", "/").strip("/")
         want = _note_to_path(n)
+        if stored and stored not in reserved and _sync_path_matches(stored, want):
+            reserved[stored] = n
+    by_path, id_to_path = {}, {}
+    taken = set(reserved)
+    pending = []
+    # 第一遍只认领已登记路径，避免「新笔记先到」把老笔记的路径抢走。
+    for n in scoped:
+        nid = n.get("id")
+        want = _note_to_path(n)
+        stored = str(saved.get(nid) or "").replace("\\", "/").strip("/")
+        if stored and stored not in taken and _sync_path_matches(stored, want):
+            by_path[stored] = n
+            id_to_path[nid] = stored
+            taken.add(stored)
+        else:
+            pending.append((n, want))
+    # 第二遍给未登记 / 路径已失效的笔记分配空位。
+    for n, want in pending:
+        stem = want[:-3] if want.lower().endswith(".md") else want
         p, i = want, 2
-        while p in by_path and by_path[p].get("id") != n.get("id"):
-            stem = want[:-3] if want.lower().endswith(".md") else want
+        while p in taken:
             p = "%s-%d.md" % (stem, i)
             i += 1
         by_path[p] = n
         id_to_path[n.get("id")] = p
+        taken.add(p)
+    changed = False
+    for nid, p in id_to_path.items():
+        if saved.get(nid) != p:
+            saved[nid] = p
+            changed = True
+    # 清理已不存在的笔记 id（永久删除后不残留映射）
+    alive_ids = {n.get("id") for n in idx}
+    for nid in list(saved.keys()):
+        if nid not in alive_ids:
+            saved.pop(nid, None)
+            changed = True
+    if changed:
+        storage.save_user_json(username, "notes/syncpaths.json", saved)
     return by_path, id_to_path
 
 def _resolve_sync_path(username: str, path: str, vault_id: str = ""):
@@ -918,7 +987,9 @@ def _sync_apply_note(username, nid, folder, title, body_md, site_mtime, norm, va
     new_title = title or old_title or "未命名笔记"
     vault_same = (not vault_id) or old_vault == vault_id
     if old_body == body_md and new_title == old_title and folder == old_folder and vault_same:
-        return {"path": norm, "mtime": site_mtime, "id": nid, "applied": True, "unchanged": True}
+        by_path, id_to_path = _sync_path_index(username, vault_id)
+        return {"path": id_to_path.get(nid, norm), "mtime": site_mtime, "id": nid,
+                "applied": True, "unchanged": True}
     if old_body != body_md:
         storage.note_rev_snapshot(username, nid, old_body, old_title, "obsidian")
     storage.note_write(username, nid, body_md)
@@ -938,7 +1009,11 @@ def _sync_apply_note(username, nid, folder, title, body_md, site_mtime, norm, va
                                       _clip_sync(folder or "根目录", 24)))
     if old_body != body_md:
         bits.append(_diff_summary(old_body, body_md))
-    return {"path": norm, "mtime": now * 1000, "id": nid, "applied": True,
+    # 标题/文件夹变化会改变同步路径；返回实际路径，供客户端把本地文件跟过去，
+    # 避免客户端一直往旧路径推、或把路径上新出现的另一篇笔记覆盖掉。
+    by_path2, id_to_path2 = _sync_path_index(username, vault_id)
+    return {"path": id_to_path2.get(nid, norm), "mtime": now * 1000, "id": nid,
+            "applied": True,
             "title": new_title, "summary": "；".join(bits) or "内容已更新"}
 
 

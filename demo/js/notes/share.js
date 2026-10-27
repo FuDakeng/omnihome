@@ -90,8 +90,13 @@ import { S } from './state.js';
   S.pollOpenNote = async function(){
     if (!S.currentId || S.dirty) return;
     if (document.body.dataset.view !== 'notes' || document.hidden) return;
+    const id = S.currentId;
+    if (S.editorNoteId !== id) return;   // 正文还没加载完，别拿远端内容去覆盖
     try {
-      const d = await API.get('/api/notes/' + S.currentId);
+      const d = await API.get('/api/notes/' + id);
+      /* 请求期间可能已切换笔记、开始输入或刚保存：只有仍停留在同一篇且没有
+         未保存内容时才允许回写，否则 A 的响应会把 B 的正文覆盖掉。 */
+      if (S.currentId !== id || S.editorNoteId !== id || S.dirty) return;
       const ts = d.updated || 0;
       if (ts && S.lastKnownUpdated && ts > S.lastKnownUpdated + 1){
         $('#edSrc').value = d.content || '';

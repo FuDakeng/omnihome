@@ -531,6 +531,52 @@ def test_appearance_density_and_motion_wired():
     assert "om_layout_compact" in app_js
 
 
+def test_note_editor_never_saves_one_note_into_another():
+    """切换笔记 / 远端轮询的慢响应不能把 A 的正文写进 B。
+
+    回归的是两类真实事故：
+      1) 打开 B 的 GET 还没返回时，旧笔记 A 的正文仍在编辑器里，延时保存却
+         按 currentId=B 落库 → B 被整篇替换成 A；
+      2) 4 秒轮询的 GET 在切换笔记后才返回，把 A 的正文写进 B 的编辑器，
+         下一次自动保存再把 A 写进 B。
+    """
+    state = (ROOT / "demo" / "js" / "notes" / "state.js").read_text(encoding="utf-8")
+    crud = (ROOT / "demo" / "js" / "notes" / "crud.js").read_text(encoding="utf-8")
+    share = (ROOT / "demo" / "js" / "notes" / "share.js").read_text(encoding="utf-8")
+
+    assert "S.editorNoteId" in state
+    assert "S._openSeq" in state
+    assert "S._saveChain" in state
+
+    # 保存目标必须是“编辑器内容所属”的笔记，而不是切换后的 currentId
+    assert "const id = S.editorNoteId;" in crud
+    assert "if (!id || S.currentId !== id) return;" in crud
+    assert "API.put('/api/notes/' + S.currentId" not in crud
+
+    # S.open 必须丢弃乱序返回的旧响应，并在加载期间解除内容归属
+    assert "const seq = ++S._openSeq;" in crud
+    assert "if (seq !== S._openSeq || S.currentId !== id) return;" in crud
+    assert "S.editorNoteId = null;" in crud
+    assert "S.editorNoteId = id;" in crud
+
+    # 轮询响应返回后要复核当前笔记 / 内容归属 / dirty
+    assert "const id = S.currentId;" in share
+    assert "if (S.currentId !== id || S.editorNoteId !== id || S.dirty) return;" in share
+
+
+def test_plan_editor_writes_only_its_own_month_document():
+    """仪表盘「今日计划」与日历单日弹窗可能在不同月份，不能共用一个缓存：
+    否则日历打开别的月份后，仪表盘的自动保存会把今天的内容写进那个月文档。"""
+    plan = (ROOT / "demo" / "js" / "plan.js").read_text(encoding="utf-8")
+    assert "let dashDoc" in plan
+    assert "let dayDoc" in plan
+    assert "const owner = dashDoc;" in plan
+    assert "const owner = dayDoc;" in plan
+    assert "if (seq !== daySeq || dayDate !== date) return;" in plan
+    assert "dayDoc.ym !== ymOf(dayDate)" in plan
+    assert "let cache = { ym: '', id: null, content: '' }" not in plan
+
+
 def test_kb_drag_state_uses_module_sets():
     """v0.2.52 ESM 拆分后裸 selNotes 会 ReferenceError，拖到回收站失效。"""
     import re

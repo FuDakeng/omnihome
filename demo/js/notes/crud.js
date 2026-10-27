@@ -4,10 +4,17 @@ import { S } from './state.js';
   /* ---------- 打开 / 保存 ---------- */
   S.open = async function(id){
     if (!S.idx.find(n => n.id === id)) return;
-    if (id !== S.currentId && S.dirty) await S.save();
+    /* 先把当前页未保存内容落到它自己的 id 上；即使点的还是同一篇，也不能
+       让后面的 GET 无条件覆盖尚未保存的编辑。 */
+    if (S.dirty) await S.save();
+    clearTimeout(S.saveTimer); S.saveTimer = null;
+    const seq = ++S._openSeq;
     /* 标签页登记：新开追加到末尾，已存在则仅切换激活 */
     if (!S.openTabs.includes(id)){ S.openTabs.push(id); S.persistTabs(); }
     S.currentId = id;
+    /* 正文尚未换过来：先解除“编辑器内容归属”。加载期间任何自动保存都只能是
+       no-op，绝不能把上一篇的正文写进这一篇。 */
+    S.editorNoteId = null;
     const meta = S.idx.find(n => n.id === id);
     if (meta && S.noteVault(meta) !== S.currentVault){
       S.currentVault = S.noteVault(meta);
@@ -17,9 +24,13 @@ import { S } from './state.js';
     S.setReadonly(!!(meta && meta.readonly) || !S.vaultCanEdit());
     try {
       const d = await API.get('/api/notes/' + id);
+      /* 请求期间用户又切了别的笔记（或关掉了标签页）：这份响应已过期，
+         直接丢弃，避免把 A 的正文显示在 B 的编辑器里并被自动保存回 B。 */
+      if (seq !== S._openSeq || S.currentId !== id) return;
       $('#edSrc').value = d.content;
       $('#edTitle').value = (d.title != null && d.title !== '') ? d.title : (meta ? meta.title : '');
       if (meta && d.title) meta.title = d.title;
+      S.editorNoteId = id;
       S.lastKnownUpdated = d.updated || Math.floor(Date.now() / 1000);
       S.dirty = false;
       S.renderPreview();
@@ -39,6 +50,9 @@ import { S } from './state.js';
         requestAnimationFrame(() => op.classList.add('open'));
       }
     } catch (e) {
+      /* 过期请求的失败不要弹到用户面前；当前请求失败时保持 editorNoteId 为空，
+         后续自动保存不会把上一篇正文写进这篇加载失败的笔记。 */
+      if (seq !== S._openSeq || S.currentId !== id) return;
       /* 打开失败：撤回标签登记 */
       S.openTabs = S.openTabs.filter(t => t !== id);
       S.persistTabs();
@@ -67,22 +81,53 @@ import { S } from './state.js';
     } catch (e) { showToast(e.message, 'err'); }
   };
 
-  S.save = async function(){
-    if (!S.currentId) return;
+  /* 单次落库：只写“编辑器内容当前所属”的那篇笔记。切换笔记时 editorNoteId
+     会被置空/更新，因此即使延时器晚到，也不可能写进另一篇笔记。 */
+  S._saveOnce = async function(){
+    clearTimeout(S.saveTimer); S.saveTimer = null;
+    const id = S.editorNoteId;
+    if (!id || S.currentId !== id) return;
     if ($('#edTitle').readOnly) return;   // 只读笔记不落库（防延时保存串页）
+    const content = $('#edSrc').value;
+    const title = $('#edTitle').value.trim() || '未命名笔记';
+    const editSeq = S._editSeq;
     try {
-      await API.put('/api/notes/' + S.currentId, {
-        content: $('#edSrc').value,
-        title: $('#edTitle').value.trim() || '未命名笔记',
-      });
-      S.dirty = false;
-      S.lastKnownUpdated = Math.floor(Date.now() / 1000);
-      const meta = S.idx.find(n => n.id === S.currentId);
-      if (meta){ meta.title = $('#edTitle').value.trim() || '未命名笔记'; meta.updated = Date.now() / 1000; }
+      await API.put('/api/notes/' + id, { content, title });
+    } catch (e) {
+      showToast('保存失败：' + e.message, 'err');
+      return;
+    }
+    /* 保存期间已切到别的笔记：这次写入落在旧 id 上，是安全的；不要再改
+       当前页的 dirty/标题状态。 */
+    if (S.editorNoteId !== id || S.currentId !== id) return;
+    if (S._editSeq === editSeq) S.dirty = false;
+    S.lastKnownUpdated = Math.floor(Date.now() / 1000);
+    const meta = S.idx.find(n => n.id === id);
+    if (meta){ meta.title = title; meta.updated = Date.now() / 1000; }
+    if (S._editSeq === editSeq){
       $('#edFootTime').textContent = '已自动保存（刚刚）';
-      S.renderTree();
-      S.renderTabs();
-    } catch (e) { showToast('保存失败：' + e.message, 'err'); }
+    }
+    S.renderTree();
+    S.renderTabs();
+  };
+
+  S.save = async function(){
+    /* 同一篇笔记串行保存：避免两个 PUT 并发时旧正文后到、把新正文盖回去。 */
+    if (S._saveChain){
+      S._saveQueued = true;
+      return S._saveChain;
+    }
+    S._saveChain = (async () => {
+      do {
+        S._saveQueued = false;
+        await S._saveOnce();
+      } while (S._saveQueued && S._saveChain);
+    })().finally(() => {
+      S._saveChain = null;
+      /* 极小窗口：保存链刚结束又有输入请求保存，补跑一次，避免正文停在本地。 */
+      if (S._saveQueued){ S._saveQueued = false; S.save(); }
+    });
+    return S._saveChain;
   };
 
   S.del = async function(id){
@@ -92,6 +137,10 @@ import { S } from './state.js';
       ? `「${meta.title}」是常驻笔记，删除后将立即自动重建一篇新的，确定继续？`
       : '删除这篇笔记？\n\n笔记会进入回收站（可在设置中配置保留天数），期间可从回收站恢复。';
     if (!await App.confirmModal({ title: '删除笔记', sub: msg, okText: '删除到回收站', danger: !meta.pinned })) return;
+    if (id === S.currentId){
+      clearTimeout(S.saveTimer); S.saveTimer = null;
+      S.dirty = false;
+    }
     try {
       const r = await API.del('/api/notes/' + id);
       /* v0.2.15：普通笔记后端改为软删除（进回收站），pinned 仍然直接删（随后端自动重建），
@@ -108,6 +157,8 @@ import { S } from './state.js';
       S.persistTabs();
       if (S.currentId === id){
         S.currentId = null;
+        S.editorNoteId = null;
+        clearTimeout(S.saveTimer); S.saveTimer = null;
         $('#edSrc').value = ''; $('#edTitle').value = ''; S.renderPreview();
         if (S.liveEd) S.liveEd.refresh();
         S.updateCrumb();

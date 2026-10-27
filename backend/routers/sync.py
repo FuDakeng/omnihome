@@ -344,7 +344,8 @@ def sync_put_file(body: SyncFileIn,
     snippet = _clip_sync(first[0] if first else "空白笔记", 48)
     _log_vault_note(username, vault_id, kind="add", title=note_title,
                     summary="新建笔记，开头「%s」" % snippet, path=norm)
-    return {"path": norm, "mtime": now * 1000, "id": nid, "applied": True}
+    _by_path, id_to_path = _sync_path_index(username, vault_id)
+    return {"path": id_to_path.get(nid, norm), "mtime": now * 1000, "id": nid, "applied": True}
 
 class SyncRenameIn(BaseModel):
     oldPath: str
@@ -375,11 +376,13 @@ def sync_rename_file(body: SyncRenameIn,
             it["updated"] = now
             break
     storage.save_notes_index(username, idx)
+    _by_path, id_to_path = _sync_path_index(username, vault_id)
+    actual = id_to_path.get(meta["id"], new)
     _log_vault_note(username, vault_id, kind="edit",
                     title=new_title or (meta.get("title") or ""),
-                    summary="路径「%s」→「%s」" % (_clip_sync(old, 36), _clip_sync(new, 36)),
-                    path=new)
-    return {"ok": True, "path": new, "id": meta["id"], "mtime": now * 1000}
+                    summary="路径「%s」→「%s」" % (_clip_sync(old, 36), _clip_sync(actual, 36)),
+                    path=actual)
+    return {"ok": True, "path": actual, "id": meta["id"], "mtime": now * 1000}
 
 @router.delete("/api/sync/file")
 def sync_delete_file(path: str,

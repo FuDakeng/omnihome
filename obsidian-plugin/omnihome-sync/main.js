@@ -27,7 +27,7 @@ const SELF_WRITE_MS = 4000;         // 自写抑制窗口（避免回环触发�
 
 /* 插件独立版本线（与服务端 app 版本解耦；须与 manifest.json 的 version 保持一致）。
    打进启动日志与设置页，用户反馈报错时可一眼确认所装插件版本。 */
-const PLUGIN_VERSION = '0.0.10';
+const PLUGIN_VERSION = '0.0.11';
 
 const ASSET_MAX = 5 * 1024 * 1024;   // 与服务端 ASSET_MAX 一致
 const ASSET_DIR = 'OmniHome-assets';  // 从站点拉取、本地无原路径的附件落点
@@ -688,9 +688,24 @@ class OmniHomeSyncPlugin extends Plugin {
       // 旧路径曾同步过：走服务端 rename，保持笔记身份与历史（退化为删+建会丢 ID）
       this.markSelfWrite(f.path);
       this.setStatus('syncing');
-      this.remoteRename(oldPath, f.path).then((resp) => {
-        this.settings.baseline[f.path] = { lm: (f.stat && f.stat.mtime) || nowMs(), rm: (resp && resp.mtime) || b.rm };
+      this.remoteRename(oldPath, f.path).then(async (resp) => {
+        /* 服务端可能因重名给这篇笔记分配了 -2 序号；本地必须跟到实际路径，
+           否则下一次对账会把路径上原有的另一篇笔记当成“本篇更新”覆盖掉。 */
+        const requested = f.path;
+        const actual = (resp && resp.path) || requested;
+        if (actual !== requested) {
+          this.markSelfWrite(actual);
+          try { await this.app.vault.rename(f, actual); }
+          catch (e) {
+            throw new Error('服务端已改名到「' + actual + '」，本地无法跟随：' + ((e && e.message) || e));
+          }
+        }
+        this.settings.baseline[actual] = {
+          lm: (f.stat && f.stat.mtime) || nowMs(),
+          rm: (resp && resp.mtime) || b.rm,
+        };
         delete this.settings.baseline[oldPath];
+        if (requested !== actual) delete this.settings.baseline[requested];
         return this.saveSettings();
       }).then(() => { this.setStatus('idle'); this.notifyChanges(1); })
         .catch((e) => { this.lastError = (e && e.message) || String(e); this.setStatus('error'); this.scheduleReconcile('rename-fallback'); });
@@ -891,24 +906,54 @@ class OmniHomeSyncPlugin extends Plugin {
   }
 
   /* ---------- 单文件操作 ---------- */
+  /* 服务端因 H1 标题变化 / 重名分配而返回了实际路径时，把本地文件跟到同一路径。
+     本地目标已存在时返回 ''（由调用方报错中止），绝不覆盖另一篇笔记。 */
+  async followRemotePath(file, fromPath, toPath, baseline) {
+    if (!file || !toPath || toPath === fromPath) return fromPath;
+    const existing = this.app.vault.getAbstractFileByPath(toPath);
+    if (existing && existing !== file) return '';
+    this.markSelfWrite(fromPath);
+    this.markSelfWrite(toPath);
+    try {
+      await this.ensureVaultFolder(parentDir(toPath));
+      await this.app.vault.rename(file, toPath);
+    } catch (e) {
+      console.warn('[OmniHome Sync] 本地文件跟随服务端路径失败：', fromPath, '->', toPath, e);
+      return '';
+    }
+    delete baseline[fromPath];
+    return toPath;
+  }
+
   async pushFile(f, baseline) {
     const content = await this.app.vault.read(f.file);
     const wire = await this.toServerMarkdown(f.path, content);
     const knownRm = (baseline[f.path] && baseline[f.path].rm) || 0;
     const resp = await this.remotePut(f.path, wire, f.mtime, knownRm);
+    let path = f.path;
+    if (resp && resp.path && resp.path !== path) {
+      path = await this.followRemotePath(f.file, path, resp.path, baseline);
+      if (!path) {
+        throw new Error('同步路径「' + resp.path + '」在本地已被另一篇笔记占用，已跳过本次写入以免覆盖');
+      }
+    }
     if (resp && resp.applied === false) {
       // 仅当站点 mtime 确实超过上次同步基线，才视为远端独立变更并回拉。
       // 2s LWW 窗口拒绝连续本地保存时服务端并无新内容，回拉会触发 Obsidian
       // 「文件已被外部修改，正在自动合并更改」，冲掉正在输入的正文、光标跳到行首。
       const siteMtime = (resp && resp.mtime) || 0;
       if (siteMtime <= knownRm + LWW_WINDOW_MS) {
-        baseline[f.path] = { lm: f.mtime, rm: knownRm || siteMtime };
+        baseline[path] = { lm: f.mtime, rm: knownRm || siteMtime };
         return false;
       }
-      await this.pullFile(f.path, f.file, { mtime: resp.mtime }, baseline);
+      const target = this.app.vault.getAbstractFileByPath(path);
+      await this.pullFile(path, target instanceof TFile ? target : null,
+        { mtime: resp.mtime }, baseline);
       return true;
     }
-    baseline[f.path] = { lm: f.mtime, rm: (resp && resp.mtime) || nowMs() };
+    const saved = this.app.vault.getAbstractFileByPath(path);
+    baseline[path] = { lm: (saved && saved.stat && saved.stat.mtime) || f.mtime,
+                       rm: (resp && resp.mtime) || nowMs() };
     return true;
   }
   async pullFile(path, file, r, baseline) {
