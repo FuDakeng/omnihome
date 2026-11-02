@@ -804,6 +804,11 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* 磁贴悬浮会上移 2px 并带阴影，而 overflow:auto 的裁切边紧贴首行卡片，
+     导致第一排上边框（及阴影）被裁掉。预留 8px 内边距，再用等量负外边距
+     抵消布局占位，网格位置不变，首行悬浮样式可完整显示。 */
+  padding: 8px;
+  margin: -8px;
 }
 #dashGrid [data-widget="quicknav"] .dash-qn-hint{ flex: none; margin-top: auto; }
 #dashGrid [data-widget="calendar"].has-h .cal-grid{
