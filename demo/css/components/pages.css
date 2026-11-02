@@ -810,6 +810,10 @@ body.dash-resizing{ user-select: none; cursor: nwse-resize; }
   padding: 8px;
   margin: -8px;
 }
+/* 自定义高度（has-h）时通用规则会给 .card-pad 加 overflow:auto，
+   又会把上面为悬浮预留的空间裁掉。快捷导航的滚动由 #quickNavPanels
+   自己负责，这里让 .card-pad 只负责布局、不参与裁切。 */
+#dashGrid [data-widget="quicknav"].has-h > .card-pad{ overflow: visible; }
 #dashGrid [data-widget="quicknav"] .dash-qn-hint{ flex: none; margin-top: auto; }
 #dashGrid [data-widget="calendar"].has-h .cal-grid{
   flex: 1;
