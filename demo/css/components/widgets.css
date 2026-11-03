@@ -162,7 +162,18 @@
 .vault-main-head .card-title{ margin: 0; }
 .vault-sec{ margin-left: auto; padding: 6px 12px; }
 .vault-grid{ min-height: 120px; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: var(--om-space-4); }
-.v-card .bmc-info .bm-name{ display: flex; align-items: center; gap: 6px; }
+/* 网站卡片：固定高度，账号多时只在卡片内部滚动 */
+#vaultItems .v-site-card{ height: 286px; min-height: 286px; }
+.v-site-card > .bmc-top,
+.v-site-card > .bmc-foot{ flex: none; }
+.v-site-card > .bmc-top{ align-items: flex-start; }
+.v-site-link{
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--om-text-1); font-weight: 650; text-decoration: none;
+}
+.v-site-link:hover{ color: var(--om-primary); text-decoration: underline; }
+.v-site-link.is-plain{ cursor: default; }
+.v-card .bmc-info .bm-name{ display: flex; align-items: center; gap: 6px; min-width: 0; }
 .v-card{ cursor: grab; }
 /* 多选模式：默认不显示勾选控件，点顶部「多选」后才出现 */
 #vaultItems .v-card .bm-check{ opacity: 0; pointer-events: none; }
@@ -177,8 +188,7 @@
   background: var(--om-primary-ghost);
 }
 .v-card .bmc-foot{ gap: 8px; }
-.v-card .v-eye{ margin-left: auto; }
-.v-site-chip{ font-size: 10px; padding: 0 7px; line-height: 1.6; }
+.v-site-chip{ flex: none; font-size: 10px; padding: 0 7px; line-height: 1.6; }
 .v-date{ font-size: 11px; color: var(--om-text-3); white-space: nowrap; }
 .vault-cat-list .tab{ cursor: grab; }
 .vault-cat-list .tab.sel{
@@ -192,25 +202,56 @@
 .vault-cat-list .tab.sel .v-cat-check{ opacity: 1; }
 .vault-cat-list .tab-ops i[data-v-cat-del]:hover{ color: var(--om-danger); }
 .vault-cat-list .tab.drop-over{ background: var(--om-primary-ghost); box-shadow: inset 0 0 0 1.5px var(--om-primary); }
-.v-preview{
-  display: none;
+/* 卡片内账号列表：固定高度内滚动 */
+.v-accounts{
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
   flex-direction: column;
   gap: 6px;
-  width: 100%;
+  padding: 1px 2px 2px;
+  margin: 0 -2px;
+  scrollbar-gutter: stable;
 }
-.v-card.is-open .v-preview{ display: flex; }
-.v-kv{
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) 28px;
+.v-account{
+  flex: none;
+  display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+  padding: 7px 7px 7px 10px;
+  border: 1px solid var(--om-border);
+  border-radius: 10px;
+  background: var(--om-surface-2);
+  transition: border-color var(--om-t-fast), background var(--om-t-fast);
 }
-.v-k{ font-size: 11px; color: var(--om-text-3); font-weight: 600; }
-.v-v{ font-size: var(--om-fs-sm); color: var(--om-text-1); min-width: 0; word-break: break-all; }
-.v-v a{ color: var(--om-primary); }
+.v-account:hover{ border-color: var(--om-border-strong); background: var(--om-surface); }
+.v-account.is-revealed{ border-color: var(--om-primary-border); background: var(--om-primary-ghost); }
+.v-acc-main{ flex: 1 1 auto; min-width: 0; cursor: pointer; }
+.v-acc-user{
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12.5px; font-weight: 600; color: var(--om-text-1);
+  white-space: nowrap; overflow: hidden;
+}
+.v-acc-user .ic{ width: 12px; height: 12px; color: var(--om-text-3); }
+.v-acc-user span{ min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.v-acc-pass-line{ display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 2px; }
+.v-pass-val{
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--om-font-mono); font-size: 12px;
+  color: var(--om-text-2); letter-spacing: .4px;
+}
+.v-pass-val.is-plain{ color: var(--om-text-1); user-select: text; }
+.v-acc-pass-line .strength{ flex: none; }
+.v-acc-pass-line .strength i{ width: 7px; height: 3px; }
+.v-acc-actions{ flex: none; display: flex; align-items: center; gap: 1px; }
+.v-acc-actions .icon-btn-xs{ width: 22px; height: 22px; border-radius: 6px; }
+.v-acc-actions .icon-btn-xs .ic{ width: 13px; height: 13px; }
+.v-acc-actions .icon-btn-xs[disabled]{ opacity: .35; pointer-events: none; }
+.v-acc-actions [data-v-act="del"]:hover{ background: var(--om-danger-soft); color: var(--om-danger); }
 .v-empty{ color: var(--om-text-3); }
-.v-pass-plain{ font-family: var(--om-font-mono); letter-spacing: .3px; }
 #viCat{ cursor: pointer; appearance: none; padding-right: 28px; }
 #vaultSort{ height: 32px; }
 

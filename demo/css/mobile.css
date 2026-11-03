@@ -281,9 +281,9 @@
   .vault-main-head{ align-items: stretch; }
   #vaultSort{ min-height: 40px; font-size: 16px; width: 100%; }
   .v-card .bm-x, .v-card .bm-e, .v-card .bm-check{ opacity: 1; }
-  .v-card .v-eye,
-  .v-preview .icon-btn-xs{ width: 44px; height: 44px; }
-  .v-kv{ grid-template-columns: 48px minmax(0, 1fr) 44px; }
+  #vaultItems .v-site-card{ height: 260px; min-height: 260px; }
+  .v-acc-actions .icon-btn-xs{ width: 34px; height: 34px; }
+  .v-acc-actions .icon-btn-xs .ic{ width: 15px; height: 15px; }
   #viCat{ font-size: 16px; min-height: 40px; height: 40px; }
   #vaultBatch{
     left: 8px; right: 8px; transform: none; width: auto;

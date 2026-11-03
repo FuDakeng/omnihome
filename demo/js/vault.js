@@ -1,8 +1,9 @@
 /* ============================================================
    OmniDesk · 密码保险库（零知识 · 端到端加密）
    主密码 → PBKDF2-SHA256 派生 AES-GCM 密钥，全部在浏览器完成。
-   排版对齐快捷导航：左分类、右卡片；分类/凭据均可多选、拖拽排序、
-   拖到分类归类、拖到底部条快速删除。同一网站可保存多条账号。
+   排版对齐快捷导航：左分类、右网站卡片；同一网站凭据合并展示，
+   密码默认隐藏，可在卡片内逐条显示/复制；分类/凭据均可多选、拖拽排序、
+   拖到分类归类、拖到底部条快速删除。
    分类名单写在校验密文 check 内，凭据字段写在条目密文内。
    ============================================================ */
 const Vault = (() => {
@@ -86,10 +87,6 @@ const Vault = (() => {
     if (!url) return '';
     try { return new URL(/^https?:\/\//.test(url) ? url : 'https://' + url).host; }
     catch (e) { return ''; }
-  }
-  function sameSiteN(host){
-    if (!host) return 1;
-    return cache.filter(x => hostOf(x.data.url) === host).length;
   }
   async function writeCheck(){
     vaultData.check = await enc({ v: 1, cats, sort: sortMode });
@@ -188,54 +185,96 @@ const Vault = (() => {
     catch (e) { return ''; }
   }
 
-  function previewHtml(data){
-    const url = data.url || '';
-    const account = data.account || '';
-    const password = data.password || '';
-    const urlInner = url
-      ? (/^https?:\/\//i.test(url)
-        ? `<a href="${App.esc(url)}" target="_blank" rel="noopener">${App.esc(url)}</a>`
-        : App.esc(url))
-      : '<span class="v-empty">未填写</span>';
-    const row = (key, label, inner, copyVal) => `<div class="v-kv">
-      <span class="v-k">${label}</span>
-      <span class="v-v" data-v-field="${key}">${inner}</span>
-      <button type="button" class="icon-btn-xs" data-v-copy="${key}" ${copyVal ? '' : 'disabled'} title="复制${label}"><svg class="ic"><use href="#i-copy"/></svg></button>
-    </div>`;
-    return row('url', '地址', urlInner, url) +
-      row('account', '账号', account ? App.esc(account) : '<span class="v-empty">未填写</span>', account) +
-      row('password', '密码', password ? `<span class="v-pass-plain">${App.esc(password)}</span>` : '<span class="v-empty">未填写</span>', password);
+  function siteKeyOf(row){
+    const host = hostOf(row.data.url);
+    if (host) return 'h:' + host;
+    const name = String(row.data.name || '').trim().toLowerCase();
+    return name ? 'n:' + name : 'i:' + row.id;
   }
 
-  function cardHtml(row){
-    const { id, item, data, cat } = row;
-    const strength = score(data.password || '');
-    const host = hostOf(data.url);
-    const nSite = sameSiteN(host);
-    const siteChip = nSite > 1
-      ? `<span class="chip no-dot v-site-chip" title="同一网站可保存多个账号">${nSite} 个账号</span>`
-      : '';
-    const hue = item.meta?.hue ?? 243;
-    const letter = App.esc((data.name || host || '?').charAt(0).toUpperCase());
-    const sub = [host || data.url || '', data.account || ''].filter(Boolean).join(' · ');
-    return `<div class="bm-tile bm-card v-card${sel.has(id) ? ' sel' : ''}" data-v-id="${id}" draggable="true">
-      <span class="bm-check" data-v-sel="${id}" title="选择 / 多选"><svg class="ic"><use href="#i-check"/></svg></span>
+  function siteHref(url){
+    const u = String(url || '').trim();
+    if (!u) return '';
+    return /^https?:\/\//i.test(u) ? u : 'https://' + u;
+  }
+
+  /* 同一网站的凭据合并为一张卡片；账号按手动顺序排列 */
+  function groupCards(rows){
+    const map = new Map();
+    for (const row of rows){
+      const key = siteKeyOf(row);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(row);
+    }
+    return [...map.entries()].map(([key, items]) => {
+      items.sort((a, b) => (a.data.order ?? 0) - (b.data.order ?? 0));
+      const primary = items[0];
+      const urls = items.map(x => x.data.url).filter(Boolean);
+      const url = urls[0] || '';
+      const host = urls.map(hostOf).find(Boolean) || '';
+      const catIds = [...new Set(items.map(x => x.cat))];
+      const latest = Math.max(...items.map(x => Number(x.data.updated || x.data.added) || 0));
+      return {
+        key, items, primary, url, host, latest,
+        name: primary.data.name || host || url || '未命名',
+        catLabel: catIds.length === 1 ? catName(catIds[0]) : `${catIds.length} 个分类`,
+      };
+    });
+  }
+
+  function accountRowHtml(row){
+    const { id, data } = row;
+    const account = data.account || '';
+    const password = data.password || '';
+    const strength = score(password);
+    const user = account ? App.esc(account) : '<span class="v-empty">未填写账号</span>';
+    const pwd = password
+      ? '<span class="v-pass-val" data-v-pass>••••••••</span>'
+      : '<span class="v-empty">未填写密码</span>';
+    const disabled = password ? '' : ' disabled';
+    return `<div class="v-account" data-v-row-id="${id}">
+      <div class="v-acc-main" title="点击账号可编辑">
+        <div class="v-acc-user"><svg class="ic"><use href="#i-user"/></svg><span>${user}</span></div>
+        <div class="v-acc-pass-line">
+          ${pwd}
+          ${password ? `<span class="strength s${strength}" title="强度 ${strength}/4"><i></i><i></i><i></i><i></i></span>` : ''}
+        </div>
+      </div>
+      <div class="v-acc-actions">
+        <button type="button" class="icon-btn-xs" data-v-act="reveal" data-v-row-id="${id}" title="${password ? '显示密码' : '未填写密码'}" aria-label="显示或隐藏密码"${disabled}><svg class="ic"><use href="#i-eye"/></svg></button>
+        <button type="button" class="icon-btn-xs" data-v-act="copy-pass" data-v-row-id="${id}" title="复制密码" aria-label="复制密码"${disabled}><svg class="ic"><use href="#i-copy"/></svg></button>
+        <button type="button" class="icon-btn-xs" data-v-act="edit" data-v-row-id="${id}" title="编辑账号" aria-label="编辑账号"><svg class="ic"><use href="#i-pen"/></svg></button>
+        <button type="button" class="icon-btn-xs" data-v-act="del" data-v-row-id="${id}" title="删除账号" aria-label="删除账号"><svg class="ic"><use href="#i-close"/></svg></button>
+      </div>
+    </div>`;
+  }
+
+  function siteCardHtml(group){
+    const ids = group.items.map(x => x.id);
+    const n = ids.length;
+    const allSel = n > 0 && ids.every(id => sel.has(id));
+    const hue = group.primary.item?.meta?.hue ?? 243;
+    const letter = App.esc((group.name || group.host || '?').charAt(0).toUpperCase());
+    const href = siteHref(group.url);
+    const title = href
+      ? `<a class="v-site-link" href="${App.esc(href)}" target="_blank" rel="noopener" draggable="false" title="打开 ${App.esc(group.name)}">${App.esc(group.name)}</a>`
+      : `<span class="v-site-link is-plain">${App.esc(group.name)}</span>`;
+    const siteChip = n > 1 ? `<span class="chip no-dot v-site-chip">${n} 个账号</span>` : '';
+    const sub = group.host || group.url || '未填写网址';
+    return `<div class="bm-tile bm-card v-card v-site-card${allSel ? ' sel' : ''}" data-v-site="${App.esc(group.key)}" data-v-ids="${ids.join(',')}" data-v-id="${ids[0]}" draggable="true">
+      <span class="bm-check" data-v-sel="${ids.join(',')}" title="选择 / 多选"><svg class="ic"><use href="#i-check"/></svg></span>
       <div class="bmc-top">
         <span class="v-fav" style="--fav:${hue}">${letter}</span>
         <div class="bmc-info">
-          <div class="bm-name">${App.esc(data.name || '未命名')} ${siteChip}</div>
-          <div class="bm-url">${App.esc(sub || '未填写地址与账号')}</div>
+          <div class="bm-name">${title} ${siteChip}</div>
+          <div class="bm-url">${App.esc(sub)}</div>
         </div>
-        <span class="strength s${strength}" title="强度 ${strength}/4"><i></i><i></i><i></i><i></i></span>
       </div>
-      <div class="v-preview" hidden></div>
+      <div class="v-accounts">${group.items.map(accountRowHtml).join('')}</div>
       <div class="bmc-foot">
-        <span class="chip no-dot bm-cat-chip">${App.esc(catName(cat))}</span>
-        <span class="v-date">${App.esc(fmtTime(data.updated || data.added))}</span>
-        <button type="button" class="icon-btn-xs v-eye" data-v-act="show" title="预览"><svg class="ic"><use href="#i-eye"/></svg></button>
+        <span class="chip no-dot bm-cat-chip">${App.esc(group.catLabel)}</span>
+        <span class="v-date">${App.esc(fmtTime(group.latest))}</span>
       </div>
-      <span class="bm-x" data-v-act="del" title="删除"><svg class="ic"><use href="#i-close"/></svg></span>
-      <span class="bm-e" data-v-act="edit" title="编辑"><svg class="ic"><use href="#i-pen"/></svg></span>
     </div>`;
   }
 
@@ -271,10 +310,11 @@ const Vault = (() => {
     if (title){
       title.textContent = multi
         ? `已选 ${catSel.size} 个分类`
-        : (view[0] === 'all' ? '全部凭据' : catName(view[0]));
+        : (view[0] === 'all' ? '全部网站' : catName(view[0]));
     }
     const rows = listed();
-    $('#vaultCount').textContent = rows.length + ' 条';
+    const groups = groupCards(rows);
+    $('#vaultCount').textContent = `${groups.length} 个网站 · ${rows.length} 个账号`;
     const box = $('#vaultItems');
     if (!cache.length){
       box.innerHTML = `<div class="empty" style="grid-column:1/-1;background:var(--om-surface);border:1px dashed var(--om-border-strong);border-radius:var(--om-radius-lg)">
@@ -287,7 +327,7 @@ const Vault = (() => {
         <div class="empty-title">此分类暂无凭据</div>
         <div class="empty-sub">新增凭据时选择此分类，或把卡片拖到左侧分类</div></div>`;
     } else {
-      box.innerHTML = rows.map(cardHtml).join('');
+      box.innerHTML = groups.map(siteCardHtml).join('');
     }
     syncSelUi();
   }
@@ -340,8 +380,8 @@ const Vault = (() => {
     const label = $('#vaultSelectLabel');
     if (label) label.textContent = selecting ? '退出多选' : '多选';
     if (selecting){
-      /* 进入多选时收起已展开的详情，避免与勾选相互干扰 */
-      $$('#vaultItems .v-card.is-open').forEach(c => setPreview(c, null, false));
+      /* 进入多选时收起已展开的密码，避免与勾选相互干扰 */
+      hideAllPasswords();
     } else {
       sel.clear();
     }
@@ -351,8 +391,10 @@ const Vault = (() => {
   /* ---------- 多选 ---------- */
   function batchBar(){ return $('#vaultBatch'); }
   function syncSelUi(){
-    $$('#vaultItems .v-card[data-v-id]').forEach(t =>
-      t.classList.toggle('sel', sel.has(t.dataset.vId)));
+    $$('#vaultItems .v-card[data-v-ids]').forEach(t => {
+      const ids = String(t.dataset.vIds || '').split(',').filter(Boolean);
+      t.classList.toggle('sel', ids.length > 0 && ids.every(id => sel.has(id)));
+    });
     $$('#vaultCats .tab[data-v-cat]').forEach(t =>
       t.classList.toggle('sel', catSel.has(t.dataset.vCat)));
     const bar = batchBar();
@@ -375,8 +417,11 @@ const Vault = (() => {
       bar.hidden = true;
     }
   }
-  function toggleSel(id){
-    if (sel.has(id)) sel.delete(id); else sel.add(id);
+  function toggleIds(ids){
+    const list = (ids || []).filter(Boolean);
+    if (!list.length) return;
+    const all = list.every(id => sel.has(id));
+    list.forEach(id => { if (all) sel.delete(id); else sel.add(id); });
     catSel.clear();
     syncSelUi();
   }
@@ -815,7 +860,8 @@ const Vault = (() => {
 
   async function persistCardOrder(){
     if (sortMode !== 'manual') return;
-    const ids = $$('#vaultItems .v-card[data-v-id]').map(el => el.dataset.vId);
+    const ids = $$('#vaultItems .v-card[data-v-ids]').flatMap(el =>
+      String(el.dataset.vIds || '').split(',').filter(Boolean));
     if (!ids.length) return;
     const shown = new Set(ids);
     const rest = cache.filter(x => !shown.has(x.id)).sort((a, b) => (a.data.order ?? 0) - (b.data.order ?? 0));
@@ -843,38 +889,49 @@ const Vault = (() => {
   }
   function renderDashSafe(){ /* 保险库不驱动仪表盘分类 */ }
 
-  function setPreview(card, data, on){
-    const pane = card.querySelector('.v-preview');
-    const btn = card.querySelector('[data-v-act="show"]');
-    card.classList.toggle('is-open', on);
-    if (!pane) return;
-    if (on){
-      pane.hidden = false;
-      pane.innerHTML = previewHtml(data);
-      if (btn){
-        btn.title = '隐藏';
-        const use = btn.querySelector('use');
-        if (use) use.setAttribute('href', '#i-eye-off');
-      }
-    } else {
-      pane.hidden = true;
-      pane.innerHTML = '';
-      if (btn){
-        btn.title = '预览';
-        const use = btn.querySelector('use');
-        if (use) use.setAttribute('href', '#i-eye');
-      }
+  function setPasswordVisible(acc, on){
+    const id = acc?.dataset.vRowId;
+    const row = cache.find(x => x.id === id);
+    const span = acc?.querySelector('[data-v-pass]');
+    const btn = acc?.querySelector('[data-v-act="reveal"]');
+    if (!row || !span || !row.data.password) return;
+    acc.classList.toggle('is-revealed', on);
+    span.textContent = on ? row.data.password : '••••••••';
+    span.classList.toggle('is-plain', on);
+    if (btn){
+      btn.title = on ? '隐藏密码' : '显示密码';
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      const use = btn.querySelector('use');
+      if (use) use.setAttribute('href', on ? '#i-eye-off' : '#i-eye');
     }
   }
 
-  /* 非多选模式：点击卡片打开该凭据详情（并收起其它卡片）；再次点击收起 */
-  function openDetail(card){
-    if (!card) return;
-    const row = cache.find(x => x.id === card.dataset.vId);
+  function hideAllPasswords(){
+    $$('#vaultItems .v-account.is-revealed').forEach(acc => setPasswordVisible(acc, false));
+  }
+
+  async function copyPassword(id){
+    const row = cache.find(x => x.id === id);
     if (!row) return;
-    const willOpen = !card.classList.contains('is-open');
-    $$('#vaultItems .v-card.is-open').forEach(c => { if (c !== card) setPreview(c, null, false); });
-    setPreview(card, row.data, willOpen);
+    if (!row.data.password) return showToast('该账号未填写密码', 'err');
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(row.data.password);
+      ok = true;
+    } catch (e) {
+      /* 非安全上下文或焦点限制时退回 execCommand */
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = row.data.password;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand('copy');
+        ta.remove();
+      } catch (e2) { ok = false; }
+    }
+    showToast(ok ? '密码已复制' : '复制失败，请先显示密码后手动复制', ok ? undefined : 'err');
   }
 
   function eventHit(e, selector){
@@ -969,54 +1026,66 @@ const Vault = (() => {
         return render();
       }
 
-      const copyField = eventHit(e, '[data-v-copy]');
-      if (copyField){
-        const card = copyField.closest('[data-v-id]');
-        const row = cache.find(x => x.id === card?.dataset.vId);
-        if (!row) return;
-        const key = copyField.dataset.vCopy;
-        const map = { url: row.data.url, account: row.data.account, password: row.data.password };
-        const label = { url: '地址', account: '账号', password: '密码' }[key] || key;
-        await navigator.clipboard.writeText(map[key] || '');
-        return showToast(`${label}已复制`);
+      const copyPass = eventHit(e, '[data-v-act="copy-pass"]');
+      if (copyPass){
+        e.preventDefault(); e.stopPropagation();
+        return copyPassword(copyPass.dataset.vRowId);
+      }
+
+      const reveal = eventHit(e, '[data-v-act="reveal"]');
+      if (reveal){
+        e.preventDefault(); e.stopPropagation();
+        const acc = reveal.closest('.v-account');
+        if (acc) setPasswordVisible(acc, !acc.classList.contains('is-revealed'));
+        return;
       }
 
       const selBtn = eventHit(e, '[data-v-sel]');
       if (selBtn){
-        e.stopPropagation();
-        const card = selBtn.closest('[data-v-id]');
-        if (selecting) toggleSel(selBtn.dataset.vSel);
-        else openDetail(card);
+        e.preventDefault(); e.stopPropagation();
+        if (selecting) toggleIds(String(selBtn.dataset.vSel || '').split(',').filter(Boolean));
         return;
       }
 
       const actBtn = eventHit(e, '[data-v-act]');
       if (actBtn){
-        const card = actBtn.closest('[data-v-id]');
-        const id = card?.dataset.vId;
-        const row = cache.find(x => x.id === id);
-        if (!row) return;
+        const id = actBtn.dataset.vRowId;
         const act = actBtn.dataset.vAct;
-        if (act === 'show'){
-          e.stopPropagation();
-          setPreview(card, row.data, !card.classList.contains('is-open'));
-          return;
-        }
         if (act === 'edit'){
-          e.stopPropagation();
+          e.preventDefault(); e.stopPropagation();
           return openEditor(id);
         }
         if (act === 'del'){
-          e.stopPropagation();
+          e.preventDefault(); e.stopPropagation();
           return deleteCards([id]);
         }
       }
 
-      const card = eventHit(e, '#vaultItems .v-card[data-v-id]');
-      if (card){
-        /* 仅多选模式下点击才勾选；否则点开该凭据详情 */
-        if (selecting) toggleSel(card.dataset.vId);
-        else openDetail(card);
+      const siteLink = eventHit(e, '.v-site-link');
+      if (siteLink){
+        if (selecting){
+          e.preventDefault();
+          const card = siteLink.closest('[data-v-ids]');
+          if (card) toggleIds(String(card.dataset.vIds || '').split(',').filter(Boolean));
+        }
+        return;
+      }
+
+      const acc = eventHit(e, '#vaultItems .v-account[data-v-row-id]');
+      if (acc){
+        e.stopPropagation();
+        if (selecting){
+          const card = acc.closest('[data-v-ids]');
+          if (card) toggleIds(String(card.dataset.vIds || '').split(',').filter(Boolean));
+        } else {
+          openEditor(acc.dataset.vRowId);
+        }
+        return;
+      }
+
+      const card = eventHit(e, '#vaultItems .v-card[data-v-ids]');
+      if (card && selecting){
+        toggleIds(String(card.dataset.vIds || '').split(',').filter(Boolean));
       }
     });
 
@@ -1072,11 +1141,13 @@ const Vault = (() => {
 
     /* 卡片拖拽排序 / 归类 */
     document.addEventListener('dragstart', e => {
-      const tile = e.target.closest?.('#vaultItems .v-card[data-v-id]');
+      const tile = e.target.closest?.('#vaultItems .v-card[data-v-ids]');
       if (!tile) return;
+      const rowIds = String(tile.dataset.vIds || '').split(',').filter(Boolean);
+      if (!rowIds.length) return;
       dragKind = 'card';
       dragEl = tile;
-      dragIds = sel.has(tile.dataset.vId) ? [...sel] : [tile.dataset.vId];
+      dragIds = rowIds.every(id => sel.has(id)) && sel.size ? [...sel] : rowIds;
       if (dragIds.length > 1){
         const ghost = document.createElement('div');
         ghost.className = 'bm-drag-ghost';
@@ -1091,7 +1162,7 @@ const Vault = (() => {
       batchDragMode(true, dragIds.length, 'card');
       tile.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
-      try { e.dataTransfer.setData('text/plain', tile.dataset.vId); } catch (_) {}
+      try { e.dataTransfer.setData('text/plain', rowIds[0]); } catch (_) {}
     });
     document.addEventListener('dragend', () => {
       $$('#vaultCats .tab.drop-over').forEach(t => t.classList.remove('drop-over'));
@@ -1157,6 +1228,7 @@ const Vault = (() => {
   }
 
   function lockUi(){
+    hideAllPasswords();
     derivedKey = null;
     cache = [];
     sel.clear();
@@ -1165,6 +1237,10 @@ const Vault = (() => {
     $('#vaultWrap').classList.remove('unlocked');
     $('#masterPass').value = '';
     $('#masterPass2').value = '';
+    const list = $('#vaultItems');
+    if (list){
+      list.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--om-text-3);padding:24px 0;text-align:center">解锁后展示凭据卡片</div>';
+    }
     const bar = batchBar();
     if (bar) bar.hidden = true;
   }

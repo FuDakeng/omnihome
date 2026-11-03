@@ -3,7 +3,7 @@
         <div class="view-head">
           <div>
             <h2 class="vh-title">密码保险库</h2>
-            <div class="vh-sub">端到端加密 · 同一网站可保存多个账号 · 分类与凭据均在浏览器加密</div>
+            <div class="vh-sub">端到端加密 · 同一网站多账号合并展示 · 密码默认隐藏，可单独显示或复制</div>
           </div>
           <div class="vh-actions">
             <button class="btn btn-ghost btn-sm" id="vaultSelect" title="进入多选，可批量归类或删除"><svg class="ic"><use href="#i-check"/></svg><span id="vaultSelectLabel">多选</span></button>
@@ -36,13 +36,13 @@
               <div class="tabs bm-cat-list vault-cat-list" id="vaultCats"></div>
               <div class="vault-main">
                 <div class="vault-main-head">
-                  <h3 class="card-title" id="vaultTitle">全部凭据</h3>
-                  <span class="chip success" id="vaultCount">0 条</span>
+                  <h3 class="card-title" id="vaultTitle">全部网站</h3>
+                  <span class="chip success" id="vaultCount">0 个网站 · 0 个账号</span>
                   <select class="lang-select" id="vaultSort" title="凭据排序" aria-label="凭据排序">
                     <option value="manual">手动排序</option>
                     <option value="added">按加入时间</option>
                     <option value="updated">按更新时间</option>
-                    <option value="name">按凭据名称</option>
+                    <option value="name">按网站名称</option>
                   </select>
                   <div class="sec-banner vault-sec">
                     <svg class="ic"><use href="#i-shield"/></svg>AES-256-GCM
