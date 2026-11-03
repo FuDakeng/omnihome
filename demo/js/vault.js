@@ -14,6 +14,7 @@ const Vault = (() => {
   let freezeTimer = 0;
   let freezePoll = 0;
   let editingId = null;
+  let editTags = [];
   let cats = [];          // [{id, name}]，含内置「全部」「未分类」
   let activeCat = 'all';
   let sortMode = 'manual';
@@ -26,6 +27,9 @@ const Vault = (() => {
   let dragIds = [];
   let droppedCat = false;
   let droppedBar = false;
+  let copyMenuEl = null;
+  let copyMenuAnchor = null;
+  let copyMenuRowId = '';
   const HINT_CARD = '拖到左侧分类可归类，拖到此条可删除';
   const HINT_CAT = '松手到此横条可删除分类（凭据改到未分类）';
   const HINT_DRAG = '松手到此横条可快速删除';
@@ -293,12 +297,16 @@ const Vault = (() => {
     const { id, data } = row;
     const account = data.account || '';
     const password = data.password || '';
+    const tags = Array.isArray(data.tags) ? data.tags : [];
     const strength = score(password);
     const user = account ? App.esc(account) : '<span class="v-empty">未填写账号</span>';
     const pwd = password
       ? '<span class="v-pass-val" data-v-pass>••••••••</span>'
       : '<span class="v-empty">未填写密码</span>';
-    const disabled = password ? '' : ' disabled';
+    const pwdDisabled = password ? '' : ' disabled';
+    const tagHtml = tags.length
+      ? `<div class="v-acc-tags">${tags.map(t => `<span class="bm-tag">${App.esc(t)}</span>`).join('')}</div>`
+      : '';
     return `<div class="v-account" data-v-row-id="${id}">
       <div class="v-acc-main" title="点击账号可编辑">
         <div class="v-acc-user"><svg class="ic"><use href="#i-user"/></svg><span>${user}</span></div>
@@ -306,10 +314,11 @@ const Vault = (() => {
           ${pwd}
           ${password ? `<span class="strength s${strength}" title="强度 ${strength}/4"><i></i><i></i><i></i><i></i></span>` : ''}
         </div>
+        ${tagHtml}
       </div>
       <div class="v-acc-actions">
-        <button type="button" class="icon-btn-xs" data-v-act="reveal" data-v-row-id="${id}" title="${password ? '显示密码' : '未填写密码'}" aria-label="显示或隐藏密码"${disabled}><svg class="ic"><use href="#i-eye"/></svg></button>
-        <button type="button" class="icon-btn-xs" data-v-act="copy-pass" data-v-row-id="${id}" title="复制密码" aria-label="复制密码"${disabled}><svg class="ic"><use href="#i-copy"/></svg></button>
+        <button type="button" class="icon-btn-xs" data-v-act="reveal" data-v-row-id="${id}" title="${password ? '显示密码' : '未填写密码'}" aria-label="显示或隐藏密码"${pwdDisabled}><svg class="ic"><use href="#i-eye"/></svg></button>
+        <button type="button" class="icon-btn-xs" data-v-act="copy-pass" data-v-row-id="${id}" title="复制密码或完整信息" aria-label="复制密码或完整信息"><svg class="ic"><use href="#i-copy"/></svg></button>
         <button type="button" class="icon-btn-xs" data-v-act="edit" data-v-row-id="${id}" title="编辑账号" aria-label="编辑账号"><svg class="ic"><use href="#i-pen"/></svg></button>
         <button type="button" class="icon-btn-xs" data-v-act="del" data-v-row-id="${id}" title="删除账号" aria-label="删除账号"><svg class="ic"><use href="#i-close"/></svg></button>
       </div>
@@ -566,9 +575,33 @@ const Vault = (() => {
     }));
   }
 
+  function renderEditTags(){
+    const box = $('#viTagList');
+    if (!box) return;
+    box.innerHTML = editTags.map((t, i) =>
+      `<span class="v-tag-chip">${App.esc(t)}<button type="button" data-v-tag-del="${i}" title="移除标签" aria-label="移除标签"><svg class="ic"><use href="#i-close"/></svg></button></span>`
+    ).join('');
+  }
+
+  function addTagsFromInput(){
+    const input = $('#viTagInput');
+    if (!input) return;
+    const parts = String(input.value || '').split(/[,，;；|]/)
+      .map(t => t.trim().slice(0, 20)).filter(Boolean);
+    for (const t of parts){
+      if (editTags.length >= 8) break;
+      if (!editTags.includes(t)) editTags.push(t);
+    }
+    input.value = '';
+    renderEditTags();
+  }
+
   function openEditor(id){
     editingId = id;
     $('#viName').value = ''; $('#viUrl').value = ''; $('#viNote').value = '';
+    const tagInput = $('#viTagInput');
+    if (tagInput) tagInput.value = '';
+    editTags = [];
     const fallback = (viewingCats()[0] === 'all' ? 'none' : viewingCats()[0]);
     fillCatSelect(fallback);
     let rows = [{ account: '', password: '' }];
@@ -579,11 +612,13 @@ const Vault = (() => {
         $('#viName').value = d.name || '';
         $('#viUrl').value = d.url || '';
         $('#viNote').value = d.note || '';
+        editTags = Array.isArray(d.tags) ? d.tags.slice(0, 8) : [];
         rows = [{ account: d.account || '', password: d.password || '' }];
         fillCatSelect(itemCat(d));
       }
     }
     renderAccRows(rows);
+    renderEditTags();
     App.openModal('vaultItemMask');
   }
 
@@ -593,6 +628,8 @@ const Vault = (() => {
     const cat = itemCat({ cat: $('#viCat')?.value });
     const url = $('#viUrl').value.trim();
     const note = $('#viNote').value.trim();
+    if ($('#viTagInput')?.value.trim()) addTagsFromInput();
+    const tags = editTags.slice(0, 8);
     const now = Date.now();
 
     /* 首行始终保留；其余行仅在填了账号或密码时才保存 */
@@ -618,7 +655,7 @@ const Vault = (() => {
         order = nextOrder++;
       }
       const payload = { name, account: row.account, url, password: row.password,
-                        note, cat, added, updated: now, order };
+                        note, cat, tags, added, updated: now, order };
       vaultData.items[id] = {
         blob: await enc(payload),
         meta: { name, hue, updated: stamp },
@@ -647,8 +684,9 @@ const Vault = (() => {
     'username': 'account', 'user': 'account',
     '密码': 'password', 'password': 'password', 'pass': 'password', 'pwd': 'password',
     '备注': 'note', '说明': 'note', 'note': 'note', 'notes': 'note', 'memo': 'note',
+    '标签': 'tags', 'tag': 'tags', 'tags': 'tags',
   };
-  const CSV_ORDER = ['name', 'cat', 'url', 'account', 'password', 'note'];
+  const CSV_ORDER = ['name', 'cat', 'url', 'account', 'password', 'note', 'tags'];
   let pendingImport = [];
 
   /* 极简 CSV 解析：支持双引号包裹、"" 转义、CRLF / LF */
@@ -691,7 +729,9 @@ const Vault = (() => {
         const val = vi === undefined ? '' : String(r[vi] ?? '');
         rec[key] = key === 'password' ? val : val.trim();
       });
-      if (!rec.name && !rec.account && !rec.url && !rec.password && !rec.note) continue;
+      rec.tags = [...new Set(String(rec.tags || '')
+        .split(/[,，;；|]/).map(t => t.trim().slice(0, 20)).filter(Boolean))].slice(0, 8);
+      if (!rec.name && !rec.account && !rec.url && !rec.password && !rec.note && !rec.tags.length) continue;
       rec.name = (rec.name || rec.account || rec.url || '未命名').slice(0, 60);
       out.push(rec);
     }
@@ -700,10 +740,10 @@ const Vault = (() => {
 
   function downloadTemplate(){
     const lines = [
-      '名称,分类,网址,账号,密码,备注',
-      'GitHub,工作,https://github.com,me@example.com,示例密码,可留空',
-      'GitHub,工作,https://github.com,team-bot,第二个密码,同一网站多账号就多写一行',
-      '邮箱,社交,https://mail.example.com,me@example.com,,',
+      '名称,分类,网址,账号,密码,备注,标签',
+      'GitHub,工作,https://github.com,me@example.com,示例密码,可留空,工作;重要',
+      'GitHub,工作,https://github.com,team-bot,第二个密码,同一网站多账号就多写一行,工作',
+      '邮箱,社交,https://mail.example.com,me@example.com,,,',
     ];
     const blob = new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -712,6 +752,47 @@ const Vault = (() => {
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(a.href);
     showToast('模板已下载');
+  }
+
+  function csvCell(value){
+    const s = String(value ?? '');
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  async function exportCsv(){
+    if (!$('#vaultWrap').classList.contains('unlocked'))
+      return showToast('请先解锁保险库', 'err');
+    if (!cache.length) return showToast('保险库暂无凭据', 'err');
+    const ok = await App.confirmModal({
+      title: '导出明文凭据？',
+      sub: '导出的 CSV 会包含网站、账号、密码和标签的明文，请只保存到可信位置，用完及时删除。',
+      okText: '导出 CSV', danger: true,
+    });
+    if (!ok) return;
+    const rows = [...cache].sort((a, b) => (a.data.order ?? 0) - (b.data.order ?? 0));
+    const lines = [
+      ['名称', '分类', '网址', '账号', '密码', '备注', '标签'].map(csvCell).join(','),
+      ...rows.map(r => [
+        r.data.name || '',
+        catName(r.cat),
+        r.data.url || '',
+        r.data.account || '',
+        r.data.password || '',
+        r.data.note || '',
+        (r.data.tags || []).join(';'),
+      ].map(csvCell).join(',')),
+    ];
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    const name = `omnihome-vault-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}.csv`;
+    const blob = new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'],
+      { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(a.href);
+    showToast(`已导出 ${rows.length} 条凭据（含标签）`);
   }
 
   /* CSV 多为 UTF-8；Excel 另存的中文文件可能是 GBK，解码失败再回退 */
@@ -775,6 +856,7 @@ const Vault = (() => {
         const payload = {
           name: rec.name, account: rec.account || '', url: rec.url || '',
           password: rec.password || '', note: rec.note || '', cat,
+          tags: rec.tags || [],
           added: now, updated: now, order: nextOrder++,
         };
         const id = crypto.randomUUID().slice(0, 8);
@@ -797,6 +879,7 @@ const Vault = (() => {
 
   function bindImport(){
     $('#vaultImport').addEventListener('click', openImport);
+    $('#vaultExport').addEventListener('click', exportCsv);
     $('#vimpDl').addEventListener('click', downloadTemplate);
     $('#vimpPick').addEventListener('click', () => $('#vimpFile').click());
     $('#vimpCancel').addEventListener('click', () => App.closeModal('vimpMask'));
@@ -977,28 +1060,90 @@ const Vault = (() => {
     $$('#vaultItems .v-account.is-revealed').forEach(acc => setPasswordVisible(acc, false));
   }
 
-  async function copyPassword(id){
-    const row = cache.find(x => x.id === id);
-    if (!row) return;
-    if (!row.data.password) return showToast('该账号未填写密码', 'err');
-    let ok = false;
+  async function writeClipboard(text){
     try {
-      await navigator.clipboard.writeText(row.data.password);
-      ok = true;
+      await navigator.clipboard.writeText(text);
+      return true;
     } catch (e) {
       /* 非安全上下文或焦点限制时退回 execCommand */
       try {
         const ta = document.createElement('textarea');
-        ta.value = row.data.password;
+        ta.value = text;
         ta.style.position = 'fixed';
         ta.style.opacity = '0';
         document.body.appendChild(ta);
         ta.select();
-        ok = document.execCommand('copy');
+        const ok = document.execCommand('copy');
         ta.remove();
-      } catch (e2) { ok = false; }
+        return ok;
+      } catch (e2) { return false; }
     }
-    showToast(ok ? '密码已复制' : '复制失败，请先显示密码后手动复制', ok ? undefined : 'err');
+  }
+
+  function credentialText(row){
+    const d = row.data;
+    return [
+      `网站：${d.name || hostOf(d.url) || '未命名'}`,
+      `地址：${d.url || '未填写'}`,
+      `账号：${d.account || '未填写'}`,
+      `密码：${d.password || '未填写'}`,
+    ].join('\n');
+  }
+
+  async function copyCredential(id, full){
+    const row = cache.find(x => x.id === id);
+    if (!row) return;
+    const text = full ? credentialText(row) : (row.data.password || '');
+    if (!full && !text) return showToast('该账号未填写密码', 'err');
+    const ok = await writeClipboard(text);
+    showToast(ok ? (full ? '完整信息已复制' : '密码已复制')
+                 : '复制失败，请检查浏览器剪贴板权限', ok ? undefined : 'err');
+  }
+
+  function closeCopyMenu(){
+    if (copyMenuEl) copyMenuEl.remove();
+    copyMenuEl = null;
+    copyMenuAnchor = null;
+    copyMenuRowId = '';
+  }
+
+  function openCopyMenu(btn, id){
+    const row = cache.find(x => x.id === id);
+    if (!btn || !row) return;
+    closeCopyMenu();
+    const menu = document.createElement('div');
+    menu.className = 'v-copy-menu';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = `
+      <button type="button" data-v-copy-mode="password" ${row.data.password ? '' : 'disabled'}>
+        <svg class="ic"><use href="#i-key"/></svg>
+        <span>仅复制密码<span class="v-copy-hint">只把密码写入剪贴板</span></span>
+      </button>
+      <button type="button" data-v-copy-mode="full">
+        <svg class="ic"><use href="#i-note"/></svg>
+        <span>复制完整信息<span class="v-copy-hint">网站名、地址、账号、密码</span></span>
+      </button>`;
+    document.body.appendChild(menu);
+    copyMenuEl = menu;
+    copyMenuAnchor = btn;
+    copyMenuRowId = id;
+    const r = btn.getBoundingClientRect();
+    const mw = menu.offsetWidth;
+    const mh = menu.offsetHeight;
+    let left = Math.min(r.right - mw, window.innerWidth - mw - 8);
+    left = Math.max(8, left);
+    let top = r.bottom + 6;
+    if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 6);
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+    menu.addEventListener('click', async e => {
+      const item = e.target.closest?.('[data-v-copy-mode]');
+      if (!item || item.disabled) return;
+      const mode = item.dataset.vCopyMode;
+      const rid = copyMenuRowId;
+      closeCopyMenu();
+      await copyCredential(rid, mode === 'full');
+    });
   }
 
   function eventHit(e, selector){
@@ -1022,6 +1167,11 @@ const Vault = (() => {
       setSelecting(!selecting);
     });
     bindImport();
+    window.addEventListener('resize', () => { if (copyMenuEl) closeCopyMenu(); });
+    window.addEventListener('scroll', () => { if (copyMenuEl) closeCopyMenu(); }, true);
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && copyMenuEl) closeCopyMenu();
+    });
     $('#viCancel').addEventListener('click', () => App.closeModal('vaultItemMask'));
     $('#viSave').addEventListener('click', saveItem);
     $('#viAccAdd').addEventListener('click', () => {
@@ -1044,6 +1194,23 @@ const Vault = (() => {
         syncAccDel();
       }
     });
+    $('#viTagList').addEventListener('click', e => {
+      const del = e.target.closest?.('[data-v-tag-del]');
+      if (!del) return;
+      e.preventDefault();
+      const i = Number(del.dataset.vTagDel);
+      if (Number.isInteger(i)) editTags.splice(i, 1);
+      renderEditTags();
+    });
+    $('#viTagInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ',' || e.key === '，'){
+        e.preventDefault();
+        addTagsFromInput();
+      }
+    });
+    $('#viTagInput').addEventListener('blur', () => {
+      if ($('#viTagInput').value.trim()) addTagsFromInput();
+    });
     $('#vaultSort').addEventListener('change', async () => {
       sortMode = $('#vaultSort').value;
       await writeCheck();
@@ -1061,6 +1228,10 @@ const Vault = (() => {
     const batch = $('#vaultBatch');
 
     document.addEventListener('click', async e => {
+      if (copyMenuEl && !copyMenuEl.contains(e.target)
+          && !(copyMenuAnchor && copyMenuAnchor.contains(e.target))){
+        closeCopyMenu();
+      }
       if (!eventHit(e, '#vaultView')) return;
       if (eventHit(e, '[data-v-cat-add]')){
         e.preventDefault();
@@ -1096,7 +1267,7 @@ const Vault = (() => {
       const copyPass = eventHit(e, '[data-v-act="copy-pass"]');
       if (copyPass){
         e.preventDefault(); e.stopPropagation();
-        return copyPassword(copyPass.dataset.vRowId);
+        return openCopyMenu(copyPass, copyPass.dataset.vRowId);
       }
 
       const reveal = eventHit(e, '[data-v-act="reveal"]');

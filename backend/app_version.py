@@ -5,8 +5,8 @@
 import json
 from pathlib import Path
 
-VERSION = "0.3.41"
-STAGE = "保险库冻结保护"
+VERSION = "0.3.42"
+STAGE = "凭据标签与复制菜单"
 
 _CHANGELOG_FILE = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
 

@@ -326,6 +326,15 @@
     if (!btn) return;
     const username = btn.dataset.vaultUnfreeze;
     btn.disabled = true;
+    const ok = await App.confirmModal({
+      title: `解冻 @${username} 的保险库？`,
+      sub: '解冻会立即解除该账号的冻结状态并清零连续失败次数，账号可以马上重新尝试主密码。请确认这是管理员本人发起的操作，避免绕过安全保护。',
+      okText: '确认解冻', danger: true,
+    });
+    if (!ok){
+      btn.disabled = false;
+      return;
+    }
     try {
       await API.post('/api/vault/freeze/unfreeze', { username });
       showToast(`已解冻 @${username}`);
