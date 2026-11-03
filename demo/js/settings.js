@@ -228,6 +228,9 @@
     $('#setFeaturesMenu').hidden = false;
     /* 普通用户看到当前状态 + "请联系管理员"提示；管理员看到真正的开关 */
     document.querySelectorAll('.features-admin-only').forEach(el => { el.hidden = isAdmin; });
+    const freezeCard = $('#vaultFreezeCard');
+    if (freezeCard) freezeCard.hidden = !isAdmin;
+    if (isAdmin) loadVaultFreeze();
     try {
       const c = await API.get('/api/system/monitor-config');
       $('#monitorEnabled').classList.toggle('on', !!c.enabled);
@@ -252,6 +255,88 @@
       if (chip) chip.textContent = '检测失败';
     }
   }
+  function freezeRemainText(sec){
+    const m = Math.max(1, Math.ceil((Number(sec) || 0) / 60));
+    return m >= 60 ? `${Math.floor(m / 60)} 小时 ${m % 60} 分` : `${m} 分钟`;
+  }
+
+  async function loadVaultFreeze(){
+    const card = $('#vaultFreezeCard');
+    if (!card) return;
+    if (!App.user || App.user.role !== 'admin'){ card.hidden = true; return; }
+    card.hidden = false;
+    const list = $('#vaultFrozenList');
+    const chip = $('#vaultFrozenChip');
+    try {
+      const d = await API.get('/api/vault/freeze/users');
+      $('#vaultFreezeEnabled').classList.toggle('on', !!d.enabled);
+      const users = d.users || [];
+      if (!d.enabled){
+        if (chip){ chip.textContent = '功能已关闭'; chip.classList.remove('success'); }
+        if (list) list.innerHTML = '<div style="font-size:12px;color:var(--om-text-3)">冻结保护已关闭；当前没有冻结账号。重新开启后，新的连续输错才会触发冻结。</div>';
+        return;
+      }
+      if (chip){
+        chip.textContent = users.length ? `${users.length} 个账号已冻结` : '暂无冻结账号';
+        chip.classList.toggle('success', !users.length);
+      }
+      if (!list) return;
+      if (!users.length){
+        list.innerHTML = '<div style="font-size:12px;color:var(--om-text-3)">暂无冻结账号。</div>';
+        return;
+      }
+      list.innerHTML = users.map(u => {
+        const until = u.frozenUntil
+          ? new Date(u.frozenUntil * 1000).toLocaleTimeString('zh-CN',
+              { hour: '2-digit', minute: '2-digit' }) : '';
+        const name = u.nickname || u.username;
+        return `<div class="set-row">
+          <div style="display:flex;align-items:center;gap:12px;min-width:0">
+            <span class="avatar">${App.esc(name.slice(0, 2).toUpperCase())}</span>
+            <div class="set-row-info">
+              <div class="set-row-label">${App.esc(name)}</div>
+              <div class="set-row-sub">@${App.esc(u.username)} · 连续错误 ${Number(u.failures) || 5} 次 · 剩余 ${freezeRemainText(u.remaining)}${until ? `（冻结至 ${until}）` : ''}</div>
+            </div>
+          </div>
+          <button class="btn btn-outline btn-sm" data-vault-unfreeze="${App.esc(u.username)}"><svg class="ic"><use href="#i-lock"/></svg>解冻</button>
+        </div>`;
+      }).join('');
+    } catch (e) {
+      if (chip) chip.textContent = '加载失败';
+      if (list) list.innerHTML = '<div style="font-size:12px;color:var(--om-text-3)">冻结账号加载失败</div>';
+    }
+  }
+
+  $('#vaultFreezeEnabled')?.addEventListener('click', async () => {
+    /* demo.js 通用绑定已先切换视觉状态，此处读取新状态提交 */
+    const next = $('#vaultFreezeEnabled').classList.contains('on');
+    try {
+      await API.put('/api/vault/freeze-config', { enabled: next });
+      showToast(next ? '已开启保险库连续输错冻结' : '已关闭保险库连续输错冻结，冻结状态已清除');
+      await loadVaultFreeze();
+      window.Vault?.refreshFreeze?.();
+    } catch (e) {
+      $('#vaultFreezeEnabled').classList.toggle('on', !next);
+      showToast(e.message, 'err');
+    }
+  });
+
+  document.addEventListener('click', async e => {
+    const btn = e.target.closest?.('[data-vault-unfreeze]');
+    if (!btn) return;
+    const username = btn.dataset.vaultUnfreeze;
+    btn.disabled = true;
+    try {
+      await API.post('/api/vault/freeze/unfreeze', { username });
+      showToast(`已解冻 @${username}`);
+      await loadVaultFreeze();
+      window.Vault?.refreshFreeze?.();
+    } catch (err) {
+      btn.disabled = false;
+      showToast(err.message, 'err');
+    }
+  });
+
   $('#monitorEnabled').addEventListener('click', async () => {
     /* demo.js 通用绑定已先切换视觉状态，此处读取新状态提交 */
     const next = $('#monitorEnabled').classList.contains('on');

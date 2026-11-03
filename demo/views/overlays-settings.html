@@ -186,6 +186,28 @@
                   </div>
                 </div>
               </article>
+              <article class="card" id="vaultFreezeCard">
+                <div class="card-head">
+                  <h3 class="card-title"><svg class="ic"><use href="#i-lock"/></svg>保险库冻结保护</h3>
+                  <span class="chip no-dot" id="vaultFrozenChip">加载中…</span>
+                </div>
+                <div class="card-pad">
+                  <div class="set-row">
+                    <div class="set-row-info"><div class="set-row-label">连续输错冻结</div>
+                      <div class="set-row-sub">开启后，主密码连续输错 5 次将冻结保险库 10 分钟；刷新页面或换设备不会绕过。关闭时立即解除所有冻结</div></div>
+                    <div class="set-row-ctrl">
+                      <button class="switch" id="vaultFreezeEnabled" role="switch"></button>
+                    </div>
+                  </div>
+                  <div class="set-row stack">
+                    <div class="set-row-info"><div class="set-row-label">已冻结账号</div>
+                      <div class="set-row-sub">管理员可在这里查看并立即解冻账号，解冻后失败次数一并清零</div></div>
+                    <div id="vaultFrozenList">
+                      <div style="font-size:12px;color:var(--om-text-3)">加载中…</div>
+                    </div>
+                  </div>
+                </div>
+              </article>
               <article class="card">
                 <div class="card-head">
                   <h3 class="card-title"><svg class="ic"><use href="#i-swap"/></svg>Obsidian 插件</h3>

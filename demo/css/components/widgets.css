@@ -135,6 +135,16 @@
 .lock-form .input{ width: 240px; }
 .lock-hint{ font-size: 11px; color: var(--om-text-3); display: flex; align-items: center; gap: 5px; }
 .lock-hint .ic{ width: 12px; height: 12px; }
+.lock-freeze{
+  max-width: 420px;
+  padding: 8px 12px;
+  border-radius: var(--om-radius-sm);
+  border: 1px solid color-mix(in oklab, var(--om-danger) 35%, var(--om-border));
+  background: var(--om-danger-soft);
+  color: var(--om-danger);
+  font-size: 12px;
+  line-height: 1.55;
+}
 
 .sec-banner{
   display: flex; align-items: center; gap: 10px;

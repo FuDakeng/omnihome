@@ -10,6 +10,9 @@ const Vault = (() => {
   let derivedKey = null;
   let vaultData = { check: null, salt: null, items: {} };
   let failCount = 0;
+  let freezeInfo = { enabled: true, frozen: false, remaining: 0, failures: 0, limit: 5 };
+  let freezeTimer = 0;
+  let freezePoll = 0;
   let editingId = null;
   let cats = [];          // [{id, name}]，含内置「全部」「未分类」
   let activeCat = 'all';
@@ -92,12 +95,63 @@ const Vault = (() => {
     vaultData.check = await enc({ v: 1, cats, sort: sortMode });
   }
 
+  /* ---------- 连续输错冻结 ---------- */
+  function freezeMinutes(sec){
+    const m = Math.max(1, Math.ceil((Number(sec) || 0) / 60));
+    return m >= 60 ? `${Math.floor(m / 60)} 小时 ${m % 60} 分` : `${m} 分钟`;
+  }
+
+  function applyFreezeState(info){
+    if (!info) return;
+    freezeInfo = { ...freezeInfo, ...info };
+    const on = !!freezeInfo.enabled && !!freezeInfo.frozen;
+    const btn = $('#unlockBtn');
+    const box = $('#lockFreeze');
+    const sub = $('#lockSub');
+    if (btn) btn.disabled = on;
+    if (sub){
+      sub.textContent = freezeInfo.enabled === false
+        ? '输入主密码解锁。连续输错冻结保护已由管理员关闭。'
+        : '输入主密码解锁。连续 5 次错误将冻结 10 分钟，管理员可解冻。';
+    }
+    if (box){
+      box.hidden = !on;
+      if (on){
+        box.textContent = `保险库已冻结，剩余 ${freezeMinutes(freezeInfo.remaining)}；管理员可在「设置 → 功能设置」中解冻。`;
+      }
+    }
+    if (freezeTimer) clearTimeout(freezeTimer);
+    freezeTimer = 0;
+    if (freezePoll) clearInterval(freezePoll);
+    freezePoll = 0;
+    if (on){
+      if (freezeInfo.remaining > 0){
+        freezeTimer = setTimeout(() => { refreshFreeze(); },
+          (freezeInfo.remaining + 1) * 1000);
+      }
+      /* 管理员解冻 / 关闭保护后，锁定页最多 30 秒内自动恢复，无需手动刷新 */
+      freezePoll = setInterval(refreshFreeze, 30000);
+    }
+  }
+
+  async function refreshFreeze(){
+    try {
+      const fz = await API.get('/api/vault/freeze');
+      applyFreezeState(fz || null);
+    } catch (e) { /* 网络异常时保留当前状态 */ }
+  }
+
   /* ---------- 解锁 ---------- */
   async function unlock(){
     const master = $('#masterPass').value;
     if (!master) return showToast('请输入主密码', 'err');
     try {
       vaultData = await API.get('/api/vault');
+      const fz = vaultData.freeze || null;
+      if (fz) applyFreezeState(fz);
+      if (fz && fz.enabled && fz.frozen){
+        return showToast(`保险库已冻结，请在 ${freezeMinutes(fz.remaining)} 后重试`, 'err');
+      }
       if (!vaultData.salt){
         if ($('#masterPass2').value !== master){
           $('#masterPass2Wrap').hidden = false;
@@ -123,9 +177,22 @@ const Vault = (() => {
           failCount++;
           derivedKey = null;
           cats = normalizeCats([]);
-          return showToast(`主密码错误（${failCount}/5）`, 'err');
+          const z = await API.post('/api/vault/unlock-attempt', { success: false })
+            .catch(() => null);
+          if (z) applyFreezeState(z);
+          const used = z ? z.failures : failCount;
+          const limit = z?.limit || 5;
+          if (z && z.enabled === false) return showToast('主密码错误', 'err');
+          if (z && z.frozen){
+            return showToast(`主密码连续错误 ${used} 次，保险库已冻结 ${freezeMinutes(z.remaining)}`, 'err');
+          }
+          return showToast(`主密码错误（${used}/${limit}）`, 'err');
         }
       }
+      const z = await API.post('/api/vault/unlock-attempt', { success: true })
+        .catch(() => null);
+      if (z) applyFreezeState(z);
+      failCount = 0;
       await refreshCache();
       $('#vaultWrap').classList.add('unlocked');
       $('#vaultSort').value = sortMode;
@@ -1231,12 +1298,15 @@ const Vault = (() => {
     hideAllPasswords();
     derivedKey = null;
     cache = [];
+    failCount = 0;
     sel.clear();
     catSel.clear();
     if (selecting) setSelecting(false);
     $('#vaultWrap').classList.remove('unlocked');
     $('#masterPass').value = '';
     $('#masterPass2').value = '';
+    freezeInfo = { enabled: true, frozen: false, remaining: 0, failures: 0, limit: 5 };
+    applyFreezeState(freezeInfo);
     const list = $('#vaultItems');
     if (list){
       list.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--om-text-3);padding:24px 0;text-align:center">解锁后展示凭据卡片</div>';
@@ -1245,7 +1315,7 @@ const Vault = (() => {
     if (bar) bar.hidden = true;
   }
 
-  return { init, genPass, updateBadge, lockUi };
+  return { init, genPass, updateBadge, lockUi, refreshFreeze };
 })();
 Vault.init();
 App.onEnter(() => {
@@ -1257,6 +1327,7 @@ App.onEnter(() => {
     $('#vaultBadge').style.display = n ? '' : 'none';
     const dash = $('#dashVaultNum');
     if (dash) dash.textContent = n;
+    applyFreezeState(v.freeze || null);
   }).catch(() => {});
 });
 

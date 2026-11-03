@@ -16,7 +16,8 @@
           <div class="lock-panel">
             <div class="lock-ic"><svg class="ic"><use href="#i-lock"/></svg></div>
             <h3 class="lock-title">保险库已锁定</h3>
-            <p class="lock-sub">输入主密码解锁。连续 5 次错误将冻结 10 分钟并通知管理员。</p>
+            <p class="lock-sub" id="lockSub">输入主密码解锁。连续 5 次错误将冻结 10 分钟，管理员可解冻。</p>
+            <div class="lock-freeze" id="lockFreeze" hidden></div>
             <div class="lock-form">
               <div class="input-wrap">
                 <svg class="ic"><use href="#i-key"/></svg>

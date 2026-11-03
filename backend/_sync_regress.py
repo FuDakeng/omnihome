@@ -16,6 +16,7 @@ storage 重定向到临时目录，file + sqlite 双引擎各跑一遍，结束�
   · 路径遍历（.. / 绝对路径 / 空段）被拒
   · 创建人 overwrite 审批 200 skipped；创建人无票可强制覆盖
   · /api/about/logs 诊断 zip（未登录 401；成员看不到其他用户 http 行）
+  · 保险库连续输错冻结 / 管理员解冻 / 全局开关联动
 运行：cd backend && python3 _sync_regress.py
 """
 import json
@@ -949,6 +950,7 @@ def run_suite(engine):
           layout.get("compact") is True and layout.get("sidebarCollapsed") is True, str(layout))
 
     check_plugin_downloads(engine, tok)
+    check_vault_freeze(engine, tok)
 
     print("-- 监控横条字段 --")
     r = client.get("/api/settings", headers=HA(tok))
@@ -1011,6 +1013,133 @@ def check_plugin_downloads(engine, tok):
     finally:
         ws.EXTENSION_ZIP = old_w
         data_mod.EXTENSION_ZIP = old_d
+
+
+def check_vault_freeze(engine, tok):
+    """保险库连续输错冻结：阈值、持久化、管理员解冻、开关联动。"""
+    print("-- 保险库连续输错冻结 --")
+    name = "vaultfrz"
+    cfg = storage.get_config()
+    cfg["vaultFreezeEnabled"] = True
+    cfg.get("users", {}).pop(name, None)
+    storage.save_config(cfg)
+    storage.delete_user_file(name, "vault.json")
+    storage.delete_user_file(name, "vault-lock.json")
+
+    r = client.post("/api/auth/users", headers=HA(tok),
+                    json={"username": name, "password": "pw123456",
+                          "nickname": "Vault Freeze"})
+    check(f"[{engine}] 冻结测试用户创建", r.status_code == 200, r.text[:120])
+    r = client.post("/api/auth/login",
+                    json={"username": name, "password": "pw123456"})
+    check(f"[{engine}] 冻结测试用户登录", r.status_code == 200, r.text[:120])
+    mtok = (r.json() or {}).get("token", "")
+    HM = HA(mtok)
+
+    try:
+        r = client.get("/api/vault", headers=HM)
+        fz = (r.json() or {}).get("freeze") or {}
+        check(f"[{engine}] 冻结默认开启且未冻结",
+              r.status_code == 200 and fz.get("enabled") is True
+              and fz.get("frozen") is False,
+              str(fz))
+
+        r = client.get("/api/vault/freeze/users", headers=HM)
+        check(f"[{engine}] 普通用户不能查看冻结列表",
+              r.status_code == 403, str(r.status_code))
+        r = client.put("/api/vault/freeze-config", headers=HM,
+                       json={"enabled": False})
+        check(f"[{engine}] 普通用户不能关闭冻结",
+              r.status_code == 403, str(r.status_code))
+
+        for i in range(4):
+            r = client.post("/api/vault/unlock-attempt", headers=HM,
+                            json={"success": False})
+            fz = (r.json() or {})
+            check(f"[{engine}] 第 {i + 1} 次输错未冻结",
+                  r.status_code == 200 and fz.get("failures") == i + 1
+                  and fz.get("frozen") is False, str(fz))
+
+        r = client.post("/api/vault/unlock-attempt", headers=HM,
+                        json={"success": False})
+        fz5 = (r.json() or {})
+        check(f"[{engine}] 第 5 次输错触发冻结",
+              r.status_code == 200 and fz5.get("failures") == 5
+              and fz5.get("frozen") is True and fz5.get("remaining", 0) > 0,
+              str(fz5))
+
+        r = client.get("/api/vault", headers=HM)
+        fz = (r.json() or {}).get("freeze") or {}
+        check(f"[{engine}] 冻结状态刷新后仍在",
+              fz.get("frozen") is True and fz.get("remaining", 0) > 0,
+              str(fz))
+        r = client.get("/api/vault/freeze", headers=HM)
+        fz = r.json() or {}
+        check(f"[{engine}] 轻量冻结状态接口一致",
+              r.status_code == 200 and fz.get("frozen") is True,
+              str(fz)[:180])
+
+        r = client.get("/api/vault/freeze/users", headers=HA(tok))
+        users = (r.json() or {}).get("users") or []
+        hit = next((u for u in users if u.get("username") == name), None)
+        check(f"[{engine}] 管理员冻结列表可见",
+              r.status_code == 200 and hit and hit.get("failures") == 5,
+              str(users)[:220])
+
+        r = client.post("/api/vault/freeze/unfreeze", headers=HA(tok),
+                        json={"username": name})
+        check(f"[{engine}] 管理员解冻成功", r.status_code == 200, r.text[:120])
+        r = client.get("/api/vault", headers=HM)
+        fz = (r.json() or {}).get("freeze") or {}
+        check(f"[{engine}] 解冻后状态与次数清零",
+              fz.get("frozen") is False and fz.get("failures") == 0, str(fz))
+
+        client.post("/api/vault/unlock-attempt", headers=HM,
+                    json={"success": False})
+        client.post("/api/vault/unlock-attempt", headers=HM,
+                    json={"success": False})
+        r = client.post("/api/vault/unlock-attempt", headers=HM,
+                        json={"success": True})
+        fz = (r.json() or {})
+        check(f"[{engine}] 解锁成功清零连续失败",
+              fz.get("failures") == 0 and fz.get("frozen") is False, str(fz))
+        r = client.post("/api/vault/unlock-attempt", headers=HM,
+                        json={"success": False})
+        fz = (r.json() or {})
+        check(f"[{engine}] 成功后重新从 1 计数",
+              fz.get("failures") == 1 and fz.get("frozen") is False, str(fz))
+
+        for _ in range(5):
+            client.post("/api/vault/unlock-attempt", headers=HM,
+                        json={"success": False})
+        r = client.put("/api/vault/freeze-config", headers=HA(tok),
+                       json={"enabled": False})
+        check(f"[{engine}] 管理员关闭冻结开关",
+              r.status_code == 200 and (r.json() or {}).get("enabled") is False,
+              r.text[:120])
+        r = client.get("/api/vault", headers=HM)
+        fz = (r.json() or {}).get("freeze") or {}
+        check(f"[{engine}] 关闭后立即解除冻结",
+              fz.get("enabled") is False and fz.get("frozen") is False
+              and fz.get("failures") == 0, str(fz))
+        r = client.post("/api/vault/unlock-attempt", headers=HM,
+                        json={"success": False})
+        fz = (r.json() or {})
+        check(f"[{engine}] 关闭期间输错不累计",
+              fz.get("enabled") is False and fz.get("failures") == 0, str(fz))
+
+        client.put("/api/vault/freeze-config", headers=HA(tok),
+                   json={"enabled": True})
+        r = client.get("/api/vault", headers=HM)
+        fz = (r.json() or {}).get("freeze") or {}
+        check(f"[{engine}] 重新开启后从零开始",
+              fz.get("enabled") is True and fz.get("failures") == 0
+              and fz.get("frozen") is False, str(fz))
+    finally:
+        client.delete(f"/api/auth/users/{name}", headers=HA(tok))
+        cfg = storage.get_config()
+        cfg["vaultFreezeEnabled"] = True
+        storage.save_config(cfg)
 
 
 def main():
