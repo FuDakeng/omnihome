@@ -5,8 +5,8 @@
 import json
 from pathlib import Path
 
-VERSION = "0.3.42"
-STAGE = "凭据标签与复制菜单"
+VERSION = "0.3.43"
+STAGE = "提示词增强"
 
 _CHANGELOG_FILE = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
 

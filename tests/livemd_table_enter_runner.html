@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>livemd table enter</title></head>
+<body>
+<pre id="result">RUNNING</pre>
+<script type="module">
+import { LiveMD } from '../demo/js/livemd.js';
+
+const out = [];
+const fails = [];
+const eq = (name, got, want) => {
+  if (JSON.stringify(got) !== JSON.stringify(want)) fails.push({ name, got, want });
+};
+const has = (name, got, needle) => {
+  if (String(got).indexOf(needle) < 0) fails.push({ name, got, needle });
+};
+const raw = '| A | B |\n| --- | --- |\n| a1 | b1 |\n| a2 | b2 |';
+const ta = document.createElement('textarea');
+document.body.appendChild(ta);
+const ed = LiveMD.attach(ta, {});
+ed.setValue(raw);
+const table = () => ed.el.querySelector('.lm-table');
+const cells = () => Array.from(ed.el.querySelectorAll('.lm-table td, .lm-table th'));
+const bodyRows = () => Array.from(ed.el.querySelectorAll('.lm-table tbody tr'));
+const key = (el, k, opts = {}) => el.dispatchEvent(new KeyboardEvent('keydown', {
+  key: k, bubbles: true, cancelable: true, ...opts,
+}));
+const activeCellIndex = () => {
+  const s = getSelection();
+  let n = s.rangeCount ? s.anchorNode : null;
+  while (n && n.nodeType !== 1) n = n.parentNode;
+  const cell = n && n.closest ? n.closest('td, th') : null;
+  return cells().indexOf(cell);
+};
+
+/* 1) 普通回车：表头第 2 列 → 第一数据行第 2 列 */
+key(cells()[1], 'Enter');
+eq('header enter -> first body row same col', activeCellIndex(), 3);
+eq('header enter keeps row count', bodyRows().length, 2);
+eq('header enter does not change source', ta.value, raw);
+
+/* 2) 数据行回车：下移同列 */
+key(cells()[3], 'Enter');
+eq('body enter -> next row same col', activeCellIndex(), 5);
+eq('body enter keeps row count', bodyRows().length, 2);
+eq('body enter does not change source', ta.value, raw);
+
+/* 3) 末行回车：追加一行并落在同列 */
+key(cells()[5], 'Enter');
+eq('last row enter adds row', bodyRows().length, 3);
+eq('last row enter focuses new same col', activeCellIndex(), 7);
+has('last row enter source new row', ta.value, '|  |  |');
+
+/* 4) Alt+Enter：单元格内插入 <br>，不新增行 */
+const target = cells()[0];
+const text = Array.from(target.childNodes).find(n => n.nodeType === 3 && n.data.indexOf('A') >= 0);
+const r = document.createRange();
+r.setStart(text, 1);
+r.collapse(true);
+getSelection().removeAllRanges();
+getSelection().addRange(r);
+const beforeRows = bodyRows().length;
+key(target, 'Enter', { altKey: true });
+eq('alt+enter keeps row count', bodyRows().length, beforeRows);
+has('alt+enter writes br to source', ta.value, '| A<br> | B |');
+eq('alt+enter renders br in cell', target.querySelectorAll('br.lm-cellbr').length, 1);
+eq('alt+enter source still one table row', ta.value.split('\n').length, 5);
+
+/* 5) Alt+Enter 后离开表格重建，<br> 与表格结构仍稳定 */
+ed.setValue(ta.value);
+eq('rebuild keeps table row count', bodyRows().length, beforeRows);
+has('rebuild keeps br source', ta.value, '| A<br> | B |');
+eq('rebuild renders br again', table().querySelectorAll('br.lm-cellbr').length, 1);
+
+/* 6) Shift+Enter 反向移动，不写换行 */
+const raw2 = '| A | B |\n| --- | --- |\n| a1 | b1 |\n| a2 | b2 |';
+ed.setValue(raw2);
+key(cells()[3], 'Enter', { shiftKey: true });
+eq('shift+enter moves to header same col', activeCellIndex(), 1);
+eq('shift+enter does not change source', ta.value, raw2);
+
+/* 7) Tab 仍是左右移格，不会在单元格里产生换行元素 */
+key(cells()[1], 'Tab');
+eq('tab moves right', activeCellIndex(), 2);
+eq('tab does not add br', table().querySelectorAll('br').length, 0);
+eq('tab does not change source', ta.value, raw2);
+
+/* 8) 只有表头 + 分隔行的空表：回车应补出第一条数据行 */
+const raw3 = '| A | B |\n| --- | --- |';
+ed.setValue(raw3);
+key(cells()[1], 'Enter');
+eq('empty table enter adds row', bodyRows().length, 1);
+eq('empty table enter focuses same col', activeCellIndex(), 3);
+has('empty table enter writes new source row', ta.value, '|  |  |');
+
+/* 9) Alt+Enter 后再按普通回车：仍按同列下移，源码不被二次改写 */
+const raw4 = '| A | B |\n| --- | --- |\n| a1 | b1 |\n| a2 | b2 |';
+ed.setValue(raw4);
+const cell0 = cells()[0];
+const text0 = Array.from(cell0.childNodes).find(n => n.nodeType === 3 && n.data.indexOf('A') >= 0);
+const rr = document.createRange();
+rr.setStart(text0, 1); rr.collapse(true);
+getSelection().removeAllRanges(); getSelection().addRange(rr);
+key(cell0, 'Enter', { altKey: true });
+const afterBreak = ta.value;
+eq('alt+enter then enter source row count', afterBreak.split('\n').length, 4);
+key(cell0, 'Enter');
+eq('alt+enter then enter moves down', activeCellIndex(), 2);
+eq('alt+enter then enter keeps source', ta.value, afterBreak);
+eq('alt+enter then enter no new row', bodyRows().length, 2);
+
+/* 10) 重建后 <br> 单元格再回车：同列下移且软换行仍在 */
+ed.setValue(afterBreak);
+key(cells()[0], 'Enter');
+eq('rendered br cell enter moves down', activeCellIndex(), 2);
+eq('rendered br cell enter keeps source', ta.value, afterBreak);
+
+/* 11) 末行补行后直接输入：新行仍是一行，不把单元格拆成多行 */
+const raw5 = '| A | B |\n| --- | --- |\n| a1 | b1 |';
+ed.setValue(raw5);
+key(cells()[2], 'Enter');
+const added = cells()[4];
+added.focus();
+const rr5 = document.createRange();
+rr5.selectNodeContents(added);
+rr5.collapse(false);
+getSelection().removeAllRanges();
+getSelection().addRange(rr5);
+document.execCommand('insertText', false, 'x');
+eq('typing in appended row stays one line', ta.value, '| A | B |\n| --- | --- |\n| a1 | b1 |\n| x |  |');
+eq('typing in appended row row count', bodyRows().length, 2);
+
+out.push(fails.length ? 'FAIL ' + fails.length : 'ALL PASS 11');
+if (fails.length) out.push(JSON.stringify(fails, null, 2));
+document.getElementById('result').textContent = out.join('\n');
+</script>
+</body>
+</html>

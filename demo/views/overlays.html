@@ -650,6 +650,173 @@
   </div>
 </div>
 
+<!-- ==================== 工具：提示词增强 ==================== -->
+<div class="modal-mask" id="peMask">
+  <div class="modal pe-modal">
+    <div class="m-head pe-head">
+      <div class="pe-head-row">
+        <div>
+          <h3>提示词增强</h3>
+          <p>把一句话想法补全成结构清晰、可直接使用的提示词</p>
+        </div>
+        <div class="pe-head-actions">
+          <button class="pe-lib-btn" id="peHistoryBtn" type="button"><svg class="ic"><use href="#i-clock"/></svg><span>历史</span> <b class="num" id="peHistoryCount">0</b></button>
+          <button class="pe-lib-btn" id="peFavBtn" type="button"><svg class="ic"><use href="#i-star"/></svg><span>收藏</span> <b class="num" id="peFavCount">0</b></button>
+          <button class="icon-btn" data-close title="关闭"><svg class="ic"><use href="#i-close"/></svg></button>
+        </div>
+      </div>
+    </div>
+    <div class="m-body pe-body">
+      <div class="pe-templates" id="peTemplates">
+        <button class="pe-tpl" type="button" data-template="coding">
+          <span class="pe-tpl-ic"><svg class="ic"><use href="#i-code"/></svg></span>
+          <span class="pe-tpl-text"><b>代码生成</b><small>性能、测试与错误处理</small></span>
+        </button>
+        <button class="pe-tpl" type="button" data-template="writing">
+          <span class="pe-tpl-ic"><svg class="ic"><use href="#i-pen"/></svg></span>
+          <span class="pe-tpl-text"><b>文案创作</b><small>吸引眼球、SEO 与标题候选</small></span>
+        </button>
+        <button class="pe-tpl" type="button" data-template="data">
+          <span class="pe-tpl-ic"><svg class="ic"><use href="#i-table"/></svg></span>
+          <span class="pe-tpl-text"><b>数据分析</b><small>可视化建议与趋势解读</small></span>
+        </button>
+        <button class="pe-tpl" type="button" data-template="academic">
+          <span class="pe-tpl-ic"><svg class="ic"><use href="#i-book"/></svg></span>
+          <span class="pe-tpl-text"><b>学术研究</b><small>权威引用与严密论证</small></span>
+        </button>
+      </div>
+
+      <div class="pe-lib" id="peLib" hidden>
+        <div class="pe-lib-head">
+          <b id="peLibTitle">历史记录</b>
+          <span id="peLibHint">仅保存在本机</span>
+          <button class="pe-link" id="peLibClear" type="button">清空</button>
+        </div>
+        <div class="pe-lib-list" id="peLibList"></div>
+      </div>
+
+      <div class="pe-cols">
+        <section class="pe-col">
+          <div class="pe-col-head">
+            <span>原始提示词</span>
+            <span class="pe-count num" id="peCount">0 / 2000</span>
+          </div>
+          <textarea class="pe-input" id="peInput" maxlength="2000" spellcheck="false" placeholder="例如：检查日志，排查解决运行时崩溃的问题"></textarea>
+          <div class="pe-quick">
+            <span>Ctrl / ⌘ + Enter 快速增强</span>
+          </div>
+        </section>
+
+        <section class="pe-col">
+          <div class="pe-col-head">
+            <span>增强结果</span>
+            <span class="chip primary no-dot pe-mode" id="peMode" hidden>本地模板</span>
+          </div>
+          <div class="pe-out" id="peOut" tabindex="0"><span class="pe-empty">增强结果会显示在这里</span></div>
+          <div class="pe-missing" id="peMissing" hidden></div>
+          <div class="pe-result-actions">
+            <button class="icon-btn-xs" id="peCopy" type="button" title="复制"><svg class="ic"><use href="#i-copy"/></svg></button>
+            <button class="icon-btn-xs" id="peFav" type="button" title="收藏"><svg class="ic"><use href="#i-star"/></svg></button>
+            <button class="btn btn-outline btn-sm" id="peTest" type="button"><svg class="ic"><use href="#i-zap"/></svg>测试运行</button>
+            <span class="pe-test-hint" id="peTestHint">发送到你的 AI 接口</span>
+          </div>
+          <div class="pe-test" id="peTestWrap" hidden>
+            <div class="pe-test-head">
+              <b>测试运行</b>
+              <button class="pe-link" id="peTestClose" type="button">收起</button>
+            </div>
+            <div class="pe-test-out" id="peTestOut"></div>
+          </div>
+        </section>
+      </div>
+
+      <details class="pe-advanced" open>
+        <summary>高级配置</summary>
+        <div class="pe-opts">
+          <label class="pe-field"><span>场景</span>
+            <select class="lang-select" id="peScene">
+              <option value="auto">自动识别</option>
+              <option value="general">通用</option>
+              <option value="coding">代码生成</option>
+              <option value="writing">文案创作</option>
+              <option value="data">数据分析</option>
+              <option value="academic">学术研究</option>
+              <option value="translation">翻译润色</option>
+            </select>
+          </label>
+          <label class="pe-field"><span>角色设定</span>
+            <select class="lang-select" id="peRole">
+              <option value="auto">自动（按场景）</option>
+              <option value="programmer">程序员</option>
+              <option value="writer">作家</option>
+              <option value="analyst">数据分析师</option>
+              <option value="translator">翻译官</option>
+              <option value="researcher">学术研究者</option>
+              <option value="custom">自定义</option>
+            </select>
+          </label>
+          <label class="pe-field"><span>语气风格</span>
+            <select class="lang-select" id="peTone">
+              <option value="professional">专业严谨</option>
+              <option value="rigorous">批判审慎</option>
+              <option value="concise">简洁明了</option>
+              <option value="friendly">亲切友好</option>
+              <option value="humorous">幽默风趣</option>
+              <option value="creative">创意发散</option>
+            </select>
+          </label>
+          <label class="pe-field"><span>输出格式</span>
+            <select class="lang-select" id="peFormat">
+              <option value="auto">自动</option>
+              <option value="markdown">Markdown 分节</option>
+              <option value="list">分点列表</option>
+              <option value="table">Markdown 表格</option>
+              <option value="json">JSON 格式</option>
+              <option value="code">代码块</option>
+              <option value="plain">自然段</option>
+            </select>
+          </label>
+          <label class="pe-field"><span>回答语言</span>
+            <select class="lang-select" id="peLang">
+              <option value="auto">跟随输入</option>
+              <option value="zh">简体中文</option>
+              <option value="en">English</option>
+              <option value="both">中英双语</option>
+            </select>
+          </label>
+          <label class="pe-field"><span>详细度</span>
+            <select class="lang-select" id="peDetail">
+              <option value="concise">简洁</option>
+              <option value="standard" selected>标准</option>
+              <option value="detailed">详尽</option>
+            </select>
+          </label>
+        </div>
+        <div class="pe-role-custom" id="peRoleCustomWrap" hidden>
+          <input class="input" id="peRoleCustom" maxlength="60" placeholder="输入自定义角色，例如：资深安全审计员">
+        </div>
+      </details>
+
+      <details class="pe-more">
+        <summary>更多选项（目标读者 / 额外约束 / 示例）</summary>
+        <label class="pe-field"><span>目标读者（可选）</span><input class="input" id="peAudience" maxlength="200" placeholder="例如：刚入行的开发者"></label>
+        <label class="pe-field"><span>额外约束（可选，每行一条）</span><textarea class="pe-mini" id="peConstraints" maxlength="500" spellcheck="false" placeholder="例如：不要使用第三方库&#10;必须兼容 Windows"></textarea></label>
+        <label class="pe-field"><span>期望示例（可选）</span><textarea class="pe-mini" id="peExamples" maxlength="1000" spellcheck="false" placeholder="粘贴一段你希望的语气或结构示例"></textarea></label>
+      </details>
+    </div>
+    <div class="m-foot pe-foot">
+      <div class="pe-ai">
+        <button class="switch" id="peAI" type="button" role="switch" aria-checked="false" title="用 AI 润色"></button>
+        <span>用 AI 润色</span>
+        <span class="pe-ai-hint" id="peAIHint">内容将发送到你配置的 AI 接口</span>
+        <button class="pe-link" id="peAISetup" type="button" hidden>去设置</button>
+      </div>
+      <button class="btn btn-ghost" id="peClear" type="button">清空</button>
+      <button class="btn btn-primary" id="peEnhance" type="button"><svg class="ic"><use href="#i-zap"/></svg>增强提示词</button>
+    </div>
+  </div>
+</div>
+
 <!-- ==================== Toast ==================== -->
 <div class="toast" id="toast"><svg class="ic"><use href="#i-check"/></svg><span id="toastMsg">操作成功</span></div>
 

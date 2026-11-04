@@ -19,6 +19,7 @@ import { Notes } from './notes.js';
 import './notes/quick.js';
 import { Plan } from './plan.js';
 import './toolbox.js';
+import './prompt.js';
 import './settings.js';
 
 void API;

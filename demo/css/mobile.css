@@ -369,3 +369,12 @@
   .sp-item .sp-del{ opacity: 1; }
   .kb-trash-row .icon-btn-xs{ opacity: 1; }
 }
+
+/* ---------- 提示词增强（触控目标不小于 36px） ---------- */
+@media (max-width: 768px){
+  .pe-lib-btn{ min-height: 36px; }
+  .pe-lib-item{ padding: 10px 8px; }
+  .pe-result-actions .icon-btn-xs{ width: 34px; height: 34px; }
+  .pe-foot .btn{ min-height: 40px; }
+  .pe-foot .pe-ai{ flex: 1 1 100%; }
+}

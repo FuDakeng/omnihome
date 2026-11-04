@@ -475,6 +475,65 @@ def test_livemd_backspace_at_line_start_not_corrupt_table():
         httpd.shutdown()
 
 
+def test_livemd_table_enter_and_alt_enter():
+    """表格单元格：Enter 同列下移 / 末行补行；Alt+Enter 在格内写 <br>，不拆坏表格。"""
+    import shutil
+
+    livemd = (ROOT / "demo" / "js" / "livemd.js").read_text(encoding="utf-8")
+    assert "function tableCellNav" in livemd
+    assert "function appendTableRow" in livemd
+    assert "function insertCellBreak" in livemd
+    assert "e.altKey && !e.ctrlKey && !e.metaKey" in livemd
+    assert "br.dataset.raw = '<br>';" in livemd
+    assert "e.inputType === 'insertParagraph'" in livemd
+    assert "data-raw=\"' + escAttr(br[0]) + '\"" in livemd
+    md = (ROOT / "demo" / "js" / "notes" / "md.js").read_text(encoding="utf-8")
+    assert "&lt;br\\s*\\/?&gt;" in md
+    pages = (ROOT / "demo" / "css" / "components" / "pages.css").read_text(encoding="utf-8")
+    assert "vertical-align: top" in pages.split(".livemd .lm-table th, .livemd .lm-table td{", 1)[1][:300]
+
+    chrome = (shutil.which("google-chrome") or shutil.which("google-chrome-stable")
+              or shutil.which("chromium") or shutil.which("chromium-browser"))
+    if not chrome:
+        pytest.skip("未安装 Chrome，跳过表格回车行为测试")
+
+    import tempfile
+    import threading
+    import subprocess
+    from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+
+    class Quiet(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(ROOT), **kwargs)
+
+        def log_message(self, fmt, *args):
+            return
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), Quiet)
+    port = httpd.server_address[1]
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    profile = tempfile.mkdtemp(prefix="omni-table-enter-")
+    try:
+        url = f"http://127.0.0.1:{port}/tests/livemd_table_enter_runner.html"
+        proc = subprocess.Popen(
+            [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
+             "--disable-dev-shm-usage", f"--user-data-dir={profile}",
+             "--dump-dom", url],
+            cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, text=True,
+        )
+        try:
+            dom, _ = proc.communicate(timeout=35)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            dom, _ = proc.communicate()
+        dom = dom or ""
+        if 'id="result">ALL PASS' not in dom:
+            pytest.fail(dom[-4000:])
+    finally:
+        httpd.shutdown()
+
+
 def test_livemd_tab_indent_and_indented_lists():
     """实时编辑器支持 Tab 缩进；有序/无序/任务列表在行首有空格或 Tab 时也能渲染。"""
     import re
@@ -642,3 +701,52 @@ def test_translate_script():
     )
     if r.returncode != 0:
         pytest.fail(r.stdout[-2000:] + "\n" + r.stderr[-2000:])
+
+
+def test_prompt_enhancer_engine_and_ui():
+    """提示词增强：本地引擎可用；工具箱磁贴 / 弹窗 / 历史收藏 / 对比布局齐全。"""
+    r = subprocess.run(
+        [sys.executable, str(BACKEND / "_prompt_test.py")],
+        cwd=str(BACKEND),
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        pytest.fail(r.stdout[-3000:] + "\n" + r.stderr[-2000:])
+
+    tb = (ROOT / "demo" / "views" / "toolbox.html").read_text(encoding="utf-8")
+    assert 'id="tool-prompt"' in tb
+    assert "提示词增强" in tb
+    assert 'data-widget="prompt"' not in tb
+
+    overlay = (ROOT / "demo" / "views" / "overlays.html").read_text(encoding="utf-8")
+    assert overlay.count('id="peMask"') == 1
+    assert overlay.count('id="promptMask"') == 1
+    for node_id in ("peInput", "peOut", "peScene", "peRole", "peTone",
+                    "peFormat", "peLang", "peHistoryBtn", "peFavBtn",
+                    "peTest", "peAI", "peEnhance"):
+        assert f'id="{node_id}"' in overlay
+
+    js = (ROOT / "demo" / "js" / "toolbox.js").read_text(encoding="utf-8")
+    assert "'tool-prompt': 'peMask'" in js
+    boot = (ROOT / "demo" / "js" / "boot.js").read_text(encoding="utf-8")
+    assert "./prompt.js" in boot
+
+    prompt_js = (ROOT / "demo" / "js" / "prompt.js").read_text(encoding="utf-8")
+    assert "out.textContent = d.prompt" in prompt_js
+    assert "localStorage" in prompt_js
+    assert "om_pe_history" in prompt_js and "om_pe_favs" in prompt_js
+    assert "/api/tools/prompt/enhance" in prompt_js
+    assert "/api/tools/prompt/test" in prompt_js
+    assert "textContent" in prompt_js
+
+    css = (ROOT / "demo" / "css" / "components" / "toolbox.css").read_text(encoding="utf-8")
+    assert ".pe-modal" in css
+    assert ".pe-cols" in css
+    assert "grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)" in css
+    mobile = (ROOT / "demo" / "css" / "mobile.css").read_text(encoding="utf-8")
+    assert ".pe-lib-btn" in mobile
+
+    loc = (ROOT / "demo" / "js" / "locale.js").read_text(encoding="utf-8")
+    assert '"提示词增强": "Prompt Enhancer"' in loc
+    assert '"测试运行": "Test run"' in loc

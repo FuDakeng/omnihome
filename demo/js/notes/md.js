@@ -91,6 +91,8 @@ export function mdFallback(md, App){
       return NUL + 'C' + (codes.length - 1) + NUL;
     });
     t = esc(t);
+    /* 单元格软换行：编辑器里 Alt+Enter 写入的 <br> 在兜底渲染器中也显示为换行 */
+    t = t.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
     /* 图片：行内 / 参考 */
     t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g,
       (m, alt, url, ti) => '<img src="' + esc(url) + '" alt="' + alt + '"' + (ti ? ' title="' + ti + '"' : '') + '>');

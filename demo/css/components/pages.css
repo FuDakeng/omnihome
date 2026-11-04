@@ -1127,6 +1127,7 @@ body.dash-palette-open .view[data-view="dashboard"] > .view-head .vh-actions{
   border: 1px solid var(--om-border); padding: 5px 10px;
   min-width: 48px; color: var(--om-text-2); text-align: left;
   position: relative; outline: none;
+  vertical-align: top;   /* 多行单元格（Alt+Enter 软换行）顶部对齐，行高不跳动 */
 }
 .livemd .lm-table th:focus, .livemd .lm-table td:focus{
   background: color-mix(in oklab, var(--om-primary) 6%, transparent);

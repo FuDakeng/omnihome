@@ -111,6 +111,13 @@ export const LiveMD = (() => {
           i += m[0].length; continue;
         }
       } else if (ch === '<'){
+        /* 单元格内 Alt+Enter 的软换行：源码里存 <br>，渲染为真正的换行。
+           data-raw 保证重建 / 序列化时原样还原，不把表格行拆坏。 */
+        const br = s.slice(i).match(/^<br\s*\/?>/i);
+        if (br){
+          out += '<br class="lm-cellbr" data-raw="' + escAttr(br[0]) + '">';
+          i += br[0].length; continue;
+        }
         /* 自动链接 <url> / <mail@x> */
         const m = s.slice(i).match(/^<(https?:\/\/[^>\s]+|mailto:[^>\s]+|[^>\s@]+@[^>\s@]+\.[^>\s@]+)>/);
         if (m){
@@ -153,10 +160,11 @@ export const LiveMD = (() => {
   /* ---------- 序列化：DOM -> 原始 Markdown ---------- */
   function rawOfNode(n){
     if (n.nodeType === 3) return n.data;
-    if (n.tagName === 'BR') return '';
     if (n.dataset && n.dataset.tableRaw !== undefined) return tableLiveRaw(n);   // 表格：读现行单元格内容
-    const inner = Array.from(n.childNodes).map(rawOfNode).join('');
+    /* 带 data-raw 的节点优先按源码还原；单元格软换行 <br> 也走这里 */
     if (n.dataset && n.dataset.raw !== undefined) return n.dataset.raw;
+    if (n.tagName === 'BR') return '';
+    const inner = Array.from(n.childNodes).map(rawOfNode).join('');
     if (n.dataset && n.dataset.pre !== undefined) return n.dataset.pre + inner + (n.dataset.post || '');
     return inner;
   }
@@ -177,11 +185,13 @@ export const LiveMD = (() => {
         return true;
       }
       if (node.nodeType === 3){ count += node.data.length; return false; }
-      if (!node.tagName || node.tagName === 'BR') return false;
+      if (!node.tagName) return false;
+      /* data-raw 节点（含单元格软换行 <br>）按源码长度计 */
       if (node.dataset && node.dataset.raw !== undefined){
         count += node.dataset.raw.length;
         return false;
       }
+      if (node.tagName === 'BR') return false;
       const hasPre = !!(node.dataset && node.dataset.pre !== undefined);
       if (hasPre) count += node.dataset.pre.length;
       for (const ch of node.childNodes){ if (walk(ch)) return true; }
@@ -404,7 +414,6 @@ export const LiveMD = (() => {
             if (off <= n.data.length) return { node: n, offset: off };
             off -= n.data.length; continue;
           }
-          if (n.tagName === 'BR') continue;
           if (n.dataset && n.dataset.raw !== undefined){
             const len = n.dataset.raw.length;
             if (off < len){
@@ -413,6 +422,7 @@ export const LiveMD = (() => {
             }
             off -= len; continue;
           }
+          if (n.tagName === 'BR') continue;
           if (n.dataset && n.dataset.pre !== undefined){
             const pre = n.dataset.pre, post = n.dataset.post || '';
             if (off < pre.length){
@@ -591,7 +601,18 @@ export const LiveMD = (() => {
       }
       bar.hidden = false;
     }
-    /* Enter 下移 / Shift+Enter 上移 / Tab 右移 / Shift+Tab 左移；末行回车自动追加新行 */
+    /* Enter 下移 / Shift+Enter 上移 / Tab 右移 / Shift+Tab 左移；末行回车自动追加新行。
+       Alt+Enter 在单元格内部插入软换行（<br>），不改变表格的行列结构。 */
+    function appendTableRow(tbl, ci){
+      const tk = tableIndexOf(tbl);
+      tableMutate(tbl, cells => cells.push(cells[0].map(() => '')));
+      const nt = nthTable(tk);
+      if (!nt) return false;
+      const trs = nt.querySelectorAll('tbody tr');
+      if (!trs.length) return false;
+      focusCellAt(nt, trs.length - 1, ci);
+      return true;
+    }
     function tableCellNav(cell, dir, shift){
       const tbl = cell.closest('.lm-table');
       if (!tbl) return;
@@ -610,17 +631,46 @@ export const LiveMD = (() => {
         if (!shift) caretAfterTable(tbl);   // Tab 到表格最后一格再按 → 跳出表格继续写正文（光标不再困在表内）
         return;
       }
-      let nri = ri + (shift ? -1 : 1);
-      if (head){ focusCellAt(tbl, Math.max(0, nri), ci); return; }
-      if (!shift && nri >= rows){
-        /* 末行回车：追加新行后跳到新行同列 */
-        const tk = tableIndexOf(tbl);
-        tableMutate(tbl, cells => cells.push(cells[0].map(() => '')));
-        const nt = nthTable(tk);
-        if (nt) focusCellAt(nt, nt.querySelectorAll('tbody tr').length - 1, ci);
+      if (!shift){
+        /* 回车始终落到同一列的下一行；表头下面是第一条数据行，末行则自动补一行 */
+        if (head){
+          if (rows > 0) focusCellAt(tbl, 0, ci);
+          else appendTableRow(tbl, ci);
+          return;
+        }
+        if (ri >= rows - 1){ appendTableRow(tbl, ci); return; }
+        focusCellAt(tbl, ri + 1, ci);
         return;
       }
-      focusCellAt(tbl, nri, ci);
+      /* Shift+Enter：反向移一行，表头没有上一行时保持原位 */
+      if (head) return;
+      if (ri > 0){ focusCellAt(tbl, ri - 1, ci); return; }
+      const ths = tbl.querySelectorAll('thead th');
+      if (ths[ci]) focusCell(ths[ci]);
+    }
+    /* Alt+Enter：在光标处插入 <br>。源码中保留 <br>，单元格仍是一行 Markdown，
+       不会把 | 分隔的表格拆成多行；重建后由 inlineHtml 还原为可视换行。 */
+    function insertCellBreak(cell){
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return false;
+      const r = sel.getRangeAt(0);
+      if (r.startContainer !== cell && !cell.contains(r.startContainer)) return false;
+      if (!r.collapsed){
+        if (r.endContainer === cell || cell.contains(r.endContainer)) r.deleteContents();
+        else r.collapse(true);
+      }
+      const br = document.createElement('br');
+      br.className = 'lm-cellbr';
+      br.dataset.raw = '<br>';
+      r.insertNode(br);
+      const nr = document.createRange();
+      nr.setStartAfter(br);
+      nr.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(nr);
+      commitNoRebuild();
+      if (!histNo) histPush();
+      return true;
     }
     /* 把光标落到表格之后：表格是文档最后一行时自动补空行，避免光标无处可点 */
     function caretAfterTable(tbl){
@@ -1400,12 +1450,19 @@ export const LiveMD = (() => {
         return;
       }
 
-      /* 表格单元格内：Enter 下移 / Tab 右移；退格/删除交给原生，跳过下方标记还原逻辑 */
+      /* 表格单元格内：Enter 下移 / Alt+Enter 单元格内换行 / Tab 右移；
+         退格/删除交给原生，跳过下方标记还原逻辑 */
       const inCell = e.target.closest ? e.target.closest('.lm-table td, .lm-table th') : null;
       if (inCell){
-        if (e.key === 'Enter' || e.key === 'Tab'){
+        if (e.key === 'Enter'){
           e.preventDefault();
-          tableCellNav(inCell, e.key === 'Enter' ? 'down' : 'right', e.shiftKey);
+          if (e.altKey && !e.ctrlKey && !e.metaKey) insertCellBreak(inCell);
+          else tableCellNav(inCell, 'down', e.shiftKey);
+          return;
+        }
+        if (e.key === 'Tab'){
+          e.preventDefault();
+          tableCellNav(inCell, 'right', e.shiftKey);
           return;
         }
         if (e.key === 'Backspace' || e.key === 'Delete') return;
@@ -2224,6 +2281,16 @@ export const LiveMD = (() => {
     });
     root.addEventListener('beforeinput', e => {
       if (composing || e.isComposing) return;
+      /* 移动端 / 输入法可能只发 beforeinput：单元格内保持同样的回车语义，
+         避免浏览器默认插入 <div> / 换行把表格行结构撑坏 */
+      const cell = e.target && e.target.closest
+        ? e.target.closest('.lm-table td, .lm-table th') : null;
+      if (cell && (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak')){
+        e.preventDefault();
+        if (e.inputType === 'insertLineBreak' || e.altKey) insertCellBreak(cell);
+        else tableCellNav(cell, 'down', false);
+        return;
+      }
       if (!e.data || e.inputType !== 'insertText') return;
       if (!applyMarkerText(e.data)) return;
       e.preventDefault();

@@ -344,7 +344,7 @@ function renderTable(table){
   const cap = table.querySelector('caption');
   const rows = Array.from(table.querySelectorAll('tr')).map(tr =>
     Array.from(tr.children).filter(c => c.tagName === 'TD' || c.tagName === 'TH').map(cell => ({
-      text: stringifyInline(cell.childNodes, NONE).trim().replace(/\|/g, '\\|').replace(/\n+/g, ' '),
+      text: stringifyInline(cell.childNodes, NONE).trim().replace(/\|/g, '\\|').replace(/\n+/g, '<br>'),
       align: cellAlign(cell),
     }))
   ).filter(r => r.length);
