@@ -5,8 +5,8 @@
 import json
 from pathlib import Path
 
-VERSION = "0.3.43"
-STAGE = "提示词增强"
+VERSION = "0.3.44"
+STAGE = "提示词增强改为内联卡片"
 
 _CHANGELOG_FILE = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
 

@@ -243,8 +243,7 @@
 
   /* ---------- 磁贴 → 弹窗映射 ---------- */
   const TOOL_MODAL = { 'tool-ts': 'tsMask', 'tool-qr': 'qrMask', 'tool-unit': 'unitMask',
-                       'tool-color': 'colorMask', 'tool-json': 'jsonMask', 'tool-b64': 'b64Mask',
-                       'tool-prompt': 'peMask' };
+                       'tool-color': 'colorMask', 'tool-json': 'jsonMask', 'tool-b64': 'b64Mask' };
 
   function init(){
     $$('[data-tool="translate"]').forEach(initTranslate);

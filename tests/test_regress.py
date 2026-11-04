@@ -704,7 +704,7 @@ def test_translate_script():
 
 
 def test_prompt_enhancer_engine_and_ui():
-    """提示词增强：本地引擎可用；工具箱磁贴 / 弹窗 / 历史收藏 / 对比布局齐全。"""
+    """提示词增强：本地引擎可用；工具箱内联卡片 / 历史收藏 / 对比布局齐全。"""
     r = subprocess.run(
         [sys.executable, str(BACKEND / "_prompt_test.py")],
         cwd=str(BACKEND),
@@ -715,24 +715,29 @@ def test_prompt_enhancer_engine_and_ui():
         pytest.fail(r.stdout[-3000:] + "\n" + r.stderr[-2000:])
 
     tb = (ROOT / "demo" / "views" / "toolbox.html").read_text(encoding="utf-8")
-    assert 'id="tool-prompt"' in tb
+    assert 'data-tool="prompt"' in tb
+    assert 'class="card col-12" data-tool="prompt"' in tb
     assert "提示词增强" in tb
+    assert 'id="tool-prompt"' not in tb
     assert 'data-widget="prompt"' not in tb
-
-    overlay = (ROOT / "demo" / "views" / "overlays.html").read_text(encoding="utf-8")
-    assert overlay.count('id="peMask"') == 1
-    assert overlay.count('id="promptMask"') == 1
     for node_id in ("peInput", "peOut", "peScene", "peRole", "peTone",
                     "peFormat", "peLang", "peHistoryBtn", "peFavBtn",
                     "peTest", "peAI", "peEnhance"):
-        assert f'id="{node_id}"' in overlay
+        assert f'id="{node_id}"' in tb
+
+    overlay = (ROOT / "demo" / "views" / "overlays.html").read_text(encoding="utf-8")
+    assert 'id="peMask"' not in overlay
+    assert overlay.count('id="promptMask"') == 1
 
     js = (ROOT / "demo" / "js" / "toolbox.js").read_text(encoding="utf-8")
-    assert "'tool-prompt': 'peMask'" in js
+    assert "peMask" not in js
+    assert "'tool-prompt'" not in js
     boot = (ROOT / "demo" / "js" / "boot.js").read_text(encoding="utf-8")
     assert "./prompt.js" in boot
 
     prompt_js = (ROOT / "demo" / "js" / "prompt.js").read_text(encoding="utf-8")
+    assert 'data-tool="prompt"' in prompt_js
+    assert "peMask" not in prompt_js
     assert "out.textContent = d.prompt" in prompt_js
     assert "localStorage" in prompt_js
     assert "om_pe_history" in prompt_js and "om_pe_favs" in prompt_js
@@ -741,7 +746,8 @@ def test_prompt_enhancer_engine_and_ui():
     assert "textContent" in prompt_js
 
     css = (ROOT / "demo" / "css" / "components" / "toolbox.css").read_text(encoding="utf-8")
-    assert ".pe-modal" in css
+    assert ".pe-modal" not in css
+    assert ".pe-body" in css
     assert ".pe-cols" in css
     assert "grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)" in css
     mobile = (ROOT / "demo" / "css" / "mobile.css").read_text(encoding="utf-8")

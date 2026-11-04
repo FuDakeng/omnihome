@@ -764,6 +764,7 @@
       });
       loadAi();
       showToast(saved.enabled ? 'AI 配置已保存并启用' : 'AI 配置已保存');
+      document.dispatchEvent(new CustomEvent('om-ai-config-changed'));
     } catch (e) { showToast(e.message, 'err'); }
   });
 

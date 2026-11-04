@@ -101,8 +101,8 @@
   }
 
   /* ---------- DOM ---------- */
-  const mask = $id('peMask');
-  if (!mask) return;
+  const root = document.querySelector('[data-tool="prompt"]');
+  if (!root) return;
 
   const input = $id('peInput');
   const out = $id('peOut');
@@ -458,8 +458,6 @@
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter'){
       e.preventDefault();
       enhance();
-    } else if (e.key === 'Escape'){
-      App.closeModal('peMask');
     }
   });
 
@@ -551,7 +549,6 @@
   });
 
   aiSetup.addEventListener('click', () => {
-    App.closeModal('peMask');
     if (typeof openSettings === 'function') openSettings(true);
     const tab = document.querySelector('.set-item[data-set="ai"]');
     if (tab) tab.click();
@@ -585,31 +582,10 @@
 
   testClose.addEventListener('click', () => { testWrap.hidden = true; });
 
-  /* ---------- 打开弹窗 ---------- */
-  function onOpen(){
-    aiSwitch.classList.remove('on');
-    aiSwitch.setAttribute('aria-checked', 'false');
-    closeLibrary();
-    updateCounts();
-    refreshAI();
-    if (!last && !input.value.trim()) showEmpty();
-    updateInputState();
-    setTimeout(() => { try { input.focus(); } catch (e) {} }, 80);
-  }
-
-  document.addEventListener('click', e => {
-    if (e.target.closest('#tool-prompt')) onOpen();
-  });
-
-  /* data-close 由 toolbox.js 统一绑定；这里补一次，避免加载顺序变化 */
-  mask.querySelectorAll('[data-close]').forEach(b => {
-    b.addEventListener('click', () => mask.classList.remove('open'));
-  });
-  mask.addEventListener('keydown', e => {
-    if (e.key === 'Escape') App.closeModal('peMask');
-  });
-
   updateCounts();
   updateInputState();
   applyAIState();
+  document.addEventListener('om-ai-config-changed', refreshAI);
+  if (window.App && App.onEnter) App.onEnter(() => refreshAI());
+  else if (API.getToken && API.getToken()) refreshAI();
 })();
