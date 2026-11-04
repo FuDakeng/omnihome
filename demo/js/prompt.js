@@ -587,6 +587,9 @@
 
   /* ---------- 打开弹窗 ---------- */
   function onOpen(){
+    aiSwitch.classList.remove('on');
+    aiSwitch.setAttribute('aria-checked', 'false');
+    closeLibrary();
     updateCounts();
     refreshAI();
     if (!last && !input.value.trim()) showEmpty();
