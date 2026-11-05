@@ -32,6 +32,17 @@ const activeCellIndex = () => {
   const cell = n && n.closest ? n.closest('td, th') : null;
   return cells().indexOf(cell);
 };
+/* 真实浏览器中 keydown 的 target 是外层 .livemd，故按选区放置光标后再从 ed.el 派发 */
+const placeCaret = (i) => {
+  const c = cells()[i];
+  const r = document.createRange();
+  const t = Array.from(c.childNodes).find(n => n.nodeType === 3 && n.data.trim());
+  if (t) r.setStart(t, t.data.length);
+  else { r.selectNodeContents(c); r.collapse(false); }
+  r.collapse(true);
+  const s = getSelection();
+  s.removeAllRanges(); s.addRange(r);
+};
 
 /* 1) 普通回车：表头第 2 列 → 第一数据行第 2 列 */
 key(cells()[1], 'Enter');
@@ -130,7 +141,30 @@ document.execCommand('insertText', false, 'x');
 eq('typing in appended row stays one line', ta.value, '| A | B |\n| --- | --- |\n| a1 | b1 |\n| x |  |');
 eq('typing in appended row row count', bodyRows().length, 2);
 
-out.push(fails.length ? 'FAIL ' + fails.length : 'ALL PASS 11');
+/* 12) 真实浏览器 keydown target = .livemd：仍按选区找到单元格，普通回车不拆表 */
+const raw6 = '| A | B |\n| --- | --- |\n| a1 | b1 |\n| a2 | b2 |';
+ed.setValue(raw6);
+placeCaret(2);
+key(ed.el, 'Enter');
+eq('root keydown enter moves down', activeCellIndex(), 4);
+eq('root keydown enter keeps rows', bodyRows().length, 2);
+eq('root keydown enter keeps source', ta.value, raw6);
+placeCaret(4);
+key(ed.el, 'Enter');
+eq('root keydown last row adds row', bodyRows().length, 3);
+eq('root keydown last row focuses new cell', activeCellIndex(), 6);
+has('root keydown last row writes new row', ta.value, '|  |  |');
+
+/* 13) 真实 keydown target = .livemd 时 Alt+Enter 仍只写 <br>，不新增行 */
+const raw7 = '| A | B |\n| --- | --- |\n| a1 | b1 |';
+ed.setValue(raw7);
+placeCaret(0);
+key(ed.el, 'Enter', { altKey: true });
+eq('root alt+enter keeps rows', bodyRows().length, 1);
+eq('root alt+enter writes br', ta.value, '| A<br> | B |\n| --- | --- |\n| a1 | b1 |');
+eq('root alt+enter renders br', table().querySelectorAll('br.lm-cellbr').length, 1);
+
+out.push(fails.length ? 'FAIL ' + fails.length : 'ALL PASS 13');
 if (fails.length) out.push(JSON.stringify(fails, null, 2));
 document.getElementById('result').textContent = out.join('\n');
 </script>

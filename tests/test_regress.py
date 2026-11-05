@@ -483,6 +483,9 @@ def test_livemd_table_enter_and_alt_enter():
     assert "function tableCellNav" in livemd
     assert "function appendTableRow" in livemd
     assert "function insertCellBreak" in livemd
+    assert "function cellAtSelection" in livemd
+    assert "function eventCell" in livemd
+    assert "const inCell = eventCell(e);" in livemd
     assert "e.altKey && !e.ctrlKey && !e.metaKey" in livemd
     assert "br.dataset.raw = '<br>';" in livemd
     assert "e.inputType === 'insertParagraph'" in livemd

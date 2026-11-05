@@ -548,6 +548,23 @@ export const LiveMD = (() => {
         rows: tbl.querySelectorAll('tbody tr').length,
       };
     }
+    /* 真实键盘事件的 target 通常是外层 .livemd（contenteditable 编辑宿主），
+       不是单元格本身；必须从当前选区反查光标所在单元格。 */
+    function cellAtSelection(){
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return null;
+      const r = sel.getRangeAt(0);
+      if (r.startContainer !== root && !root.contains(r.startContainer)) return null;
+      let n = r.startContainer;
+      if (n.nodeType === 3) n = n.parentNode;
+      const cell = n && n.closest ? n.closest('td, th') : null;
+      return cell && root.contains(cell) ? cell : null;
+    }
+    function eventCell(e){
+      const t = e && e.target;
+      const direct = t && t.closest ? t.closest('.lm-table td, .lm-table th') : null;
+      return direct || cellAtSelection();
+    }
     function focusCell(cell){
       if (!cell) return;
       cell.focus();
@@ -1452,7 +1469,7 @@ export const LiveMD = (() => {
 
       /* 表格单元格内：Enter 下移 / Alt+Enter 单元格内换行 / Tab 右移；
          退格/删除交给原生，跳过下方标记还原逻辑 */
-      const inCell = e.target.closest ? e.target.closest('.lm-table td, .lm-table th') : null;
+      const inCell = eventCell(e);
       if (inCell){
         if (e.key === 'Enter'){
           e.preventDefault();
@@ -2283,8 +2300,7 @@ export const LiveMD = (() => {
       if (composing || e.isComposing) return;
       /* 移动端 / 输入法可能只发 beforeinput：单元格内保持同样的回车语义，
          避免浏览器默认插入 <div> / 换行把表格行结构撑坏 */
-      const cell = e.target && e.target.closest
-        ? e.target.closest('.lm-table td, .lm-table th') : null;
+      const cell = eventCell(e);
       if (cell && (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak')){
         e.preventDefault();
         if (e.inputType === 'insertLineBreak' || e.altKey) insertCellBreak(cell);
